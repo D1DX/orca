@@ -70,13 +70,26 @@ function translateArgsForWsl(args: string[]): string[] {
 function resolveCommand(
   command: string,
   args: string[],
-  cwd: string | undefined
+  cwd: string | undefined,
+  wslDistroOverride?: string
 ): ResolvedCommand {
-  if (!cwd || process.platform !== 'win32') {
+  if (process.platform !== 'win32') {
     return { binary: command, args, cwd, wsl: null }
   }
 
-  const wsl = parseWslPath(cwd)
+  // Why: global gh callers (rate_limit, listAccessibleProjects) have no
+  // meaningful cwd to derive a WSL distro from. On WSL-only Windows setups,
+  // gh.exe isn't on the host PATH and the spawn fails with ENOENT. Allow
+  // callers to pass a distro hint so we can route through wsl.exe regardless.
+  // TODO(wsl-default-distro): the codebase currently has no persistent
+  // "default WSL distro" setting — distros are derived from individual repo
+  // paths. Until such a setting exists, global gh callers without an explicit
+  // override silently fall back to host gh.exe, which on WSL-only Windows
+  // installs will ENOENT. The wslDistroOverride parameter is the hook for
+  // wiring a future setting in without re-plumbing the runner.
+  const cwdWsl = cwd ? parseWslPath(cwd) : null
+  const wsl: WslPathInfo | null =
+    cwdWsl ?? (wslDistroOverride ? { distro: wslDistroOverride, linuxPath: '' } : null)
   if (!wsl) {
     return { binary: command, args, cwd, wsl: null }
   }
@@ -89,8 +102,13 @@ function resolveCommand(
   const escapedArgs = translatedArgs.map(
     (a) => `'${a.replace(/'/g, "'\\''")}'`
   )
-  const escapedCwd = wsl.linuxPath.replace(/'/g, "'\\''")
-  const shellCmd = `cd '${escapedCwd}' && ${command} ${escapedArgs.join(' ')}`
+  // Why: when cwd is supplied as a WSL UNC path, prepend `cd <linuxPath> &&`
+  // so the command runs in the expected directory. When the caller only
+  // supplied a distro override (no cwd), skip the cd entirely — the gh CLI
+  // doesn't need a particular cwd for global calls like `api rate_limit`.
+  const shellCmd = cwdWsl
+    ? `cd '${cwdWsl.linuxPath.replace(/'/g, "'\\''")}' && ${command} ${escapedArgs.join(' ')}`
+    : `${command} ${escapedArgs.join(' ')}`
 
   return {
     binary: 'wsl.exe',
@@ -193,7 +211,12 @@ export function gitSpawn(
 // serves both repo-scoped and global callers and we stop having two spawn
 // sites (the other one — a plain execFileAsync in project-view.ts — bypasses
 // retry/backoff and any future quota tracker).
-type GhExecOptions = Omit<GitExecOptions, 'cwd'> & { cwd?: string }
+// Why: `wslDistro` is an explicit hint for global (cwd-less) gh callers on
+// WSL-only Windows installs where gh.exe isn't on the host PATH. When set,
+// resolveCommand routes the spawn through `wsl.exe -d <distro> -- gh ...`
+// even without a UNC cwd to parse a distro from. Repo-scoped callers should
+// keep using cwd — the distro derives from the path automatically there.
+type GhExecOptions = Omit<GitExecOptions, 'cwd'> & { cwd?: string; wslDistro?: string }
 
 /**
  * Extract stderr from an execFile rejection.
@@ -293,6 +316,13 @@ export function isTransientGhError(stderr: string): boolean {
 // total attempts = length + 1.
 const GH_RETRY_DELAYS_MS = [250, 1000] as const
 
+// Why: the upstream Retry-After header is server-suggested but unbounded —
+// GitHub has been observed to send tens-of-seconds values on rare incidents,
+// and a malicious or misconfigured proxy could send anything. Cap the wait
+// at 30s so a single transient gh call can never block the IPC main thread
+// for longer than the user's patience budget for an interactive action.
+const GH_RETRY_AFTER_MAX_MS = 30_000
+
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -309,7 +339,7 @@ export async function ghExecFileAsync(
   args: string[],
   options: GhExecOptions = {}
 ): Promise<{ stdout: string; stderr: string }> {
-  const resolved = resolveCommand('gh', args, options.cwd)
+  const resolved = resolveCommand('gh', args, options.cwd, options.wslDistro)
   let lastError: unknown
   for (let attempt = 0; attempt <= GH_RETRY_DELAYS_MS.length; attempt++) {
     try {
@@ -326,7 +356,20 @@ export async function ghExecFileAsync(
       const { stderr } = extractExecError(err)
       const isLastAttempt = attempt >= GH_RETRY_DELAYS_MS.length
       if (!isLastAttempt && isTransientGhError(stderr)) {
-        await sleep(GH_RETRY_DELAYS_MS[attempt])
+        // Why: when the upstream surfaced a Retry-After (e.g. on a transient
+        // 5xx that GitHub explicitly recommends backing off for), honor it
+        // instead of using our default backoff — sleeping less than the
+        // server suggests just earns another failure and burns our retry
+        // budget. Cap at GH_RETRY_AFTER_MAX_MS so a pathologically large
+        // hint can't block IPC for minutes; if the real wait is longer, the
+        // attempt will fail again and the error will propagate to the UI
+        // where the user can see it.
+        const retryAfterMs = parseRetryAfterMs(stderr)
+        const delayMs =
+          retryAfterMs !== null
+            ? Math.min(retryAfterMs, GH_RETRY_AFTER_MAX_MS)
+            : GH_RETRY_DELAYS_MS[attempt]
+        await sleep(delayMs)
         continue
       }
       throw err

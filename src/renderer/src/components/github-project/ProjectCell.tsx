@@ -273,17 +273,17 @@ function IssueTypeCell({
   const [owner, repo] = (row.content.repository ?? '').split('/')
 
   React.useEffect(() => {
-    if (!open || !owner || !repo) return
+    if (!open || !owner || !repo) {return}
     let cancelled = false
     setLoading(true)
     window.api.gh
       .listIssueTypesBySlug({ owner, repo })
       .then((res) => {
-        if (cancelled) return
-        if (res.ok) setOptions(res.types)
+        if (cancelled) {return}
+        if (res.ok) {setOptions(res.types)}
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) {setLoading(false)}
       })
     return () => {
       cancelled = true
@@ -595,13 +595,13 @@ function TextCell({
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => {
         setEditing(false)
-        if (draft !== value) onCommit(draft)
+        if (draft !== value) {onCommit(draft)}
       }}
       onKeyDown={(e) => {
         if (e.key === 'Enter') {
           e.preventDefault()
           setEditing(false)
-          if (draft !== value) onCommit(draft)
+          if (draft !== value) {onCommit(draft)}
         } else if (e.key === 'Escape') {
           e.preventDefault()
           setEditing(false)
@@ -622,14 +622,34 @@ function DateCell({
   editable: boolean
   onCommit: (next: string) => void
 }): React.JSX.Element {
+  // Why: a date <input> fires onChange on every digit/spinner adjustment.
+  // Committing on each fires a GraphQL mutation per keystroke. Buffer the
+  // edit locally and commit on blur or Enter — same UX as TextCell.
+  const [draft, setDraft] = React.useState(value ?? '')
+  React.useEffect(() => {
+    setDraft(value ?? '')
+  }, [value])
   if (!editable) {
     return <span className="text-xs">{value || '—'}</span>
   }
   return (
     <input
       type="date"
-      value={value ?? ''}
-      onChange={(e) => onCommit(e.target.value)}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => {
+        if (draft !== (value ?? '')) {onCommit(draft)}
+      }}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault()
+          ;(e.target as HTMLInputElement).blur()
+        } else if (e.key === 'Escape') {
+          e.preventDefault()
+          setDraft(value ?? '')
+          ;(e.target as HTMLInputElement).blur()
+        }
+      }}
       className="h-6 cursor-pointer rounded border border-border/50 bg-background px-1 text-xs"
     />
   )
@@ -700,7 +720,7 @@ function AssigneesCell({
   // Why: only hit the slug-addressed user list when the popover actually
   // opens — the assignable-users query can be expensive for large repos.
   React.useEffect(() => {
-    if (!open || !owner || !repo) return
+    if (!open || !owner || !repo) {return}
     let cancelled = false
     setLoading(true)
     window.api.gh
@@ -710,11 +730,11 @@ function AssigneesCell({
         seedLogins: seedKey ? seedKey.split(',') : []
       })
       .then((res) => {
-        if (cancelled) return
-        if (res.ok) setOptions(res.users)
+        if (cancelled) {return}
+        if (res.ok) {setOptions(res.users)}
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) {setLoading(false)}
       })
     return () => {
       cancelled = true
@@ -764,8 +784,8 @@ function AssigneesCell({
                 type="button"
                 className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs hover:bg-muted/50"
                 onClick={() => {
-                  if (isOn) onEditAssignees?.([], [u.login])
-                  else onEditAssignees?.([u.login], [])
+                  if (isOn) {onEditAssignees?.([], [u.login])}
+                  else {onEditAssignees?.([u.login], [])}
                 }}
               >
                 <span
@@ -806,17 +826,17 @@ function LabelsCell({
   // Why: only fetch the slug-addressed labels list when the popover actually
   // opens — listing labels is cheap but still a network round-trip per row.
   React.useEffect(() => {
-    if (!open || !owner || !repo) return
+    if (!open || !owner || !repo) {return}
     let cancelled = false
     setLoading(true)
     window.api.gh
       .listLabelsBySlug({ owner, repo })
       .then((res) => {
-        if (cancelled) return
-        if (res.ok) setOptions(res.labels)
+        if (cancelled) {return}
+        if (res.ok) {setOptions(res.labels)}
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        if (!cancelled) {setLoading(false)}
       })
     return () => {
       cancelled = true
@@ -868,8 +888,8 @@ function LabelsCell({
                 type="button"
                 className="flex w-full cursor-pointer items-center gap-2 rounded px-2 py-1 text-xs hover:bg-muted/50"
                 onClick={() => {
-                  if (isOn) onEditLabels?.([], [name])
-                  else onEditLabels?.([name], [])
+                  if (isOn) {onEditLabels?.([], [name])}
+                  else {onEditLabels?.([name], [])}
                 }}
               >
                 <span
@@ -906,10 +926,10 @@ function EmptyCellPlaceholder({ editable }: { editable: boolean }): React.JSX.El
 }
 
 function colorHex(color: string): string {
-  if (!color) return 'inherit'
-  if (color.startsWith('#')) return color
+  if (!color) {return 'inherit'}
+  if (color.startsWith('#')) {return color}
   // GitHub returns 6-hex without `#`.
-  if (/^[0-9a-fA-F]{6}$/.test(color)) return `#${color}`
+  if (/^[0-9a-fA-F]{6}$/.test(color)) {return `#${color}`}
   return color
 }
 
@@ -928,10 +948,10 @@ const SINGLE_SELECT_HEX: Record<string, string> = {
 }
 
 function singleSelectChipColors(color: string): { bg: string; fg: string; border: string } {
-  if (!color) return labelChipColors('')
+  if (!color) {return labelChipColors('')}
   const upper = color.toUpperCase()
   const hex = SINGLE_SELECT_HEX[upper]
-  if (hex) return labelChipColors(hex)
+  if (hex) {return labelChipColors(hex)}
   return labelChipColors(color)
 }
 
@@ -940,9 +960,9 @@ function singleSelectChipColors(color: string): { bg: string; fg: string; border
 // approximate Primer's algorithm so our chips match the GitHub UI.
 function labelChipColors(color: string): { bg: string; fg: string; border: string } {
   const fallback = { bg: 'rgba(125,125,125,0.2)', fg: '#e6edf3', border: 'rgba(125,125,125,0.4)' }
-  if (!color) return fallback
+  if (!color) {return fallback}
   const hex = color.startsWith('#') ? color.slice(1) : color
-  if (!/^[0-9a-fA-F]{6}$/.test(hex)) return fallback
+  if (!/^[0-9a-fA-F]{6}$/.test(hex)) {return fallback}
   const r = parseInt(hex.slice(0, 2), 16)
   const g = parseInt(hex.slice(2, 4), 16)
   const b = parseInt(hex.slice(4, 6), 16)
@@ -963,7 +983,7 @@ function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
   const min = Math.min(rn, gn, bn)
   const l = (max + min) / 2
   const d = max - min
-  if (d === 0) return [0, 0, l]
+  if (d === 0) {return [0, 0, l]}
   const s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
   let h = 0
   switch (max) {

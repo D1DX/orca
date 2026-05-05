@@ -46,7 +46,7 @@ export default function ProjectGroupHeader({
 
 function formatDateRange(startDate: string, duration: number): string {
   const start = new Date(`${startDate}T00:00:00Z`)
-  if (Number.isNaN(start.getTime())) return ''
+  if (Number.isNaN(start.getTime())) {return ''}
   const end = new Date(start.getTime() + (duration - 1) * 86_400_000)
   const fmt = (d: Date): string =>
     `${d.getUTCMonth() + 1}/${d.getUTCDate()}`

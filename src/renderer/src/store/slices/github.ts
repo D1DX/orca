@@ -45,6 +45,25 @@ export type ProjectRowContentUpdate = {
   removeAssignees?: string[]
 }
 
+/** Optimistic, IPC-free patch shape for `projectViewCache` rows.
+ *  Why: the dialog already issues mutations via slug-addressed IPCs and only
+ *  needs to keep the Project table view in sync optimistically. Replacing
+ *  `addLabels`/`removeLabels` deltas with full `labels`/`assignees` arrays
+ *  matches what the dialog's local state already tracks (`localLabels`,
+ *  `localAssignees`) and avoids redundant set-merge logic at the call site. */
+export type ProjectRowContentPatch = {
+  title?: string
+  body?: string
+  /** Why: accept the renderer's lowercase work-item state vocabulary
+   *  ('open' | 'closed' | 'merged' | 'draft') and translate to GitHub's
+   *  UPPERCASE row.content.state when applying. The reducer only writes
+   *  what callers send; merged/draft are passed through for completeness
+   *  even though the dialog edits only flip open↔closed today. */
+  state?: 'open' | 'closed' | 'merged' | 'draft'
+  labels?: string[]
+  assignees?: string[]
+}
+
 // Why: queryOverride participates in the cache key so an overridden search
 // does not clobber the default-view cache entry, and vice versa. `undefined`
 // means "use the view's stored filter" — the unfiltered cache entry. An
@@ -52,7 +71,7 @@ export type ProjectRowContentUpdate = {
 // different rows when the view's stored filter is non-empty, so it gets its
 // own cache key.
 function queryOverrideKeyPart(queryOverride: string | undefined): string {
-  if (queryOverride === undefined) return ''
+  if (queryOverride === undefined) {return ''}
   return `:q=${queryOverride}`
 }
 
@@ -541,6 +560,17 @@ export type GitHubSlice = {
     rowId: string,
     issueType: { id: string; name: string; color: string | null; description: string | null } | null
   ) => Promise<GitHubProjectMutationResult>
+  /** Optimistic, IPC-free patcher for a single `projectViewCache` row's
+   *  `content`. Used by GitHubItemDialog when `projectOrigin` is set so the
+   *  Project table re-renders immediately after dialog edits — `patchWorkItem`
+   *  alone only walks `workItemsCache` and would leave the Project view stale
+   *  until the next refresh. The actual write is dispatched separately via
+   *  the slug-addressed update IPCs. */
+  patchProjectRowContent: (
+    cacheKey: string,
+    rowId: string,
+    patch: ProjectRowContentPatch
+  ) => void
 }
 
 export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (set, get) => ({
@@ -754,12 +784,12 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
     }
     // Optimistic content patch.
     const nextContent = { ...previousRow.content }
-    if (updates.title !== undefined) nextContent.title = updates.title
-    if (updates.body !== undefined) nextContent.body = updates.body
+    if (updates.title !== undefined) {nextContent.title = updates.title}
+    if (updates.body !== undefined) {nextContent.body = updates.body}
     if (updates.addLabels || updates.removeLabels) {
       const next = new Map(nextContent.labels.map((l) => [l.name, l]))
       for (const name of updates.addLabels ?? []) {
-        if (!next.has(name)) next.set(name, { name, color: '808080' })
+        if (!next.has(name)) {next.set(name, { name, color: '808080' })}
       }
       for (const name of updates.removeLabels ?? []) {
         next.delete(name)
@@ -769,7 +799,7 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
     if (updates.addAssignees || updates.removeAssignees) {
       const next = new Map(nextContent.assignees.map((u) => [u.login, u]))
       for (const login of updates.addAssignees ?? []) {
-        if (!next.has(login)) next.set(login, { login, name: null, avatarUrl: null })
+        if (!next.has(login)) {next.set(login, { login, name: null, avatarUrl: null })}
       }
       for (const login of updates.removeAssignees ?? []) {
         next.delete(login)
@@ -784,7 +814,10 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
     // PRs goes through updatePullRequestBySlug; for issues through
     // updateIssueBySlug. We dispatch both as needed.
     let envelope: GitHubProjectMutationResult = { ok: true }
-    if (previousRow.itemType === 'PULL_REQUEST' && (updates.title || updates.body)) {
+    if (
+      previousRow.itemType === 'PULL_REQUEST' &&
+      (updates.title !== undefined || updates.body !== undefined)
+    ) {
       const prRes = await window.api.gh.updatePullRequestBySlug({
         owner,
         repo,
@@ -794,7 +827,7 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
           ...(updates.body !== undefined ? { body: updates.body } : {})
         }
       })
-      if (!prRes.ok) envelope = prRes
+      if (!prRes.ok) {envelope = prRes}
     }
     if (
       envelope.ok &&
@@ -802,7 +835,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
         updates.removeLabels?.length ||
         updates.addAssignees?.length ||
         updates.removeAssignees?.length ||
-        (previousRow.itemType === 'ISSUE' && (updates.title || updates.body)))
+        (previousRow.itemType === 'ISSUE' &&
+          (updates.title !== undefined || updates.body !== undefined)))
     ) {
       const issueRes = await window.api.gh.updateIssueBySlug({
         owner,
@@ -817,7 +851,7 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
           ...(updates.removeAssignees ? { removeAssignees: updates.removeAssignees } : {})
         }
       })
-      if (!issueRes.ok) envelope = issueRes
+      if (!issueRes.ok) {envelope = issueRes}
     }
     if (!envelope.ok) {
       rollbackRowIfPresent(set, get, cacheKey, rowId, previousRow)
@@ -865,6 +899,44 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       rollbackRowIfPresent(set, get, cacheKey, rowId, previousRow)
     }
     return res
+  },
+
+  patchProjectRowContent: (cacheKey, rowId, patch) => {
+    const state = get()
+    const entry = state.projectViewCache[cacheKey]
+    const table = entry?.data
+    if (!table) {
+      return
+    }
+    const previousRow = table.rows.find((r) => r.id === rowId)
+    if (!previousRow) {
+      return
+    }
+    const nextContent = { ...previousRow.content }
+    if (patch.title !== undefined) {nextContent.title = patch.title}
+    if (patch.body !== undefined) {nextContent.body = patch.body}
+    if (patch.state !== undefined) {
+      // Why: ProjectV2 row.state mirrors GitHub's UPPERCASE state enum
+      // ('OPEN' | 'CLOSED' | 'MERGED'). The dialog tracks lowercase
+      // ('open' | 'closed') matching `GitHubWorkItem['state']`. Translate
+      // here so the optimistic patch matches the canonical row shape and
+      // the next authoritative fetch overwrites cleanly.
+      nextContent.state = patch.state.toUpperCase()
+    }
+    if (patch.labels !== undefined) {
+      const existingByName = new Map(previousRow.content.labels.map((l) => [l.name, l]))
+      nextContent.labels = patch.labels.map(
+        (name) => existingByName.get(name) ?? { name, color: '808080' }
+      )
+    }
+    if (patch.assignees !== undefined) {
+      const existingByLogin = new Map(previousRow.content.assignees.map((u) => [u.login, u]))
+      nextContent.assignees = patch.assignees.map(
+        (login) => existingByLogin.get(login) ?? { login, name: null, avatarUrl: null }
+      )
+    }
+    const nextRow: GitHubProjectRow = { ...previousRow, content: nextContent }
+    applyRowPatch(set, cacheKey, rowId, nextRow)
   },
 
   getCachedWorkItems: (repoPath, limit, query) => {

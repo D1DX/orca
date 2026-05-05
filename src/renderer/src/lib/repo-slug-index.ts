@@ -29,6 +29,18 @@ type SlugIndex = Map<string, Repo>
  *  repos that will never match. */
 const slugByRepoId = new Map<string, string | null>()
 
+/** Drop a repo's cached slug result. Call when a repo is removed or its
+ *  remote URL is known to have changed (e.g. after `git remote set-url`),
+ *  so the next index build re-resolves rather than serving a stale entry. */
+export function clearRepoSlugCacheEntry(repoId: string): void {
+  slugByRepoId.delete(repoId)
+}
+
+/** Clear the entire slug cache. Useful for tests or full repo-list resets. */
+export function clearRepoSlugCache(): void {
+  slugByRepoId.clear()
+}
+
 async function resolveRepoSlug(repo: Repo): Promise<string | null> {
   if (slugByRepoId.has(repo.id)) {
     return slugByRepoId.get(repo.id) ?? null
@@ -51,12 +63,20 @@ async function resolveRepoSlug(repo: Repo): Promise<string | null> {
 }
 
 async function buildIndex(repos: Repo[]): Promise<SlugIndex> {
+  // Why: evict cached entries for repos that no longer exist in state so
+  // the cache cannot grow unbounded across long sessions where users add
+  // and remove repos. Without this, every removed repo's id (and its
+  // negative-cached null) lingers forever.
+  const liveIds = new Set(repos.map((r) => r.id))
+  for (const id of slugByRepoId.keys()) {
+    if (!liveIds.has(id)) {slugByRepoId.delete(id)}
+  }
   const next: SlugIndex = new Map()
   const results = await Promise.all(
     repos.map(async (r) => ({ repo: r, slug: await resolveRepoSlug(r) }))
   )
   for (const { repo, slug } of results) {
-    if (slug) next.set(slug, repo)
+    if (slug) {next.set(slug, repo)}
   }
   return next
 }
@@ -74,14 +94,14 @@ export function useRepoSlugIndex(): (slug: string | null | undefined) => Repo | 
   useEffect(() => {
     const gen = ++generationRef.current
     void buildIndex(repos).then((next) => {
-      if (gen !== generationRef.current) return
+      if (gen !== generationRef.current) {return}
       setIndex(next)
     })
   }, [repos])
 
   return useMemo(
     () => (slug: string | null | undefined): Repo | null => {
-      if (!slug) return null
+      if (!slug) {return null}
       return index.get(slug.toLowerCase()) ?? null
     },
     [index]

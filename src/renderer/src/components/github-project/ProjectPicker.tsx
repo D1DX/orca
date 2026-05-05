@@ -163,11 +163,23 @@ export default function ProjectPicker({ activeProject, onSelect }: Props): React
 
   const handleChooseProject = useCallback(
     async (
-      selection: { owner: string; ownerType: GitHubProjectOwnerType; number: number; title?: string }
+      selection: {
+        owner: string
+        ownerType: GitHubProjectOwnerType
+        number: number
+        title?: string
+        // Why: when the paste resolver parsed a /views/{n} URL, the caller
+        // passes the view number through so we can skip the view-pick step
+        // and commit directly once listProjectViews returns the matching id.
+        viewNumber?: number
+      }
     ) => {
       const key = `${selection.ownerType}:${selection.owner}:${selection.number}`
       const lastView = projectSettings.lastViewByProject[key]?.viewId
-      if (lastView) {
+      // Why: an explicit viewNumber from the URL takes precedence over the
+      // remembered last view — the user's intent (paste this exact view) wins
+      // over the heuristic (re-open the last view they used).
+      if (lastView && selection.viewNumber === undefined) {
         await commitSelection(
           {
             owner: selection.owner,
@@ -179,7 +191,7 @@ export default function ProjectPicker({ activeProject, onSelect }: Props): React
         )
         return
       }
-      // No prior view — open view-pick step.
+      // No prior view (or explicit viewNumber from URL) — load views.
       setViewPickFor({
         owner: selection.owner,
         ownerType: selection.ownerType,
@@ -194,10 +206,39 @@ export default function ProjectPicker({ activeProject, onSelect }: Props): React
         })
         if (res.ok) {
           setViewList(res.views)
+          if (selection.viewNumber !== undefined) {
+            // Why: the URL pinned a specific view number — find its id and
+            // commit directly, bypassing the view-pick step. If the number
+            // doesn't match any view (deleted/renumbered), fall through to
+            // the picker so the user can choose another view.
+            const match = res.views.find((v) => v.number === selection.viewNumber)
+            if (match) {
+              await commitSelection(
+                {
+                  owner: selection.owner,
+                  ownerType: selection.ownerType,
+                  projectNumber: selection.number,
+                  viewId: match.id
+                },
+                selection.title ?? null
+              )
+              return
+            }
+          }
         } else {
           setViewList([])
           toast.error(res.error.message)
         }
+      } catch (err) {
+        // Why: IPC transport errors (channel disconnect, serialization
+        // failure) propagate as rejected promises and would otherwise become
+        // unhandled rejections — leaving the picker stuck on the view-pick
+        // step with a perpetual spinner. Treat as an empty result and toast
+        // a transport-level message so the user can retry or paste again.
+        setViewList([])
+        toast.error(
+          `Failed to load views: ${err instanceof Error ? err.message : String(err)}`
+        )
       } finally {
         setViewLoading(false)
       }
@@ -224,7 +265,10 @@ export default function ProjectPicker({ activeProject, onSelect }: Props): React
         owner: res.owner,
         ownerType: res.ownerType,
         number: res.number,
-        title: res.title
+        title: res.title,
+        // Why: forward the parsed view number from /views/{n} URLs so the
+        // chooser can skip the view-pick step and commit directly.
+        ...(res.viewNumber !== undefined ? { viewNumber: res.viewNumber } : {})
       })
     } finally {
       setPasteBusy(false)
@@ -241,8 +285,8 @@ export default function ProjectPicker({ activeProject, onSelect }: Props): React
     )
     return browseProjects.filter((p) => {
       const key = `${p.ownerType}:${p.owner}:${p.number}`
-      if (pinnedKeys.has(key) || recentKeys.has(key)) return false
-      if (!q) return true
+      if (pinnedKeys.has(key) || recentKeys.has(key)) {return false}
+      if (!q) {return true}
       return (
         p.title.toLowerCase().includes(q) ||
         p.owner.toLowerCase().includes(q) ||
@@ -409,7 +453,7 @@ export default function ProjectPicker({ activeProject, onSelect }: Props): React
                     setPasteError(null)
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') void handlePaste()
+                    if (e.key === 'Enter') {void handlePaste()}
                   }}
                   placeholder="Add by URL or owner/number"
                   className="h-8 text-xs"
@@ -629,7 +673,7 @@ function AuthErrorBanner({ error }: { error: GitHubProjectViewError }): React.JS
 function parseProjectInput(
   input: string
 ): { owner: string; number: number; viewNumber?: number } | null {
-  if (!input) return null
+  if (!input) {return null}
   // owner/number
   const short = /^([A-Za-z0-9][A-Za-z0-9-]*)\/(\d+)$/.exec(input)
   if (short) {
@@ -637,17 +681,17 @@ function parseProjectInput(
   }
   try {
     const url = new URL(input)
-    if (url.hostname !== 'github.com') return null
+    if (url.hostname !== 'github.com') {return null}
     const parts = url.pathname.split('/').filter(Boolean)
     // /orgs/{owner}/projects/{n} or /users/{owner}/projects/{n}[/views/{viewNumber}]
     if ((parts[0] === 'orgs' || parts[0] === 'users') && parts[2] === 'projects' && parts[3]) {
       const owner = parts[1]
       const number = Number(parts[3])
-      if (Number.isNaN(number)) return null
+      if (Number.isNaN(number)) {return null}
       let viewNumber: number | undefined
       if (parts[4] === 'views' && parts[5]) {
         const v = Number(parts[5])
-        if (!Number.isNaN(v)) viewNumber = v
+        if (!Number.isNaN(v)) {viewNumber = v}
       }
       return { owner, number, viewNumber }
     }

@@ -49,10 +49,12 @@ export function useRepoLabelsBySlug(
 
     const cached = slugLabelCache.get(key)
     if (cached && isCacheFresh(slugLabelCache, key)) {
-      if (activeKeyRef.current !== key) {
-        setState({ data: cached.data, loading: false, error: null })
-        activeKeyRef.current = key
-      }
+      // Why: always seed state from cache. A remount with the same key
+      // resets local state to defaults but `activeKeyRef.current` from the
+      // new ref instance is null on first run — the previous gate that
+      // skipped setState when keys matched dropped cached data on remount.
+      setState({ data: cached.data, loading: false, error: null })
+      activeKeyRef.current = key
       return
     }
 
@@ -118,10 +120,11 @@ export function useRepoAssigneesBySlug(
 
     const cached = slugAssigneeCache.get(key)
     if (cached && isCacheFresh(slugAssigneeCache, key)) {
-      if (activeKeyRef.current !== key) {
-        setState({ data: cached.data, loading: false, error: null })
-        activeKeyRef.current = key
-      }
+      // Why: see useRepoLabelsBySlug — always seed state from cache so a
+      // remount with the same key picks up cached data instead of staying
+      // at the empty default.
+      setState({ data: cached.data, loading: false, error: null })
+      activeKeyRef.current = key
       return
     }
 

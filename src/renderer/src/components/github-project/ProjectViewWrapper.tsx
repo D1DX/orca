@@ -41,7 +41,7 @@ import type {
   GitHubProjectViewError,
   GitHubProjectViewSummary
 } from '../../../../shared/github-project-types'
-import type { GitHubWorkItem, Repo } from '../../../../shared/types'
+import type { GitHubWorkItem } from '../../../../shared/types'
 import ProjectPicker, { type ResolvedProjectSelection } from './ProjectPicker'
 import ProjectViewList from './ProjectViewList'
 import ProjectItemSlugDialog from './ProjectItemSlugDialog'
@@ -126,10 +126,10 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
 
   // Auto-fetch when activeProject exists and we don't have cached data.
   useEffect(() => {
-    if (!activeProject) return
+    if (!activeProject) {return}
     const key = `${activeProject.ownerType}:${activeProject.owner}:${activeProject.number}`
     const viewId = lastViewByProject[key]?.viewId
-    if (!viewId) return
+    if (!viewId) {return}
     const projectViewKey = `${key}:${viewId}`
     const queryOverride = appliedQueryByView[projectViewKey]
     const cacheKey = projectViewCacheKey(
@@ -139,7 +139,7 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
       viewId,
       queryOverride
     )
-    if (projectViewCache[cacheKey]?.data) return
+    if (projectViewCache[cacheKey]?.data) {return}
     void doFetch(
       {
         owner: activeProject.owner,
@@ -156,9 +156,9 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
   // tab strip can render. The list is small and rarely changes — fetched once
   // per project per session is fine.
   useEffect(() => {
-    if (!activeProject) return
+    if (!activeProject) {return}
     const projectKey = `${activeProject.ownerType}:${activeProject.owner}:${activeProject.number}`
-    if (viewListByProject[projectKey]) return
+    if (viewListByProject[projectKey]) {return}
     let cancelled = false
     void window.api.gh
       .listProjectViews({
@@ -167,10 +167,18 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
         projectNumber: activeProject.number
       })
       .then((res) => {
-        if (cancelled) return
+        if (cancelled) {return}
         if (res.ok) {
           setViewListByProject((prev) => ({ ...prev, [projectKey]: res.views }))
+        } else {
+          console.warn('[project-view] listProjectViews failed:', res.error.message)
         }
+      })
+      .catch((err) => {
+        if (cancelled) {return}
+        // Why: an IPC rejection here would surface as an unhandled rejection
+        // and dev-tools red — log and fall back to the empty-tabs UI.
+        console.warn('[project-view] listProjectViews threw:', err)
       })
     return () => {
       cancelled = true
@@ -179,12 +187,17 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
 
   const handleSwitchView = useCallback(
     async (viewId: string) => {
-      if (!activeProject) return
+      if (!activeProject) {return}
       const projectKey = `${activeProject.ownerType}:${activeProject.owner}:${activeProject.number}`
       const current = lastViewByProject[projectKey]?.viewId
-      if (current === viewId) return
+      if (current === viewId) {return}
       // Persist the new view selection so reloads & the picker stay in sync.
-      const prevSettings = settings?.githubProjects ?? {
+      // Why: read the freshest settings via getState() rather than the closure-
+      // captured `settings` — between callback creation and invocation another
+      // mutation (pin/recent update from elsewhere) may have landed, and the
+      // closure value would clobber it on write.
+      const freshSettings = useAppStore.getState().settings
+      const prevSettings = freshSettings?.githubProjects ?? {
         pinned: [],
         recent: [],
         lastViewByProject: {},
@@ -210,10 +223,10 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
   )
 
   const currentProjectViewKey = useMemo(() => {
-    if (!activeProject) return null
+    if (!activeProject) {return null}
     const key = `${activeProject.ownerType}:${activeProject.owner}:${activeProject.number}`
     const viewId = lastViewByProject[key]?.viewId
-    if (!viewId) return null
+    if (!viewId) {return null}
     return `${key}:${viewId}`
   }, [activeProject, lastViewByProject])
 
@@ -222,10 +235,10 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
     : undefined
 
   const currentCacheKey = useMemo(() => {
-    if (!activeProject) return null
+    if (!activeProject) {return null}
     const key = `${activeProject.ownerType}:${activeProject.owner}:${activeProject.number}`
     const viewId = lastViewByProject[key]?.viewId
-    if (!viewId) return null
+    if (!viewId) {return null}
     return projectViewCacheKey(
       activeProject.ownerType,
       activeProject.owner,
@@ -241,8 +254,8 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
 
   // Parent-dropped toast, once per table.
   useEffect(() => {
-    if (!table || !currentCacheKey || !table.parentFieldDropped) return
-    if (parentDroppedToasted.has(currentCacheKey)) return
+    if (!table || !currentCacheKey || !table.parentFieldDropped) {return}
+    if (parentDroppedToasted.has(currentCacheKey)) {return}
     toast.message('Sub-issue data is unavailable for your token.')
     setParentDroppedToasted((prev) => {
       const next = new Set(prev)
@@ -265,9 +278,12 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
     repoPath: string
     origin: GitHubItemDialogProjectOrigin
   } | null>(null)
+  // Why: the slug dialog is only opened for rows whose repo isn't registered
+  // in Orca (matched repos go through the full GitHubItemDialog above), so
+  // there's no `matchedRepo` to track here. The repo-not-in-orca modal —
+  // owned by this parent, not the slug dialog — handles "Start work".
   const [slugDialog, setSlugDialog] = useState<{
     origin: GitHubItemDialogProjectOrigin
-    matchedRepo: Repo | null
   } | null>(null)
   const [repoNotInOrca, setRepoNotInOrca] = useState<{
     owner: string
@@ -277,8 +293,8 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
 
   const buildWorkItem = useCallback(
     (row: GitHubProjectRow, repoId: string): GitHubWorkItem | null => {
-      if (row.itemType !== 'ISSUE' && row.itemType !== 'PULL_REQUEST') return null
-      if (row.content.number == null || !row.content.url) return null
+      if (row.itemType !== 'ISSUE' && row.itemType !== 'PULL_REQUEST') {return null}
+      if (row.content.number == null || !row.content.url) {return null}
       return {
         id: `${row.itemType === 'PULL_REQUEST' ? 'pr' : 'issue'}:${row.content.number}`,
         type: row.itemType === 'PULL_REQUEST' ? 'pr' : 'issue',
@@ -308,10 +324,10 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
       cacheKey: string,
       table: GitHubProjectTable
     ): GitHubItemDialogProjectOrigin | null => {
-      if (row.itemType !== 'ISSUE' && row.itemType !== 'PULL_REQUEST') return null
-      if (row.content.number == null || !row.content.repository) return null
+      if (row.itemType !== 'ISSUE' && row.itemType !== 'PULL_REQUEST') {return null}
+      if (row.content.number == null || !row.content.repository) {return null}
       const [owner, repo] = row.content.repository.split('/')
-      if (!owner || !repo) return null
+      if (!owner || !repo) {return null}
       return {
         owner,
         repo,
@@ -327,11 +343,11 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
 
   const handleOpenDialog = useCallback(
     (row: GitHubProjectRow) => {
-      if (!currentCacheKey || !table) return
+      if (!currentCacheKey || !table) {return}
       const origin = buildOrigin(row, currentCacheKey, table)
       if (!origin) {
         // Redacted / draft / missing slug — fall back to opening GitHub.
-        if (row.content.url) void window.api.shell.openUrl(row.content.url)
+        if (row.content.url) {void window.api.shell.openUrl(row.content.url)}
         return
       }
       const matched = lookupSlug(`${origin.owner}/${origin.repo}`)
@@ -343,16 +359,16 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
         }
       }
       // Unknown repo — use the simplified slug-mode dialog.
-      setSlugDialog({ origin, matchedRepo: null })
+      setSlugDialog({ origin })
     },
     [currentCacheKey, table, buildOrigin, lookupSlug, buildWorkItem]
   )
 
   const handleStartWork = useCallback(
     (row: GitHubProjectRow) => {
-      if (!currentCacheKey || !table) return
+      if (!currentCacheKey || !table) {return}
       const origin = buildOrigin(row, currentCacheKey, table)
-      if (!origin) return
+      if (!origin) {return}
       const matched = lookupSlug(`${origin.owner}/${origin.repo}`)
       if (!matched) {
         setRepoNotInOrca({
@@ -363,7 +379,7 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
         return
       }
       const workItem = buildWorkItem(row, matched.id)
-      if (!workItem) return
+      if (!workItem) {return}
       void launchWorkItemDirect({
         item: workItem,
         repoId: matched.id,
@@ -372,7 +388,7 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
           // When `launchWorkItemDirect` wants user input (setupRunPolicy:'ask'
           // or agent detection fails), fall back to opening the URL so the
           // user keeps a path forward rather than a silent no-op.
-          if (row.content.url) void window.api.shell.openUrl(row.content.url)
+          if (row.content.url) {void window.api.shell.openUrl(row.content.url)}
         }
       })
     },
@@ -381,33 +397,33 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
 
   const handleEditAssignees = useCallback(
     async (row: GitHubProjectRow, add: string[], remove: string[]) => {
-      if (!currentCacheKey) return
+      if (!currentCacheKey) {return}
       const res = await patchProjectIssueOrPr(currentCacheKey, row.id, {
         ...(add.length ? { addAssignees: add } : {}),
         ...(remove.length ? { removeAssignees: remove } : {})
       })
-      if (!res.ok) toast.error(res.error.message)
+      if (!res.ok) {toast.error(res.error.message)}
     },
     [currentCacheKey, patchProjectIssueOrPr]
   )
 
   const handleEditLabels = useCallback(
     async (row: GitHubProjectRow, add: string[], remove: string[]) => {
-      if (!currentCacheKey) return
+      if (!currentCacheKey) {return}
       const res = await patchProjectIssueOrPr(currentCacheKey, row.id, {
         ...(add.length ? { addLabels: add } : {}),
         ...(remove.length ? { removeLabels: remove } : {})
       })
-      if (!res.ok) toast.error(res.error.message)
+      if (!res.ok) {toast.error(res.error.message)}
     },
     [currentCacheKey, patchProjectIssueOrPr]
   )
 
   const handleEditIssueType = useCallback(
     async (row: GitHubProjectRow, issueType: GitHubIssueType | null) => {
-      if (!currentCacheKey) return
+      if (!currentCacheKey) {return}
       const res = await patchProjectRowIssueType(currentCacheKey, row.id, issueType)
-      if (!res.ok) toast.error(res.error.message)
+      if (!res.ok) {toast.error(res.error.message)}
     },
     [currentCacheKey, patchProjectRowIssueType]
   )
@@ -418,7 +434,7 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
       fieldId: string,
       value: GitHubProjectFieldMutationValue | null
     ) => {
-      if (!currentCacheKey) return
+      if (!currentCacheKey) {return}
       const result =
         value === null
           ? await clearProjectFieldValue(currentCacheKey, row.id, fieldId)
@@ -452,43 +468,48 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
           }
           onSelect={handleSelect}
         />
+        {currentProjectViewKey ? (
+          // Why: render the search input whenever a view is selected — even
+          // while a refetch is in flight and `table` has briefly cleared for
+          // the new cache key. Hiding the search box mid-search would make
+          // it look like the search vanished. `key` keeps the local input
+          // state stable across (project, view) changes only.
+          <ProjectSearchInput
+            key={currentProjectViewKey}
+            viewFilter={table?.selectedView.filter ?? ''}
+            appliedOverride={appliedQueryByView[currentProjectViewKey]}
+            onApply={(nextOverride) => {
+              if (!activeProject) {return}
+              const key = `${activeProject.ownerType}:${activeProject.owner}:${activeProject.number}`
+              const viewId = lastViewByProject[key]?.viewId
+              if (!viewId) {return}
+              setAppliedQueryByView((prev) => {
+                const next = { ...prev }
+                if (nextOverride === undefined) {
+                  delete next[currentProjectViewKey]
+                } else {
+                  next[currentProjectViewKey] = nextOverride
+                }
+                return next
+              })
+              // Why: force-fetch on user-initiated apply so the same
+              // query re-typed (or cache-stale entries within TTL) does
+              // not silently no-op.
+              void doFetch(
+                {
+                  owner: activeProject.owner,
+                  ownerType: activeProject.ownerType,
+                  projectNumber: activeProject.number,
+                  viewId
+                },
+                true,
+                nextOverride
+              )
+            }}
+          />
+        ) : null}
         {table ? (
           <>
-            {currentProjectViewKey ? (
-              <ProjectSearchInput
-                key={currentProjectViewKey}
-                viewFilter={table.selectedView.filter}
-                appliedOverride={appliedQueryByView[currentProjectViewKey]}
-                onApply={(nextOverride) => {
-                  if (!activeProject) return
-                  const key = `${activeProject.ownerType}:${activeProject.owner}:${activeProject.number}`
-                  const viewId = lastViewByProject[key]?.viewId
-                  if (!viewId) return
-                  setAppliedQueryByView((prev) => {
-                    const next = { ...prev }
-                    if (nextOverride === undefined) {
-                      delete next[currentProjectViewKey]
-                    } else {
-                      next[currentProjectViewKey] = nextOverride
-                    }
-                    return next
-                  })
-                  // Why: force-fetch on user-initiated apply so the same
-                  // query re-typed (or cache-stale entries within TTL) does
-                  // not silently no-op.
-                  void doFetch(
-                    {
-                      owner: activeProject.owner,
-                      ownerType: activeProject.ownerType,
-                      projectNumber: activeProject.number,
-                      viewId
-                    },
-                    true,
-                    nextOverride
-                  )
-                }}
-              />
-            ) : null}
             <span className="ml-auto rounded-full border border-border/50 bg-background px-2 py-0.5 text-[11px]">
               {table.totalCount}
             </span>
@@ -508,10 +529,10 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
               size="icon"
               className="h-7 w-7"
               onClick={() => {
-                if (!activeProject || !currentCacheKey) return
+                if (!activeProject || !currentCacheKey) {return}
                 const key = `${activeProject.ownerType}:${activeProject.owner}:${activeProject.number}`
                 const viewId = lastViewByProject[key]?.viewId
-                if (!viewId) return
+                if (!viewId) {return}
                 void doFetch(
                   {
                     owner: activeProject.owner,
@@ -535,7 +556,7 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
         ? (() => {
             const projectKey = `${activeProject.ownerType}:${activeProject.owner}:${activeProject.number}`
             const views = viewListByProject[projectKey] ?? []
-            if (views.length === 0) return null
+            if (views.length === 0) {return null}
             const activeViewId = lastViewByProject[projectKey]?.viewId ?? null
             return (
               <ViewTabStrip
@@ -561,7 +582,7 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
           error={error.error}
           totalCount={error.totalCount}
           onOpenInGitHub={() => {
-            if (selectedViewUrl) void window.api.shell.openUrl(selectedViewUrl)
+            if (selectedViewUrl) {void window.api.shell.openUrl(selectedViewUrl)}
           }}
         />
       ) : table ? (
@@ -573,7 +594,7 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
           onEditLabels={(row, add, remove) => void handleEditLabels(row, add, remove)}
           onEditIssueType={(row, issueType) => void handleEditIssueType(row, issueType)}
           onOpenInBrowser={(row) => {
-            if (row.content.url) void window.api.shell.openUrl(row.content.url)
+            if (row.content.url) {void window.api.shell.openUrl(row.content.url)}
           }}
           onStartWork={handleStartWork}
         />
@@ -590,31 +611,25 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
         onUse={(item) => {
           const current = dialogRepoItem
           setDialogRepoItem(null)
-          if (!current) return
+          if (!current) {return}
           void launchWorkItemDirect({
             item,
             repoId: current.workItem.repoId,
             openModalFallback: () => {
-              if (item.url) void window.api.shell.openUrl(item.url)
+              if (item.url) {void window.api.shell.openUrl(item.url)}
             }
           })
         }}
         onClose={() => setDialogRepoItem(null)}
       />
 
-      {/* Slug-only simplified dialog for rows whose repo isn't added to Orca. */}
+      {/* Slug-only simplified dialog for rows whose repo isn't added to Orca.
+          Why: no Start-work affordance lives inside the slug dialog — the
+          parent's `handleStartWork`/`repoNotInOrca` modal owns that flow, so
+          having a duplicate (always-disabled or always-routing-to-fallback)
+          button here would only confuse the user. */}
       <ProjectItemSlugDialog
         projectOrigin={slugDialog?.origin ?? null}
-        startWorkEnabled
-        onStartWork={() => {
-          if (!slugDialog) return
-          setRepoNotInOrca({
-            owner: slugDialog.origin.owner,
-            repo: slugDialog.origin.repo,
-            url: null
-          })
-          setSlugDialog(null)
-        }}
         onClose={() => setSlugDialog(null)}
       />
 
@@ -640,7 +655,7 @@ export default function ProjectViewWrapper(_props: Props = {} as Props): React.J
               <Button
                 variant="outline"
                 onClick={() => {
-                  if (repoNotInOrca.url) void window.api.shell.openUrl(repoNotInOrca.url)
+                  if (repoNotInOrca.url) {void window.api.shell.openUrl(repoNotInOrca.url)}
                   setRepoNotInOrca(null)
                 }}
               >
@@ -708,7 +723,7 @@ function ProjectSearchInput({
           }
         }}
         onBlur={() => {
-          if (dirty) apply(value)
+          if (dirty) {apply(value)}
         }}
         placeholder={viewFilter || 'GitHub search, e.g. assignee:@me is:open'}
         title={viewFilter ? `View filter: ${viewFilter}` : undefined}

@@ -24,7 +24,7 @@ export const TYPE_FIELD: GitHubProjectField = {
 export function getAvailableColumns(view: GitHubProjectView): GitHubProjectField[] {
   const fields = view.fields
   const titleIdx = fields.findIndex((f) => f.dataType === 'TITLE')
-  if (titleIdx === -1) return [TYPE_FIELD, ...fields]
+  if (titleIdx === -1) {return [TYPE_FIELD, ...fields]}
   return [
     ...fields.slice(0, titleIdx + 1),
     TYPE_FIELD,
@@ -39,7 +39,7 @@ type HiddenMap = Record<string, string[]>
 function readMap(): HiddenMap {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY)
-    if (!raw) return {}
+    if (!raw) {return {}}
     const parsed = JSON.parse(raw)
     return parsed && typeof parsed === 'object' ? (parsed as HiddenMap) : {}
   } catch {

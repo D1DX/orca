@@ -1736,7 +1736,21 @@ function GHEditSection({
   const [localAssignees, setLocalAssignees] = useState<string[]>(assignees)
   const hasEditedAssigneesRef = useRef(false)
   const patchWorkItem = useAppStore((s) => s.patchWorkItem)
+  const patchProjectRowContent = useAppStore((s) => s.patchProjectRowContent)
   const { isPending, run } = useImmediateMutation()
+
+  // Why: when the dialog opens from a Project view, mutations route through
+  // *BySlug IPCs and we must keep `projectViewCache` in sync alongside
+  // `workItemsCache` — `patchWorkItem` only walks the latter, so without this
+  // helper the Project table would render stale data until manual refresh.
+  // See docs/design/github-project-view-tasks.md §Dialog editing from Project rows.
+  const patchProjectRowIfNeeded = useCallback(
+    (patch: Parameters<typeof patchProjectRowContent>[2]) => {
+      if (!projectOrigin) {return}
+      patchProjectRowContent(projectOrigin.cacheKey, projectOrigin.projectItemId, patch)
+    },
+    [projectOrigin, patchProjectRowContent]
+  )
 
   // Why: when projectOrigin is set we MUST read labels/assignees from the
   // row's repo, not from the workspace path — otherwise the popovers list
@@ -1782,18 +1796,31 @@ function GHEditSection({
         onOptimistic: () => {
           onStateChange(newState)
           patchWorkItem(item.id, { state: newState })
+          patchProjectRowIfNeeded({ state: newState })
         },
         onRevert: () => {
           onStateChange(prevState)
           patchWorkItem(item.id, { state: prevState })
+          patchProjectRowIfNeeded({ state: prevState })
         },
         onSuccess: () => {
           patchWorkItem(item.id, { state: newState })
+          patchProjectRowIfNeeded({ state: newState })
         },
         onError: (err) => toast.error(err)
       })
     },
-    [item.id, item.number, localState, repoPath, projectOrigin, patchWorkItem, run, onStateChange]
+    [
+      item.id,
+      item.number,
+      localState,
+      repoPath,
+      projectOrigin,
+      patchWorkItem,
+      patchProjectRowIfNeeded,
+      run,
+      onStateChange
+    ]
   )
 
   const handleLabelToggle = useCallback(
@@ -1814,11 +1841,13 @@ function GHEditSection({
           onOptimistic: () => {
             onLabelsChange(newLabels)
             patchWorkItem(item.id, { labels: newLabels })
+            patchProjectRowIfNeeded({ labels: newLabels })
           },
           onSuccess: () => {},
           onRevert: () => {
             onLabelsChange(prevLabels)
             patchWorkItem(item.id, { labels: prevLabels })
+            patchProjectRowIfNeeded({ labels: prevLabels })
           },
           onError: (err) => toast.error(err)
         })
@@ -1834,17 +1863,29 @@ function GHEditSection({
           onOptimistic: () => {
             onLabelsChange(newLabels)
             patchWorkItem(item.id, { labels: newLabels })
+            patchProjectRowIfNeeded({ labels: newLabels })
           },
           onRevert: () => {
             onLabelsChange(prevLabels)
             patchWorkItem(item.id, { labels: prevLabels })
+            patchProjectRowIfNeeded({ labels: prevLabels })
           },
           onSuccess: () => {},
           onError: (err) => toast.error(err)
         })
       }
     },
-    [item.id, item.number, localLabels, repoPath, projectOrigin, patchWorkItem, run, onLabelsChange]
+    [
+      item.id,
+      item.number,
+      localLabels,
+      repoPath,
+      projectOrigin,
+      patchWorkItem,
+      patchProjectRowIfNeeded,
+      run,
+      onLabelsChange
+    ]
   )
 
   const handleAssigneeToggle = useCallback(
@@ -1867,9 +1908,11 @@ function GHEditSection({
             }),
           onOptimistic: () => {
             setLocalAssignees(newAssignees)
+            patchProjectRowIfNeeded({ assignees: newAssignees })
           },
           onRevert: () => {
             setLocalAssignees(prevAssignees)
+            patchProjectRowIfNeeded({ assignees: prevAssignees })
           },
           onSuccess: () => {},
           onError: (err) => toast.error(err)
@@ -1885,16 +1928,18 @@ function GHEditSection({
             }),
           onOptimistic: () => {
             setLocalAssignees(newAssignees)
+            patchProjectRowIfNeeded({ assignees: newAssignees })
           },
           onSuccess: () => {},
           onRevert: () => {
             setLocalAssignees(prevAssignees)
+            patchProjectRowIfNeeded({ assignees: prevAssignees })
           },
           onError: (err) => toast.error(err)
         })
       }
     },
-    [item.number, repoPath, projectOrigin, localAssignees, run]
+    [item.number, repoPath, projectOrigin, localAssignees, patchProjectRowIfNeeded, run]
   )
 
   if (item.type === 'pr') {
@@ -2142,12 +2187,7 @@ function GHCommentComposer({
   )
 
   return (
-    <div
-      className={cn(
-        'flex items-start gap-2 rounded-lg border border-border/50 bg-background/30 p-2',
-        className
-      )}
-    >
+    <div className={cn('flex items-start gap-2', className)}>
       <MentionTextarea
         textareaRef={textareaRef}
         value={body}

@@ -218,13 +218,13 @@ export type GitHubProjectViewSummary = {
 }
 
 export type GitHubProjectSettings = {
-  pinned: Array<{ owner: string; ownerType: GitHubProjectOwnerType; number: number }>
-  recent: Array<{
+  pinned: { owner: string; ownerType: GitHubProjectOwnerType; number: number }[]
+  recent: {
     owner: string
     ownerType: GitHubProjectOwnerType
     number: number
     lastOpenedAt: string
-  }>
+  }[]
   lastViewByProject: Record<string, { viewId: string }>
   activeProject: { owner: string; ownerType: GitHubProjectOwnerType; number: number } | null
 }
@@ -248,7 +248,7 @@ export type GitHubProjectViewError = {
   message: string
   /** Populated when the error is classifiable from a GraphQL response. Never
    *  includes tokens or full command stdout. */
-  details?: { path?: Array<string | number>; code?: string }
+  details?: { path?: (string | number)[]; code?: string }
 }
 
 export type GetProjectViewTableResult =
@@ -280,6 +280,11 @@ export type ResolveProjectRefResult =
       ownerType: GitHubProjectOwnerType
       number: number
       title: string
+      // Why: when the input is a /views/{n} URL, surface the parsed view
+      // number so the picker can skip the view-pick step and commit the
+      // selection directly. Absent for owner/number shorthand and project
+      // URLs without a /views/ segment.
+      viewNumber?: number
     }
   | { ok: false; error: GitHubProjectViewError }
 
