@@ -12,7 +12,7 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import {
   createManagedCommandMatcher,
-  getManagedScriptPathForAgent,
+  getManagedScriptPath,
   writeHooksJson,
   type HooksConfig
 } from './installer-utils'
@@ -148,15 +148,15 @@ describe('createManagedCommandMatcher', () => {
   })
 })
 
-describe('createManagedCommandMatcher recognizes getManagedScriptPathForAgent paths', () => {
+describe('createManagedCommandMatcher recognizes getManagedScriptPath paths', () => {
   it('matches a command built from the current path helper', () => {
     // Why: install-time removal of stale managed commands relies on the
-    // matcher recognizing any path produced by `getManagedScriptPathForAgent`
+    // matcher recognizing any path produced by `getManagedScriptPath`
     // (which routes through `AGENT_HOOKS_DIR_NAME`). If the directory name
     // ever changes, the matcher must stay in sync so a fresh install still
     // sweeps the newly-named entries cleanly.
     const userData = '/fake/userData'
-    const scriptPath = getManagedScriptPathForAgent(userData, 'claude-hook.sh')
+    const scriptPath = getManagedScriptPath(userData, 'claude-hook.sh')
     const matcher = createManagedCommandMatcher('claude-hook.sh')
     expect(matcher(`/bin/sh "${scriptPath}"`)).toBe(true)
   })

@@ -4,7 +4,7 @@ import { app } from 'electron'
 import type { AgentHookInstallState, AgentHookInstallStatus } from '../../shared/agent-hook-types'
 import {
   createManagedCommandMatcher,
-  getManagedScriptPathForAgent,
+  getManagedScriptPath as resolveManagedScriptPath,
   readHooksJson,
   removeManagedCommands,
   writeHooksJson,
@@ -45,7 +45,7 @@ function getManagedScriptFileName(): string {
 }
 
 function getManagedScriptPath(): string {
-  return getManagedScriptPathForAgent(app.getPath('userData'), getManagedScriptFileName())
+  return resolveManagedScriptPath(app.getPath('userData'), getManagedScriptFileName())
 }
 
 function getManagedCommand(scriptPath: string): string {

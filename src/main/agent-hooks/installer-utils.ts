@@ -28,16 +28,11 @@ export function getAgentHooksDir(userDataPath: string): string {
   return join(userDataPath, AGENT_HOOKS_DIR_NAME)
 }
 
-// Why: the endpoint file lives under userData so each Orca install (dev vs.
-// packaged) has its own path and the two cannot clobber each other. Using a
-// per-platform extension (`.env` on POSIX, `.cmd` on Windows) lets the hook
-// scripts source the file with their platform-native syntax (`.` on POSIX,
-// `call` on Windows); the OpenCode plugin's regex accepts both shapes so no
-// platform detection is needed inside the plugin source either.
-// Lives in installer-utils so both the hook server (which writes the file)
-// and the managed-script generators (which source it from the script) share
-// one source of truth for the filename convention.
-export function getEndpointFileName(): string {
+// Why: per-platform extension lets POSIX scripts source it with `.` and
+// Windows scripts with `call`. The OpenCode plugin's regex accepts both
+// `KEY=VALUE` and `set KEY=VALUE` lines so no platform branching is needed
+// in the plugin.
+function getEndpointFileName(): string {
   return process.platform === 'win32' ? 'endpoint.cmd' : 'endpoint.env'
 }
 
@@ -51,7 +46,7 @@ export function getEndpointFilePath(userDataPath: string): string {
 // Why: single accessor for a managed-script path. Routes every agent's
 // hook-service through one helper so a rename of the dir or layout is a
 // one-line change here instead of four parallel edits.
-export function getManagedScriptPathForAgent(userDataPath: string, scriptFileName: string): string {
+export function getManagedScriptPath(userDataPath: string, scriptFileName: string): string {
   return join(getAgentHooksDir(userDataPath), scriptFileName)
 }
 

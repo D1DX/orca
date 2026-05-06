@@ -1054,9 +1054,8 @@ function normalizeHookPayload(
 }
 
 // Endpoint file path construction lives in installer-utils
-// (getAgentHooksDir / getEndpointFilePath / getEndpointFileName) so the
-// hook server (writer) and the managed-script generators (readers) share
-// one source of truth for the directory + filename convention.
+// (getAgentHooksDir / getEndpointFilePath) so the hook server and the
+// install-time matcher share one source of truth for the directory name.
 
 // Why: every value in the endpoint file is sourced as shell. Reject any
 // value that contains shell/cmd metacharacters so a future field whose
