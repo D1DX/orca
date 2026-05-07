@@ -312,15 +312,34 @@ export class ClaudeRuntimeAuthService {
   }
 
   private writeRuntimeCredentials(contents: string): void {
+    // Why: every Claude pty spawn syncs auth, but credentials rarely change.
+    // Skipping the atomic rewrite when contents are unchanged avoids EPERM
+    // contention on Windows when a sibling Claude CLI or AV briefly holds
+    // .credentials.json open (issue #1507). The in-memory check covers the
+    // hot path; the on-disk check covers the first spawn after app restart.
+    if (this.lastWrittenCredentialsJson === contents) {
+      return
+    }
     const credentialsPath = this.pathResolver.getRuntimePaths().credentialsPath
     mkdirSync(dirname(credentialsPath), { recursive: true })
+    if (existsSync(credentialsPath) && readFileSync(credentialsPath, 'utf-8') === contents) {
+      this.lastWrittenCredentialsJson = contents
+      return
+    }
     writeFileAtomically(credentialsPath, contents, { mode: 0o600 })
     this.lastWrittenCredentialsJson = contents
   }
 
   private writeJson(targetPath: string, value: unknown): void {
+    const serialized = `${JSON.stringify(value, null, 2)}\n`
     mkdirSync(dirname(targetPath), { recursive: true })
-    writeFileAtomically(targetPath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 })
+    // Why: same Windows contention reasoning as writeRuntimeCredentials —
+    // skip the atomic rewrite when the on-disk content already matches
+    // (issue #1507).
+    if (existsSync(targetPath) && readFileSync(targetPath, 'utf-8') === serialized) {
+      return
+    }
+    writeFileAtomically(targetPath, serialized, { mode: 0o600 })
   }
 
   private readJsonObject(targetPath: string): Record<string, unknown> {
