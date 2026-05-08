@@ -15,6 +15,7 @@ import { registerAutoUpdaterHandlers } from './updater-events'
 import {
   compareVersions,
   isBenignCheckFailure,
+  isGitHubReleaseTransitionFailure,
   isPrereleaseVersion,
   statusesEqual
 } from './updater-fallback'
@@ -26,6 +27,10 @@ const AUTO_UPDATE_RETRY_INTERVAL_MS = 60 * 60 * 1000
 const NUDGE_POLL_INTERVAL_MS = 30 * 60 * 1000
 const NUDGE_ACTIVATION_COOLDOWN_MS = 5 * 60 * 1000
 const QUIT_AND_INSTALL_DELAY_MS = 100
+// Why: GitHub's `releases/latest/download/` alias takes a few seconds to
+// propagate after a release goes from draft to published. A delayed silent
+// retry masks that race for the common case without an extra HEAD probe.
+const TRANSITION_RETRY_DELAY_MS = 30 * 1000
 
 let mainWindowRef: BrowserWindow | null = null
 let currentStatus: UpdateStatus = { state: 'idle' }
@@ -50,6 +55,12 @@ let pendingQuitAndInstallTimer: ReturnType<typeof setTimeout> | null = null
 let persistLastUpdateCheckAt: ((timestamp: number) => void) | null = null
 let _getLastUpdateCheckAt: (() => number | null) | null = null
 let backgroundCheckLaunchPending = false
+// Why: tracks "I've already retried once for this user-visible check cycle".
+// Cleared when the cycle terminates — success, non-benign error, OR observed
+// benign recurrence — so the next cycle (hours later) starts fresh.
+let transitionRetryInFlight = false
+let pendingTransitionRetryTimer: ReturnType<typeof setTimeout> | null = null
+let pendingTransitionBackstopTimer: ReturnType<typeof setTimeout> | null = null
 let activeUpdateNudgeId: string | null = null
 let awaitingNudgeCheckOutcome = false
 let nudgeCheckInFlight = false
@@ -139,6 +150,21 @@ function clearBackgroundCheckLaunchPending(): void {
   backgroundCheckLaunchPending = false
 }
 
+function clearTransitionRetryInFlight(): void {
+  transitionRetryInFlight = false
+}
+
+function clearPendingTransitionRetryTimer(): void {
+  if (pendingTransitionRetryTimer) {
+    clearTimeout(pendingTransitionRetryTimer)
+    pendingTransitionRetryTimer = null
+  }
+  if (pendingTransitionBackstopTimer) {
+    clearTimeout(pendingTransitionBackstopTimer)
+    pendingTransitionBackstopTimer = null
+  }
+}
+
 function sendErrorStatus(message: string, userInitiated?: boolean): void {
   if (
     currentStatus.state === 'error' &&
@@ -203,12 +229,56 @@ async function sendCheckFailureStatus(message: string, userInitiated?: boolean):
   const handleFailure = async (): Promise<void> => {
     if (isBenignCheckFailure(message)) {
       // Why: release transition failures (missing latest.yml while a new
-      // release is being published) and network blips are transient. Schedule
-      // a background retry so the notification arrives once the release
-      // finishes, and intentionally skip persistLastUpdateCheckAt — the check
-      // didn't truly complete, and recording a timestamp would suppress the
-      // next startup check.
+      // release is being published) and network blips are transient. The
+      // GitHub `latest`-alias propagation race typically resolves in seconds,
+      // so on the first benign failure of a release-transition shape we
+      // silently retry once after TRANSITION_RETRY_DELAY_MS before falling
+      // through to today's calmer-toast behavior. Skip persistLastUpdateCheckAt
+      // either way — the check didn't truly complete, and recording a
+      // timestamp would suppress the next startup check.
       console.warn('[updater] benign check failure:', message)
+
+      if (!transitionRetryInFlight && isGitHubReleaseTransitionFailure(message.toLowerCase())) {
+        transitionRetryInFlight = true
+        // Why: skip clearAvailableUpdateContext and sendStatus({state:'idle'})
+        // — leave status as 'checking' across the wait so concurrent menu
+        // clicks see a check still in progress. Honest UX, and the
+        // transitionRetryInFlight flag dedupes manual clicks during the wait.
+        if (pendingTransitionRetryTimer) {
+          clearTimeout(pendingTransitionRetryTimer)
+        }
+        pendingTransitionRetryTimer = setTimeout(() => {
+          pendingTransitionRetryTimer = null
+          forceLaunchUpdateCheck({ userInitiated: Boolean(userInitiated) })
+        }, TRANSITION_RETRY_DELAY_MS)
+        // Why: belt-and-suspenders for macOS app-nap, where a throttled 30s
+        // retry might never produce an event. Use a custom timer (not
+        // scheduleAutomaticUpdateCheck, whose runBackgroundUpdateCheck
+        // callback would no-op against the still-'checking' status). The
+        // event handlers clear this on success/failure.
+        if (pendingTransitionBackstopTimer) {
+          clearTimeout(pendingTransitionBackstopTimer)
+        }
+        pendingTransitionBackstopTimer = setTimeout(() => {
+          pendingTransitionBackstopTimer = null
+          forceLaunchUpdateCheck({ userInitiated: Boolean(userInitiated) })
+        }, AUTO_UPDATE_RETRY_INTERVAL_MS)
+        return
+      }
+
+      // Recurrence path (or non-transition benign failure): clear the flag
+      // and both pending timers so they don't fire alongside the freshly-
+      // scheduled autoUpdateCheckTimer below, then fall through to today's
+      // behavior.
+      transitionRetryInFlight = false
+      if (pendingTransitionRetryTimer) {
+        clearTimeout(pendingTransitionRetryTimer)
+        pendingTransitionRetryTimer = null
+      }
+      if (pendingTransitionBackstopTimer) {
+        clearTimeout(pendingTransitionBackstopTimer)
+        pendingTransitionBackstopTimer = null
+      }
       clearAvailableUpdateContext()
       scheduleAutomaticUpdateCheck(AUTO_UPDATE_RETRY_INTERVAL_MS)
       if (userInitiated) {
@@ -216,14 +286,31 @@ async function sendCheckFailureStatus(message: string, userInitiated?: boolean):
         // dropping to 'idle' makes the button look broken. The card already
         // prefixes "Could not check for updates." and Settings prefixes
         // "Update check failed.", so the message here only carries the
-        // actionable cause.
-        sendErrorStatus('GitHub may be temporarily unavailable. Try again in a minute.', true)
+        // actionable cause. Shown only after the 30s retry has also failed,
+        // so "shortly" would be misleading — next automatic attempt is up
+        // to 1h away.
+        sendErrorStatus(
+          "Couldn't reach the update server. Try again in a few minutes.",
+          true
+        )
       } else {
         sendStatus({ state: 'idle' })
       }
       return
     }
 
+    // Non-benign error: a real DNS/outage failure. Clear the retry flag and
+    // both timers so they don't strand state and silently no-op every
+    // subsequent manual click.
+    transitionRetryInFlight = false
+    if (pendingTransitionRetryTimer) {
+      clearTimeout(pendingTransitionRetryTimer)
+      pendingTransitionRetryTimer = null
+    }
+    if (pendingTransitionBackstopTimer) {
+      clearTimeout(pendingTransitionBackstopTimer)
+      pendingTransitionBackstopTimer = null
+    }
     clearAvailableUpdateContext()
     persistLastUpdateCheckAt?.(Date.now())
     if (!userInitiated) {
@@ -336,6 +423,22 @@ export function checkForUpdates(): void {
   runBackgroundUpdateCheck()
 }
 
+// Why: the 30s retry and 1h backstop must fire even though
+// runBackgroundUpdateCheck's `currentStatus.state === 'checking'` guard would
+// otherwise no-op (we deliberately leave status as 'checking' across the
+// wait). Re-prime userInitiatedCheck because the original 'error' handler
+// cleared it synchronously before we scheduled the retry — without this, the
+// retry's success/error handlers read getUserInitiatedCheck() === false and
+// silently drop the user-initiated styling/recurrence-toast path.
+function forceLaunchUpdateCheck(opts: { userInitiated: boolean }): void {
+  userInitiatedCheck = opts.userInitiated
+  const launch = (): Promise<unknown> => autoUpdater.checkForUpdates()
+  const run = shouldResolvePrereleaseFeed() ? pinPrereleaseFeed().then(launch) : launch()
+  void Promise.resolve(run).catch((err) => {
+    void sendCheckFailureStatus(String(err?.message ?? err), opts.userInitiated)
+  })
+}
+
 function enableIncludePrerelease(): void {
   if (includePrereleaseActive) {
     return
@@ -362,8 +465,19 @@ export function checkForUpdatesFromMenu(options?: { includePrerelease?: boolean 
     return
   }
 
+  // Why: apply the prerelease opt-in BEFORE the dedup guard so a shift-click
+  // during the 30s retry wait isn't silently lost. enableIncludePrerelease()
+  // is idempotent and only mutates allowPrerelease + setFeedURL, so the
+  // pending retry's events will then reflect the RC channel.
   if (options?.includePrerelease) {
     enableIncludePrerelease()
+  }
+
+  // Why: dedupe rapid manual clicks during the 30s release-transition retry
+  // wait. We deliberately do NOT add a `state === 'checking'` guard — that's
+  // exactly the condition the retry helpers are designed to fire through.
+  if (transitionRetryInFlight) {
+    return
   }
 
   userInitiatedCheck = true
@@ -579,6 +693,8 @@ export function setupAutoUpdater(
     sendStatus,
     scheduleAutomaticUpdateCheck,
     clearBackgroundCheckLaunchPending,
+    clearTransitionRetryInFlight,
+    clearPendingTransitionRetryTimer,
     setAvailableReleaseUrl: (releaseUrl) => {
       availableReleaseUrl = releaseUrl
     },
