@@ -19,6 +19,12 @@ describe('isStablePaneId', () => {
     // v4 UUIDs require version 4 in the third group.
     expect(isStablePaneId('11111111-1111-3111-8111-111111111111')).toBe(false)
   })
+
+  it('rejects uppercase UUIDs to keep paneKey maps from aliasing', () => {
+    // Why: renderer mints lowercase; accepting uppercase would let a
+    // foreign-source UUID alias as a distinct paneKey in string-keyed maps.
+    expect(isStablePaneId('AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA')).toBe(false)
+  })
 })
 
 describe('parsePaneKey', () => {
@@ -50,5 +56,9 @@ describe('parsePaneKey', () => {
     // the regex check rejects. Tabs whose IDs themselves contain colons
     // would break this contract — store invariants prevent that today.
     expect(parsePaneKey('a:b:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa')).toBeNull()
+  })
+
+  it('rejects paneKeys with uppercase UUID suffix', () => {
+    expect(parsePaneKey('tab-1:AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA')).toBeNull()
   })
 })

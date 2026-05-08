@@ -101,7 +101,7 @@ function buildDashboardData(
 ): DashboardRepoGroup[] {
   // Why: build a tabId -> entries index once per computation instead of
   // re-scanning every agent status entry inside the per-tab loop. paneKey is
-  // formatted as `${tabId}:${paneId}`; splitting on the first ':' lets us
+  // formatted as `${tabId}:${stablePaneId}`; splitting on the first ':' lets us
   // bucket entries by tab in a single O(N) pass, turning the per-worktree
   // build from O(tabs × statuses) into O(tabs).
   const entriesByTabId = new Map<string, AgentStatusEntry[]>()

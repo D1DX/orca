@@ -62,7 +62,7 @@ export function buildExplicitEntriesByTabId(
   }
   for (const entry of Object.values(agentStatusByPaneKey)) {
     const colon = entry.paneKey.indexOf(':')
-    // Why: paneKey must be `${tabId}:${paneId}`. Skip malformed entries (no
+    // Why: paneKey must be `${tabId}:${stablePaneId}`. Skip malformed entries (no
     // colon or leading colon) rather than bucketing them under an empty tabId,
     // where they would never match a real tab and just waste memory.
     if (colon <= 0) {

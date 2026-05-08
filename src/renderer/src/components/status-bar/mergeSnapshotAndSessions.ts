@@ -22,6 +22,7 @@
  * See docs/resource-usage-merge-spec.md for the full design.
  */
 
+import { parsePaneKey } from '../../../../shared/stable-pane-id'
 import type {
   MemorySnapshot,
   SessionMemory,
@@ -143,27 +144,14 @@ function shortCwd(cwd: string): string {
   return parts.length > 2 ? parts.slice(-2).join(sep) : cwd
 }
 
-function parsePaneKey(paneKey: string | null): { tabId: string; stablePaneId: string } | null {
-  if (!paneKey) {
-    return null
-  }
-  const sepIdx = paneKey.indexOf(':')
-  if (sepIdx <= 0) {
-    return null
-  }
-  const stablePaneId = paneKey.slice(sepIdx + 1)
-  if (!stablePaneId) {
-    return null
-  }
-  return { tabId: paneKey.slice(0, sepIdx), stablePaneId }
-}
-
 function resolveSnapshotSessionLabel(
   session: SessionMemory,
   worktreeId: string,
   ctx: MergeContext
 ): string {
-  const parsed = parsePaneKey(session.paneKey)
+  // Why: shared parsePaneKey rejects non-UUID suffixes so pre-migration
+  // numeric paneKeys surviving in a daemon snapshot can't reach pane lookup.
+  const parsed = session.paneKey ? parsePaneKey(session.paneKey) : null
   if (parsed) {
     const tabs = ctx.tabsByWorktree[worktreeId] ?? []
     const tabIndex = tabs.findIndex((t) => t.id === parsed.tabId)

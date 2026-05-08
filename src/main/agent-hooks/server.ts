@@ -1093,7 +1093,7 @@ function normalizeHookPayload(
   // Why: paneKey comes from an authenticated-but-potentially-malicious local
   // client; bound its size so pathological clients cannot blow up the
   // per-pane caches (lastPromptByPaneKey / lastToolByPaneKey) with multi-MB
-  // keys. 200 chars is well above any legitimate `${tabId}:${paneId}` value.
+  // keys. 200 chars is well above any legitimate `${tabId}:${stablePaneId}` value.
   const MAX_PANE_KEY_LEN = 200
   if (
     !paneKey ||

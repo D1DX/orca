@@ -23,7 +23,9 @@ export type PaneSpawnHints = {
 
 export type PaneManagerOptions = {
   onPaneCreated?: (pane: ManagedPane, spawnHints?: PaneSpawnHints) => void | Promise<void>
-  onPaneClosed?: (paneId: number) => void
+  // Why: closedStableId enables paneKey-keyed cleanup in the callback after
+  // closePane has cleared the manager's internal mappings.
+  onPaneClosed?: (paneId: number, closedStableId: string | null) => void
   onActivePaneChange?: (pane: ManagedPane) => void
   onLayoutChanged?: () => void
   terminalOptions?: (paneId: number) => Partial<ITerminalOptions>

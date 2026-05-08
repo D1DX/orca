@@ -9,6 +9,7 @@ import { useWorktreeAgentRows } from './useWorktreeAgentRows'
 import { cn } from '@/lib/utils'
 import type { DashboardAgentRow as DashboardAgentRowData } from '@/components/dashboard/useDashboardData'
 import { parsePaneKey } from '../../../../shared/stable-pane-id'
+import { dismissStaleAgentRowByKey } from '../terminal-pane/stale-agent-row'
 
 type Props = {
   worktreeId: string
@@ -86,21 +87,17 @@ const WorktreeCardAgentsBody = React.memo(function WorktreeCardAgentsBody({
 
   const handleActivateAgentTab = useCallback(
     (tabId: string, paneKey: string) => {
-      // Why: ack is deferred to the focus listener's confirmation callback —
-      // if the agent's pane no longer exists (closed before the user clicked,
-      // or unrestored snapshot), surfaceStaleAgentRow fires instead and we
-      // want NO ack recorded so the row drops cleanly. See
-      // docs/agent-status-pane-mismapping.md.
+      // Why: dismissal happens inline for malformed/legacy paneKeys (can't
+      // decompose into a UUID stableId, so the focus dispatch can't fire);
+      // for live keys whose pane is gone, surfaceStaleAgentRow handles it
+      // via the focus-listener path. See docs/agent-status-pane-mismapping.md.
       const parsed = parsePaneKey(paneKey)
-      const stablePaneId = parsed?.stablePaneId ?? null
       if (!parsed) {
-        // Why: paneKey for sidebar agent rows is always ${tabId}:${stablePaneId}
-        // (a v4 UUID). A pre-migration legacy key with numeric suffix is
-        // intentionally rejected here — the row should be dismissed via the
-        // surfaceStaleAgentRow path on the focus dispatch, not silently
-        // refocused on a different leaf.
         console.warn('[WorktreeCardAgents] malformed paneKey, skipping pane focus', paneKey)
+        dismissStaleAgentRowByKey(paneKey)
+        return
       }
+      const stablePaneId = parsed.stablePaneId
       // Why: route through activateAndRevealWorktree so cross-repo clicks also
       // set activeRepoId, record a nav-history entry, clear sidebar filters,
       // reveal the card, and stamp focus recency — per the design doc rule

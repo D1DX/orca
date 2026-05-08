@@ -184,7 +184,7 @@ export class PaneManager {
       safeFit(p)
     }
     updateMultiPaneState(this.getDragCallbacks())
-    this.options.onPaneClosed?.(paneId)
+    this.options.onPaneClosed?.(paneId, closedStableId ?? null)
     this.options.onLayoutChanged?.()
   }
 
@@ -361,6 +361,15 @@ export class PaneManager {
     }
     if (previousStable) {
       this.numericIdByStableId.delete(previousStable)
+    }
+    const conflictingNumericId = this.numericIdByStableId.get(stablePaneId)
+    if (conflictingNumericId !== undefined && conflictingNumericId !== numericId) {
+      // Why: snapshot UUID is already mapped to a different live pane (corrupt
+      // snapshot or sibling-collision). Bail rather than create inconsistent
+      // bidirectional mappings — the freshly minted UUID stays in place; any
+      // retained agent rows under the conflicting key will surface as stale on
+      // click via surfaceStaleAgentRow rather than silently rerouting.
+      return
     }
     pane.stablePaneId = stablePaneId
     this.stableIdByNumericId.set(numericId, stablePaneId)

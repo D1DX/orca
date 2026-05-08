@@ -9,12 +9,11 @@
 // so daemon-survives-reload and lastStatusByPaneKey replay paths can't
 // reintroduce stale identities post-upgrade.
 
-const V4_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const V4_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
-/** Returns true when `value` looks like a v4 UUID. Case-insensitive; the
- *  PaneManager mints lowercase via crypto.randomUUID, but the polyfill path
- *  also produces lowercase, so the test mostly serves to exclude all-numeric
- *  suffixes from the legacy paneKey format. */
+/** Returns true when `value` is a lowercase v4 UUID. The renderer mints
+ *  lowercase via crypto.randomUUID and the polyfill, so case-equality
+ *  matters for paneKey-keyed maps to dedup correctly. */
 export function isStablePaneId(value: string): boolean {
   return V4_UUID_RE.test(value)
 }

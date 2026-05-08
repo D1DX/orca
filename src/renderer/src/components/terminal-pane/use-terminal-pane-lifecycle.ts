@@ -525,7 +525,7 @@ export function useTerminalPaneLifecycle({
         scheduleRuntimeGraphSync()
         queueResizeAll(true)
       },
-      onPaneClosed: (paneId) => {
+      onPaneClosed: (paneId, closedStableId) => {
         const linkProviderDisposable = linkProviderDisposablesRef.current.get(paneId)
         if (linkProviderDisposable) {
           linkProviderDisposable.dispose()
@@ -578,9 +578,8 @@ export function useTerminalPaneLifecycle({
           // Why: closing a pane is user-initiated teardown of this row — drop
           // (not remove) so any retained `done` snapshot for this pane is also
           // cleared and a same-frame live→gone transition cannot re-snapshot
-          // it via the retention sync. Resolve paneKey by stablePaneId — the
-          // numeric paneId would not match the entry pty-connection wrote.
-          const stablePaneId = managerRef.current?.getStablePaneId(paneId)
+          // it via the retention sync.
+          const stablePaneId = closedStableId
           if (stablePaneId) {
             useAppStore.getState().dropAgentStatus(`${tabId}:${stablePaneId}`)
           }

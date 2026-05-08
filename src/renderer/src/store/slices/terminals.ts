@@ -273,7 +273,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
   setCacheTimerStartedAt: (key, ts) => {
     set((s) => {
       const next = { ...s.cacheTimerByKey, [key]: ts }
-      // Why: when a real pane transition writes a key like `${tabId}:${paneId}`,
+      // Why: when a real pane transition writes a key like `${tabId}:${stablePaneId}`,
       // clean up any `${tabId}:seed` sentinel left by seedCacheTimersForIdleTabs.
       // This prevents phantom timers when the seeded key doesn't match the real
       // pane ID (e.g., idle Claude in pane 2 of a split tab).
@@ -493,7 +493,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       const nextPendingIssueCommandSplitByTabId = { ...s.pendingIssueCommandSplitByTabId }
       delete nextPendingIssueCommandSplitByTabId[tabId]
       const nextCacheTimer = { ...s.cacheTimerByKey }
-      // Why: cache timer keys are `${tabId}:${paneId}` composites. Remove all
+      // Why: cache timer keys are `${tabId}:${stablePaneId}` composites. Remove all
       // entries for the closing tab, regardless of how many panes it had.
       for (const key of Object.keys(nextCacheTimer)) {
         if (key.startsWith(`${tabId}:`)) {
