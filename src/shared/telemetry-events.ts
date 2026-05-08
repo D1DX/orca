@@ -277,33 +277,27 @@ export type EventMap = { [N in keyof typeof eventSchemas]: z.infer<(typeof event
 export type EventName = keyof EventMap
 export type EventProps<N extends EventName> = EventMap[N]
 
-// Events whose schemas declare `nth_repo_added`. The IPC `telemetry:track`
+// Events whose schemas declare `nth_repo_added`. Derived from `eventSchemas`
+// at module load by probing each schema's `.shape` — there is no parallel
+// hand-maintained list to drift out of sync. The IPC `telemetry:track`
 // handler injects the cohort property only when the incoming event name is
-// in this set: the schemas are `.strict()`, so injecting `nth_repo_added` on
-// an event whose schema does not declare it would fail validation and
+// in this set: the schemas are `.strict()`, so injecting `nth_repo_added`
+// on an event whose schema does not declare it would fail validation and
 // silently drop the entire event.
 //
-// Schema-additions checklist for adding a new cohort-extended event: (1)
-// add `nth_repo_added: nthRepoAddedSchema` to the event's schema above, and
-// (2) add the event name here. The `as const satisfies readonly EventName[]`
-// catches one drift direction — a name in this list that isn't a real
-// `EventName` is a TypeScript error. It does NOT catch the more dangerous
-// inverse: a schema that declares `nth_repo_added` whose name is missing
-// here would silently ship cohort-less events from the renderer. That
-// direction is caught only by this checklist and by review-time grep.
-export const COHORT_EXTENDED = [
-  'app_opened',
-  'repo_added',
-  'add_repo_setup_step_action',
-  'workspace_created',
-  'workspace_create_failed',
-  'agent_started',
-  'agent_error'
-] as const satisfies readonly EventName[]
-export type CohortExtendedEvent = (typeof COHORT_EXTENDED)[number]
+// Schema-additions checklist for adding a new cohort-extended event:
+//   add `nth_repo_added: nthRepoAddedSchema` to the event's schema above.
+//   That is the *only* step — this set updates automatically.
+const COHORT_EXTENDED_SET: ReadonlySet<EventName> = new Set(
+  (Object.entries(eventSchemas) as [EventName, z.ZodObject<z.ZodRawShape>][])
+    .filter(([, schema]) => 'nth_repo_added' in schema.shape)
+    .map(([name]) => name)
+)
+export const COHORT_EXTENDED: readonly EventName[] = Array.from(COHORT_EXTENDED_SET)
+export type CohortExtendedEvent = EventName
 
 export function isCohortExtendedEvent(name: EventName): name is CohortExtendedEvent {
-  return (COHORT_EXTENDED as readonly EventName[]).includes(name)
+  return COHORT_EXTENDED_SET.has(name)
 }
 
 // Common props attached by the client — declared here so the validator knows

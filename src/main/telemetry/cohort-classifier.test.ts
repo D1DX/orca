@@ -1,5 +1,5 @@
 // Pins the cohort-classifier contract: synchronous read of
-// `store.getRepos().length`, fail-soft to `undefined` on any failure mode,
+// `store.getRepoCount()`, fail-soft to `undefined` on any failure mode,
 // at most one warn per session. See docs/onboarding-funnel-cohort-addendum.md.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -13,7 +13,13 @@ import {
 } from './cohort-classifier'
 
 function makeFakeStore(getRepos: () => Repo[]): Store {
-  return { getRepos: vi.fn(getRepos) } as unknown as Store
+  // Both reads delegate to the same `getRepos` thunk so existing tests stay
+  // meaningful: a throw or a list change is observed identically through
+  // either accessor.
+  return {
+    getRepos: vi.fn(getRepos),
+    getRepoCount: vi.fn(() => getRepos().length)
+  } as unknown as Store
 }
 
 function makeRepos(n: number): Repo[] {

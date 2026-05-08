@@ -223,6 +223,12 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
   // Why: handleBack reuses resetState which already aborts clones and resets all fields.
   const handleBack = resetState
 
+  const handleSkip = useCallback(() => {
+    track('add_repo_setup_step_action', { action: 'skip' })
+    closeModal()
+    resetState()
+  }, [closeModal, resetState])
+
   // Why: only the Setup step's "Add another project" back arrow counts as a
   // funnel event — the in-flight Back arrows on clone/remote/create are not
   // a Setup-step affordance. Keeping the emit scoped to this handler avoids
@@ -417,11 +423,7 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
             onOpenWorktree={handleOpenWorktree}
             onCreateWorktree={handleCreateWorktree}
             onConfigureRepo={handleConfigureRepo}
-            onSkip={() => {
-              track('add_repo_setup_step_action', { action: 'skip' })
-              closeModal()
-              resetState()
-            }}
+            onSkip={handleSkip}
           />
         )}
       </DialogContent>

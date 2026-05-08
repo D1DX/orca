@@ -417,6 +417,16 @@ export class Store {
     return this.state.repos.map((repo) => this.hydrateRepo(repo))
   }
 
+  /**
+   * O(1) read of the persisted repo count. Use this when you only need the
+   * count (e.g. cohort-classifier) — `getRepos()` hydrates each repo and
+   * may run a synchronous git subprocess via `getGitUsername()`, which is
+   * wasteful when the caller only reads `.length`.
+   */
+  getRepoCount(): number {
+    return this.state.repos.length
+  }
+
   getRepo(id: string): Repo | undefined {
     const repo = this.state.repos.find((r) => r.id === id)
     return repo ? this.hydrateRepo(repo) : undefined

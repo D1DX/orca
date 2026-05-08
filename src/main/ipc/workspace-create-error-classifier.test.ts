@@ -5,7 +5,7 @@
 // a renamed throw site needs regression coverage.
 
 import { describe, expect, it } from 'vitest'
-import { classifyWorkspaceCreateError } from './worktree-create-error-class'
+import { classifyWorkspaceCreateError } from './workspace-create-error-classifier'
 
 describe('classifyWorkspaceCreateError', () => {
   it('buckets the missing-base-ref throw as base_ref_missing', () => {

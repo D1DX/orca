@@ -440,7 +440,7 @@ export function trackAppOpenedOnce(): void {
   // Why: `nth_repo_added: 0` on `app_opened` is the canonical session-zero
   // / pre-repo cohort signal — a user who has launched but never added a
   // repo. See docs/onboarding-funnel-cohort-addendum.md.
-  track('app_opened', getCohortAtEmit())
+  track('app_opened', { ...getCohortAtEmit() })
 }
 
 export async function shutdownTelemetry(): Promise<void> {

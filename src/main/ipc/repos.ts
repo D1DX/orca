@@ -396,6 +396,7 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
         // other invocation is using it. Leaking a freshly-made empty folder on
         // a rare race is strictly safer than deleting a directory the winning
         // call (and the user) now owns.
+        emitRepoAdded('folder_picker', true)
         return { repo: raceWinner }
       }
 

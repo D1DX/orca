@@ -15,11 +15,9 @@
 import type { WorkspaceCreateErrorClass } from '../../shared/telemetry-events'
 
 export function classifyWorkspaceCreateError(error: unknown): WorkspaceCreateErrorClass {
-  const message = error instanceof Error ? error.message : ''
-  const stderr = error instanceof Error ? (error as { stderr?: unknown }).stderr : ''
   // Why: throw sites mix capitalization ('Worktree created...' vs lowercased
-  // git stderr); normalize once so all anchors below can be lowercase literals.
-  const text = `${message} ${typeof stderr === 'string' ? stderr : ''}`.toLowerCase()
+  // git messages); normalize once so all anchors below can be lowercase literals.
+  const text = (error instanceof Error ? error.message : '').toLowerCase()
 
   if (text.includes('could not resolve a default base ref')) {
     return 'base_ref_missing'

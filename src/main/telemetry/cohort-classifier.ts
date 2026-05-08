@@ -2,7 +2,7 @@
 // See docs/onboarding-funnel-cohort-addendum.md.
 //
 // `nth_repo_added` is the count of repos the user has at the moment the
-// event fires — read from `store.getRepos().length`. The rule is single
+// event fires — read from `store.getRepoCount()`. The rule is single
 // and consistent: the value reflects current store state at emit time.
 // On `repo_added` the read happens *after* `store.addRepo` lands, so the
 // user's Nth repo addition emits `N` (the just-landed write is included).
@@ -39,11 +39,7 @@ export function getCohortAtEmit(): { nth_repo_added: number | undefined } {
     return { nth_repo_added: undefined }
   }
   try {
-    const length = storeRef.getRepos().length
-    if (!Number.isFinite(length) || length < 0) {
-      warnOnce('non-finite or negative repo count')
-      return { nth_repo_added: undefined }
-    }
+    const length = storeRef.getRepoCount()
     return { nth_repo_added: length }
   } catch (err) {
     warnOnce(err instanceof Error ? err.message : String(err))

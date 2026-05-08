@@ -5,6 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 import {
+  addRepoSetupStepActionSchema,
   AGENT_KIND_VALUES,
   agentKindSchema,
   commonPropsSchema,
@@ -111,8 +112,8 @@ describe('agent_started schema', () => {
 })
 
 describe('add_repo_setup_step_action schema', () => {
-  it('accepts each of the five Setup-step actions', () => {
-    for (const action of ['create_worktree', 'configure', 'skip', 'open_existing', 'back']) {
+  it('accepts every Setup-step action declared in the schema', () => {
+    for (const action of addRepoSetupStepActionSchema.options) {
       const parsed = eventSchemas.add_repo_setup_step_action.safeParse({ action })
       expect(parsed.success).toBe(true)
     }
@@ -159,6 +160,15 @@ describe('workspace_create_failed schema', () => {
       source: 'sidebar',
       error_class: 'git_failed',
       error_message: 'fatal: cannot create work tree at /Users/alice/secret'
+    })
+    expect(parsed.success).toBe(false)
+  })
+
+  it('rejects error_stack via .strict()', () => {
+    const parsed = eventSchemas.workspace_create_failed.safeParse({
+      source: 'sidebar',
+      error_class: 'git_failed',
+      error_stack: 'Error: cannot create work tree\n    at /Users/alice/...'
     })
     expect(parsed.success).toBe(false)
   })
