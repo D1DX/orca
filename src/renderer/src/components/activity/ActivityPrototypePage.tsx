@@ -761,15 +761,20 @@ export default function ActivityPrototypePage(): React.JSX.Element {
     storeData.clearWorktreeUnread(event.worktree.id)
   }
 
+  // Why (page padding): drop top padding so the worktree title row in the
+  // right pane and the WORKTREES label in the left pane sit flush with the
+  // titlebar above. The titlebar (ActivityTitlebarControls) already provides
+  // the breathing-room band; doubling it produced a visible gap above the
+  // first row.
   return (
-    <div className="flex h-full min-h-0 flex-col bg-background px-4 py-3">
+    <div className="flex h-full min-h-0 flex-col bg-background px-4 pb-3">
       <main className="flex min-h-0 flex-1 overflow-hidden">
         <aside
           ref={threadListRef}
           className="relative flex min-h-0 shrink-0 flex-col border-r border-border"
           style={{ width: threadListWidth }}
         >
-          <div className="shrink-0 border-b border-border px-2 py-2">
+          <div className="shrink-0 border-b border-border px-2 pt-1.5 pb-2">
             <div className="mb-2 flex items-center justify-between gap-2">
               <div className="text-[11px] font-semibold uppercase tracking-[0.05em] text-muted-foreground">
                 Worktrees
@@ -866,7 +871,7 @@ export default function ActivityPrototypePage(): React.JSX.Element {
           </div>
         </aside>
 
-        <section className="min-w-0 flex-1 overflow-hidden pt-2">
+        <section className="min-w-0 flex-1 overflow-hidden">
           {selectedThread ? (
             <div className="flex h-full min-h-0 flex-col">
               <div className="flex shrink-0 items-center justify-between gap-4 border-b border-border px-4 pb-3">
