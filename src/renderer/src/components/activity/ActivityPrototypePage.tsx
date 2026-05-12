@@ -391,12 +391,7 @@ function AgentEventRow({
             </TooltipContent>
           </Tooltip>
         </div>
-        <div
-          className={cn(
-            'mt-0.5 truncate text-sm text-muted-foreground',
-            compact ? 'max-w-[760px]' : 'max-w-[920px]'
-          )}
-        >
+        <div className="mt-0.5 break-words whitespace-pre-wrap text-sm text-muted-foreground">
           {agentSummary(event)}
         </div>
         <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
