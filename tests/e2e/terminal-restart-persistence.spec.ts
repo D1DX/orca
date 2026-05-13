@@ -44,6 +44,7 @@ import {
   ensureTerminalVisible
 } from './helpers/store'
 import { attachRepoAndOpenTerminal, createRestartSession } from './helpers/orca-restart'
+import { PTY_SESSION_ID_SEPARATOR } from '../../src/shared/pty-session-id-format'
 
 // Why: each test in this file does a full quit→relaunch cycle, which spawns
 // two Electron instances back-to-back. Running in serial keeps the isolated
@@ -121,7 +122,7 @@ test.describe('Terminal restart persistence', () => {
       // Why: this spec validates the daemon-backed persistence path. If the
       // daemon falls back to LocalPtyProvider, local buffers are intentionally
       // pruned and the scrollback assertion would fail with the wrong signal.
-      expect(ptyId).toContain('@@')
+      expect(ptyId).toContain(PTY_SESSION_ID_SEPARATOR)
 
       // Why: the marker must be distinctive enough that it can't appear in the
       // restored prompt banner or a stray OSC sequence. The timestamp suffix

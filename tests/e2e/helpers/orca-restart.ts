@@ -192,7 +192,7 @@ export async function attachRepoAndOpenTerminal(page: Page, repoPath: string): P
     )
     .toBe(true)
 
-  const repoBasename = repoPath.split('/').filter(Boolean).pop() ?? ''
+  const repoBasename = path.basename(repoPath)
   const worktreeId = await page.evaluate((repoBasename: string) => {
     const store = window.__store
     if (!store) {
@@ -205,7 +205,13 @@ export async function attachRepoAndOpenTerminal(page: Page, repoPath: string): P
     // and will not match this suffix. This gives us the primary deterministically
     // without depending on boolean fields on the worktree record.
     const primary =
-      allWorktrees.find((worktree) => worktree.path.endsWith(`/${repoBasename}`)) ?? allWorktrees[0]
+      allWorktrees.find(
+        (worktree) =>
+          worktree.path
+            .split(/[\\/]+/)
+            .filter(Boolean)
+            .pop() === repoBasename
+      ) ?? allWorktrees[0]
     if (!primary) {
       return null
     }

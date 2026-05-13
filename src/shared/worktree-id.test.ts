@@ -24,7 +24,7 @@ describe('getRepoIdFromWorktreeId', () => {
     expect(getRepoIdFromWorktreeId('::')).toBe('')
   })
 
-  it('returns an empty repo id for a leading separator (sep===-1 contract)', () => {
+  it('returns an empty repo id for a leading separator', () => {
     expect(getRepoIdFromWorktreeId('::path')).toBe('')
   })
 
