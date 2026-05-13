@@ -1794,15 +1794,6 @@ export default function TaskPage(): React.JSX.Element {
 
   return (
     <div className="relative flex h-full min-h-0 flex-1 overflow-hidden bg-background text-foreground">
-      {/* Why: no z-index here. App.tsx's floating titlebar-left (traffic lights
-          + sidebar-expand toggle + agent badge) is absolutely positioned at
-          z-10 in the root stacking context when the sidebar is collapsed. If
-          this wrapper also sits at z-10 it ties with titlebar-left on
-          z-index and wins on DOM order (later sibling), so even though our
-          top-left spacer is pointer-events-none, the click still lands on
-          this wrapper behind the spacer instead of falling through to the
-          sidebar toggle. Keeping this at z-auto lets titlebar-left's z-10
-          paint above our content and receive the click cleanly. */}
       <div className="relative flex min-h-0 flex-1 flex-col">
         {/* Why: pt-1.5 vertically centers this row's 32px icon cluster (X +
             source toggles) with the sidebar's "Tasks" nav row. Sidebar Tasks
