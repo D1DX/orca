@@ -5,6 +5,9 @@ import { matchesSettingsSearch, type SettingsSearchEntry } from './settings-sear
 import { useAppStore } from '../../store'
 import { MobilePane, MOBILE_PANE_SEARCH_ENTRIES } from './MobilePane'
 
+const ORCA_IOS_APP_STORE_URL = 'https://apps.apple.com/ca/app/orca-ide/id6766130217'
+const ORCA_ANDROID_RELEASE_URL = 'https://github.com/stablyai/orca/releases/tag/mobile-v0.0.2'
+
 const MOBILE_ENABLE_SEARCH_ENTRY: SettingsSearchEntry = {
   title: 'Mobile',
   description: 'Pair a mobile device to control Orca remotely.',
@@ -55,18 +58,22 @@ export function MobileSettingsPane({
               <Label>Mobile</Label>
               <p className="text-xs text-muted-foreground">
                 Control Orca from your phone by scanning a QR code. Beta / early preview &mdash;
-                expect bugs and breaking changes. Get started from the{' '}
+                expect bugs and breaking changes. Get the iOS app from the{' '}
                 <button
                   type="button"
-                  // Why: points at the current mobile release tag rather than
+                  onClick={() => void window.api.shell.openUrl(ORCA_IOS_APP_STORE_URL)}
+                  className="cursor-pointer underline underline-offset-2 hover:text-foreground"
+                >
+                  App Store
+                </button>{' '}
+                or the Android APK from{' '}
+                <button
+                  type="button"
+                  // Why: Android still ships from the current mobile release tag rather than
                   // the generic /releases page, which is dominated by desktop
                   // releases and forces the user to scroll. Update this URL
                   // when cutting a new mobile-v* tag.
-                  onClick={() =>
-                    void window.api.shell.openUrl(
-                      'https://github.com/stablyai/orca/releases/tag/mobile-v0.0.2'
-                    )
-                  }
+                  onClick={() => void window.api.shell.openUrl(ORCA_ANDROID_RELEASE_URL)}
                   className="cursor-pointer underline underline-offset-2 hover:text-foreground"
                 >
                   GitHub Releases page
