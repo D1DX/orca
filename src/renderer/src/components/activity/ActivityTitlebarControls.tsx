@@ -58,17 +58,17 @@ export function ActivityTitlebarControls(): React.JSX.Element {
               variant="ghost"
               size="icon-xs"
               onClick={closeActivityPage}
-              aria-label="Close agent view"
+              aria-label="Close agents"
             >
               <ArrowLeft className="size-3.5" />
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom" sideOffset={6}>
-            Close agent view
+            Close agents
           </TooltipContent>
         </Tooltip>
         <Bell className="size-3.5 shrink-0 text-muted-foreground" />
-        <span className="truncate text-xs font-medium">Agent View</span>
+        <span className="truncate text-xs font-medium">agents</span>
         <Badge variant="secondary" className="h-5 px-1.5 text-[11px] font-normal">
           {unreadCount} unread
         </Badge>
