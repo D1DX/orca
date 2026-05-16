@@ -50,7 +50,12 @@ import type {
 import { Check, Copy, MessageSquare, Send, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { DiffSectionItem } from './DiffSectionItem'
-import { getCombinedUncommittedEntries } from './combined-diff-entries'
+import {
+  CombinedDiffFileTree,
+  createCombinedDiffSectionIndexMap,
+  handleCombinedDiffFileTreeNavigation
+} from './CombinedDiffFileTree'
+import { getCombinedBranchEntries, getCombinedUncommittedEntries } from './combined-diff-entries'
 import { getDiffSectionEstimatedHeight, isIntrinsicHeightImageDiff } from './diff-section-layout'
 import type { DiffSection } from './diff-section-types'
 import { getInitialCombinedDiffSectionLoadIndices } from './combined-diff-initial-section-load'
@@ -225,17 +230,14 @@ export default function CombinedDiffViewer({
     [snapshotEntries, gitStatusEntries, file.combinedAreaFilter]
   )
   const branchEntries = React.useMemo<GitBranchChangeEntry[]>(() => {
-    const snapshotEntries = file.branchEntriesSnapshot ?? []
-    if (snapshotEntries.length > 0) {
-      return snapshotEntries
-    }
-    return liveBranchEntries
+    return getCombinedBranchEntries(file.branchEntriesSnapshot, liveBranchEntries)
   }, [file.branchEntriesSnapshot, liveBranchEntries])
   const commitEntries = React.useMemo<GitBranchChangeEntry[]>(
     () => file.commitEntriesSnapshot ?? [],
     [file.commitEntriesSnapshot]
   )
   const entries = isBranchMode ? branchEntries : isCommitMode ? commitEntries : uncommittedEntries
+  const treeMode = isBranchMode ? 'branch' : isCommitMode ? 'commit' : 'uncommitted'
   const entrySignature = React.useMemo(
     () =>
       JSON.stringify({
@@ -573,6 +575,34 @@ export default function CombinedDiffViewer({
       loadSchedulerRef.current.request(index)
     }
   }, [])
+  const sectionIndexByKey = React.useMemo(
+    () => createCombinedDiffSectionIndexMap(sections),
+    [sections]
+  )
+  const [activeTreeSectionKey, setActiveTreeSectionKey] = useState<string | null>(null)
+  useEffect(() => {
+    setActiveTreeSectionKey(null)
+  }, [entrySignature])
+  const viewedSectionKeys = React.useMemo(
+    () => new Set(sections.filter((section) => !section.loading).map((section) => section.key)),
+    [sections]
+  )
+  const handleTreeNavigate = useCallback(
+    (entry: GitStatusEntry | GitBranchChangeEntry) => {
+      const navigatedIndex = handleCombinedDiffFileTreeNavigation({
+        mode: treeMode,
+        entry,
+        sections: sectionsRef.current,
+        sectionIndexByKey,
+        toggleSection,
+        scrollToIndex: (index) => virtualizer.scrollToIndex(index, { align: 'start' })
+      })
+      if (navigatedIndex !== null) {
+        setActiveTreeSectionKey(sectionsRef.current[navigatedIndex]?.key ?? null)
+      }
+    },
+    [sectionIndexByKey, toggleSection, treeMode, virtualizer]
+  )
 
   const setAllSectionsCollapsed = useCallback((collapsed: boolean) => {
     combinedDiffCollapsedPreference = collapsed
@@ -1065,48 +1095,60 @@ export default function CombinedDiffViewer({
         </div>
 
         {commitHeader}
-        <div ref={scrollContainerRef} className="flex-1 overflow-auto scrollbar-editor">
-          {skippedConflictNotice}
-          <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
-            {virtualizer.getVirtualItems().map((virtualItem) => {
-              const section = sections[virtualItem.index]
-              if (!section) {
-                return null
-              }
+        <div className="flex min-h-0 flex-1">
+          <CombinedDiffFileTree
+            mode={treeMode}
+            entries={entries}
+            sectionIndexByKey={sectionIndexByKey}
+            activeSectionKey={activeTreeSectionKey}
+            viewedSectionKeys={viewedSectionKeys}
+            onNavigate={handleTreeNavigate}
+          />
+          <div ref={scrollContainerRef} className="min-w-0 flex-1 overflow-auto scrollbar-editor">
+            {skippedConflictNotice}
+            <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
+              {virtualizer.getVirtualItems().map((virtualItem) => {
+                const section = sections[virtualItem.index]
+                if (!section) {
+                  return null
+                }
 
-              return (
-                <div
-                  key={virtualItem.key}
-                  data-index={virtualItem.index}
-                  ref={virtualizer.measureElement}
-                  className="absolute left-0 top-0 w-full"
-                  // Why: `top` preserves sticky file headers inside each row;
-                  // transform-based virtualization creates a containing block
-                  // that makes long-section headers feel jumpy while scrolling.
-                  style={{ top: `${virtualItem.start}px` }}
-                >
-                  <DiffSectionItem
-                    section={section}
-                    index={virtualItem.index}
-                    isBranchMode={isBranchMode}
-                    sideBySide={sideBySide}
-                    isDark={isDark}
-                    settings={settings}
-                    sectionHeight={sectionHeights[virtualItem.index]}
-                    worktreeId={file.worktreeId}
-                    loadSection={loadSection}
-                    retrySection={retrySection}
-                    toggleSection={toggleSection}
-                    openSection={openSection}
-                    openSectionTitle={isBranchMode || isCommitMode ? 'Open diff' : 'Open in editor'}
-                    setSectionHeights={setSectionHeights}
-                    setSections={setSections}
-                    modifiedEditorsRef={modifiedEditorsRef}
-                    handleSectionSaveRef={handleSectionSaveRef}
-                  />
-                </div>
-              )
-            })}
+                return (
+                  <div
+                    key={virtualItem.key}
+                    data-index={virtualItem.index}
+                    ref={virtualizer.measureElement}
+                    className="absolute left-0 top-0 w-full"
+                    // Why: `top` preserves sticky file headers inside each row;
+                    // transform-based virtualization creates a containing block
+                    // that makes long-section headers feel jumpy while scrolling.
+                    style={{ top: `${virtualItem.start}px` }}
+                  >
+                    <DiffSectionItem
+                      section={section}
+                      index={virtualItem.index}
+                      isBranchMode={isBranchMode}
+                      sideBySide={sideBySide}
+                      isDark={isDark}
+                      settings={settings}
+                      sectionHeight={sectionHeights[virtualItem.index]}
+                      worktreeId={file.worktreeId}
+                      loadSection={loadSection}
+                      retrySection={retrySection}
+                      toggleSection={toggleSection}
+                      openSection={openSection}
+                      openSectionTitle={
+                        isBranchMode || isCommitMode ? 'Open diff' : 'Open in editor'
+                      }
+                      setSectionHeights={setSectionHeights}
+                      setSections={setSections}
+                      modifiedEditorsRef={modifiedEditorsRef}
+                      handleSectionSaveRef={handleSectionSaveRef}
+                    />
+                  </div>
+                )
+              })}
+            </div>
           </div>
         </div>
       </div>
