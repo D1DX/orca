@@ -125,7 +125,11 @@ export type RepoSlugIndexState = {
  *  deep trees can treat it as referentially equal inside a single render cycle. */
 export function useRepoSlugIndex(): RepoSlugIndexState {
   const repos = useAppStore((s) => s.repos)
-  const settings = useAppStore((s) => s.settings)
+  const activeRuntimeEnvironmentId = useAppStore((s) => s.settings?.activeRuntimeEnvironmentId)
+  const runtimeSettings = useMemo(
+    () => (activeRuntimeEnvironmentId ? { activeRuntimeEnvironmentId } : null),
+    [activeRuntimeEnvironmentId]
+  )
   const [index, setIndex] = useState<SlugIndex>(() => new Map())
   const [ready, setReady] = useState(false)
   // Why: track the current repos snapshot so the effect can ignore stale
@@ -135,14 +139,14 @@ export function useRepoSlugIndex(): RepoSlugIndexState {
   useEffect(() => {
     const gen = ++generationRef.current
     setReady(false)
-    void buildIndex(repos, settings).then((next) => {
+    void buildIndex(repos, runtimeSettings).then((next) => {
       if (gen !== generationRef.current) {
         return
       }
       setIndex(next)
       setReady(true)
     })
-  }, [repos, settings])
+  }, [repos, runtimeSettings])
 
   return useMemo(
     () => ({
