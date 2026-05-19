@@ -2,11 +2,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const state = {
   createTab: vi.fn(),
+  createEmptySplitGroup: vi.fn(),
   setTabCustomTitle: vi.fn(),
   queueTabStartupCommand: vi.fn(),
   queueTabSetupSplit: vi.fn(),
   setActiveTabType: vi.fn(),
   setTabBarOrder: vi.fn(),
+  activeGroupIdByWorktree: {
+    'wt-1': 'group-1'
+  },
+  groupsByWorktree: {
+    'wt-1': [{ id: 'group-1' }]
+  },
   tabsByWorktree: {
     'wt-1': [{ id: 'existing-tab' }, { id: 'tab-1' }]
   },
@@ -29,6 +36,7 @@ describe('launchTerminalMacro', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     state.createTab.mockReturnValue({ id: 'tab-1', title: 'Terminal 1' })
+    state.createEmptySplitGroup.mockReturnValue('group-2')
   })
 
   it('creates a named tab and queues startup for tab macros', async () => {
@@ -62,7 +70,7 @@ describe('launchTerminalMacro', () => {
     expect(result).toEqual({ tabId: 'tab-1' })
   })
 
-  it('queues an initial split and sends startup only to the new split pane', async () => {
+  it('creates a tab group split and queues startup on the new tab', async () => {
     const { launchTerminalMacro } = await import('./launch-terminal-macro')
 
     launchTerminalMacro({
@@ -76,11 +84,12 @@ describe('launchTerminalMacro', () => {
       worktreeId: 'wt-1'
     })
 
-    expect(state.queueTabStartupCommand).not.toHaveBeenCalled()
-    expect(state.queueTabSetupSplit).toHaveBeenCalledWith('tab-1', {
-      direction: 'vertical',
+    expect(state.createEmptySplitGroup).toHaveBeenCalledWith('wt-1', 'group-1', 'right')
+    expect(state.createTab).toHaveBeenCalledWith('wt-1', 'group-2')
+    expect(state.queueTabStartupCommand).toHaveBeenCalledWith('tab-1', {
       command: 'npm run dev\r'
     })
+    expect(state.queueTabSetupSplit).not.toHaveBeenCalled()
   })
 
   it('returns null for blank names', async () => {

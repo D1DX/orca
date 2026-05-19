@@ -21,10 +21,10 @@ type EditorState =
 
 function layoutLabel(layout: TerminalMacro['layout']): string {
   if (layout === 'split-right') {
-    return 'Split Right'
+    return 'Tab Split Right'
   }
   if (layout === 'split-down') {
-    return 'Split Down'
+    return 'Tab Split Down'
   }
   return 'Tab'
 }
@@ -54,7 +54,7 @@ export function TerminalMacrosSection({
         <div className="space-y-1">
           <Label>Saved Macros</Label>
           <p className="text-xs text-muted-foreground">
-            Each macro opens a named tab and can seed one startup split.
+            Each macro opens a named tab in the current tab group or a new tab split.
           </p>
         </div>
         <Button

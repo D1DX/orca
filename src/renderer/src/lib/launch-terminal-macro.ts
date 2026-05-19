@@ -20,24 +20,22 @@ export function launchTerminalMacro({
     return null
   }
 
-  const tab = store.createTab(worktreeId, groupId)
+  const targetGroupId =
+    macro.layout === 'split-right' || macro.layout === 'split-down'
+      ? resolveTerminalMacroSplitGroupId({
+          worktreeId,
+          groupId,
+          direction: macro.layout === 'split-right' ? 'right' : 'down'
+        })
+      : groupId
+
+  const tab = store.createTab(worktreeId, targetGroupId)
   store.setTabCustomTitle(tab.id, name)
 
   const command = macro.command.trimEnd()
-  if (command && macro.layout === 'tab') {
+  if (command) {
     store.queueTabStartupCommand(tab.id, {
       command: buildTerminalMacroInput(command, macro.appendEnter !== false)
-    })
-  }
-
-  if (macro.layout === 'split-right' || macro.layout === 'split-down') {
-    store.queueTabSetupSplit(tab.id, {
-      direction: macro.layout === 'split-right' ? 'vertical' : 'horizontal',
-      ...(command
-        ? {
-            command: buildTerminalMacroInput(command, macro.appendEnter !== false)
-          }
-        : {})
     })
   }
 
@@ -62,4 +60,27 @@ export function launchTerminalMacro({
   fresh.setTabBarOrder(worktreeId, order)
 
   return { tabId: tab.id }
+}
+
+function resolveTerminalMacroSplitGroupId({
+  worktreeId,
+  groupId,
+  direction
+}: {
+  worktreeId: string
+  groupId?: string
+  direction: 'right' | 'down'
+}): string | undefined {
+  const store = useAppStore.getState()
+  const sourceGroupId =
+    groupId ??
+    store.activeGroupIdByWorktree[worktreeId] ??
+    store.groupsByWorktree[worktreeId]?.[0]?.id
+  if (!sourceGroupId) {
+    return undefined
+  }
+
+  // Why: macro "split right/down" means an Orca tab-group split, not an
+  // xterm pane split. Keeping it here avoids remounting the source terminal.
+  return store.createEmptySplitGroup(worktreeId, sourceGroupId, direction) ?? undefined
 }

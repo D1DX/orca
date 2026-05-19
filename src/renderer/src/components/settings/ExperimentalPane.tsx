@@ -162,8 +162,8 @@ export function ExperimentalPane({
             <div className="min-w-0 shrink space-y-1.5">
               <Label>Terminal Macros</Label>
               <p className="text-xs text-muted-foreground">
-                Define named terminal launch presets that open a new tab, optionally create a split
-                right or down, and seed the new terminal with startup text. This remains
+                Define named terminal launch presets that open a new tab in the current tab group or
+                a new tab split, then seed the new terminal with startup text. This remains
                 experimental and appears in the tab-bar new-tab menu only when enabled.
               </p>
             </div>

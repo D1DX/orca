@@ -76,7 +76,7 @@ export function TerminalMacroDialog({
             {mode === 'edit' ? 'Edit Macro' : 'Add Macro'}
           </DialogTitle>
           <DialogDescription className="text-xs">
-            Macros open a named terminal tab and optionally create one startup split.
+            Macros open a named terminal tab and can place it in a tab split.
           </DialogDescription>
         </DialogHeader>
 
@@ -108,8 +108,8 @@ export function TerminalMacroDialog({
               className="justify-start"
             >
               <ToggleGroupItem value="tab">Tab</ToggleGroupItem>
-              <ToggleGroupItem value="split-right">Split Right</ToggleGroupItem>
-              <ToggleGroupItem value="split-down">Split Down</ToggleGroupItem>
+              <ToggleGroupItem value="split-right">Tab Split Right</ToggleGroupItem>
+              <ToggleGroupItem value="split-down">Tab Split Down</ToggleGroupItem>
             </ToggleGroup>
           </div>
 
@@ -124,24 +124,15 @@ export function TerminalMacroDialog({
               rows={5}
               className="min-h-28 w-full resize-y rounded-md border border-input bg-transparent px-3 py-2 text-sm font-mono shadow-xs outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
             />
-            {targetsSplitPane ? (
-              <p className="text-xs text-muted-foreground">
-                This startup text runs only in the newly created split pane. The original pane is
-                left alone.
-              </p>
-            ) : (
+            {!targetsSplitPane && (
               <p className="text-xs text-muted-foreground">
                 Optional startup text for the new tab.
               </p>
             )}
             <MacroAppendEnterToggle
               checked={draft.appendEnter !== false}
-              label={targetsSplitPane ? 'Run new pane startup text' : 'Run tab startup text'}
-              description={
-                targetsSplitPane
-                  ? 'Press Enter after sending the new split pane text.'
-                  : 'Press Enter after sending the tab startup text.'
-              }
+              label="Run startup command"
+              description="Press Enter after this text is in the terminal."
               onToggle={() =>
                 setDraft((current) => ({ ...current, appendEnter: !current.appendEnter }))
               }
