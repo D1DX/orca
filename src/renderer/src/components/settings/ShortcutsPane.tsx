@@ -6,6 +6,11 @@ import { SearchableSetting } from './SearchableSetting'
 import { matchesSettingsSearch, type SettingsSearchEntry } from './settings-search'
 import { Label } from '../ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select'
+import {
+  CUSTOMIZABLE_ACTION_TITLES,
+  WindowShortcutBindingsSection,
+  WINDOW_SHORTCUT_BINDING_SEARCH_ENTRIES
+} from './WindowShortcutBindingsSection'
 
 type ShortcutItem = {
   action: string
@@ -251,6 +256,7 @@ const CTRL_TAB_BEHAVIOR_SEARCH_ENTRIES: SettingsSearchEntry[] = [
 // Why: search is supposed to stay in lockstep with the rendered shortcuts. Deriving
 // both from one definition prevents the registry drift regression this branch introduced.
 export const SHORTCUTS_PANE_SEARCH_ENTRIES: SettingsSearchEntry[] = [
+  ...WINDOW_SHORTCUT_BINDING_SEARCH_ENTRIES,
   ...SHORTCUT_GROUP_DEFINITIONS.flatMap((group) =>
     group.items.map((item) => ({
       title: item.action,
@@ -274,11 +280,13 @@ export function ShortcutsPane(): React.JSX.Element {
     () =>
       SHORTCUT_GROUP_DEFINITIONS.map((group) => ({
         title: group.title,
-        items: group.items.map((item) => ({
-          action: item.action,
-          keys: item.keys({ mod, shift, enter })
-        }))
-      })),
+        items: group.items
+          .filter((item) => !CUSTOMIZABLE_ACTION_TITLES.has(item.action))
+          .map((item) => ({
+            action: item.action,
+            keys: item.keys({ mod, shift, enter })
+          }))
+      })).filter((group) => group.items.length > 0),
     [mod, shift, enter]
   )
 
@@ -291,11 +299,13 @@ export function ShortcutsPane(): React.JSX.Element {
       Object.fromEntries(
         SHORTCUT_GROUP_DEFINITIONS.map((groupDef) => [
           groupDef.title,
-          groupDef.items.map((defItem) => ({
-            title: defItem.action,
-            description: `${groupDef.title} shortcut`,
-            keywords: defItem.searchKeywords
-          }))
+          groupDef.items
+            .filter((defItem) => !CUSTOMIZABLE_ACTION_TITLES.has(defItem.action))
+            .map((defItem) => ({
+              title: defItem.action,
+              description: `${groupDef.title} shortcut`,
+              keywords: defItem.searchKeywords
+            }))
         ])
       ),
     []
@@ -310,6 +320,8 @@ export function ShortcutsPane(): React.JSX.Element {
             View common hotkeys used across the application and configure tab switching.
           </p>
         </div>
+
+        <WindowShortcutBindingsSection searchQuery={searchQuery} />
 
         {matchesSettingsSearch(searchQuery, CTRL_TAB_BEHAVIOR_SEARCH_ENTRIES) ? (
           <SearchableSetting

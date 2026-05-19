@@ -1,3 +1,6 @@
+/* eslint-disable max-lines -- Why: guest input forwarding keeps context-menu,
+grab-mode, app-shortcut, and renderer-forwarding behavior beside the single
+webContents boundary they all protect. */
 import { screen, webContents } from 'electron'
 import {
   normalizeBrowserNavigationUrl,
@@ -6,12 +9,18 @@ import {
 } from '../../shared/browser-url'
 import {
   isWindowShortcutModifierChord,
-  resolveWindowShortcutAction
+  resolveWindowShortcutAction,
+  type WindowShortcutAction
 } from '../../shared/window-shortcut-policy'
+import {
+  resolveCustomWindowShortcutAction,
+  type WindowShortcutBindings
+} from '../../shared/window-shortcut-bindings'
 import { readGuestNavigationState } from './browser-guest-navigation-state'
 
 type ResolveRenderer = (browserTabId: string) => Electron.WebContents | null
 type ShouldForwardDictationShortcut = () => boolean
+type GetWindowShortcutBindings = () => WindowShortcutBindings | undefined
 
 function isTerminalTabSwitchChord(input: Electron.Input): boolean {
   return (
@@ -29,6 +38,54 @@ function isCtrlTabSwitchKey(input: Electron.Input): boolean {
 
 function isControlKeyRelease(input: Electron.Input): boolean {
   return input.type === 'keyUp' && (input.code === 'ControlLeft' || input.code === 'ControlRight')
+}
+
+function sendResolvedWindowShortcutAction(
+  renderer: Electron.WebContents,
+  action: WindowShortcutAction,
+  shouldForwardDictationShortcut?: ShouldForwardDictationShortcut
+): boolean {
+  if (action.type === 'zoom') {
+    renderer.send('terminal:zoom', action.direction)
+    return true
+  }
+  if (action.type === 'toggleLeftSidebar') {
+    renderer.send('ui:toggleLeftSidebar')
+    return true
+  }
+  if (action.type === 'toggleRightSidebar') {
+    renderer.send('ui:toggleRightSidebar')
+    return true
+  }
+  if (action.type === 'toggleWorktreePalette') {
+    renderer.send('ui:toggleWorktreePalette')
+    return true
+  }
+  if (action.type === 'toggleFloatingTerminal') {
+    renderer.send('ui:toggleFloatingTerminal')
+    return true
+  }
+  if (action.type === 'openQuickOpen') {
+    renderer.send('ui:openQuickOpen')
+    return true
+  }
+  if (action.type === 'openNewWorkspace') {
+    renderer.send('ui:openNewWorkspace')
+    return true
+  }
+  if (action.type === 'jumpToWorktreeIndex') {
+    renderer.send('ui:jumpToWorktreeIndex', action.index)
+    return true
+  }
+  if (action.type === 'worktreeHistoryNavigate') {
+    renderer.send('ui:worktreeHistoryNavigate', action.direction)
+    return true
+  }
+  if (action.type === 'dictationKeyDown' && shouldForwardDictationShortcut?.()) {
+    renderer.send('ui:dictationKeyDown')
+    return true
+  }
+  return false
 }
 
 export function setupGuestContextMenu(args: {
@@ -228,8 +285,15 @@ export function setupGuestShortcutForwarding(args: {
   guest: Electron.WebContents
   resolveRenderer: ResolveRenderer
   shouldForwardDictationShortcut?: ShouldForwardDictationShortcut
+  getWindowShortcutBindings?: GetWindowShortcutBindings
 }): () => void {
-  const { browserTabId, guest, resolveRenderer, shouldForwardDictationShortcut } = args
+  const {
+    browserTabId,
+    guest,
+    resolveRenderer,
+    shouldForwardDictationShortcut,
+    getWindowShortcutBindings
+  } = args
   let ctrlTabSwitching = false
   const handler = (event: Electron.Event, input: Electron.Input): void => {
     if (isCtrlTabSwitchKey(input)) {
@@ -258,30 +322,35 @@ export function setupGuestShortcutForwarding(args: {
     // Alt and must be handled before the generic modifier-chord gate below,
     // which rejects Alt. Every other chord handled further down can reuse
     // the same `action` rather than re-running the full predicate chain.
-    const action = resolveWindowShortcutAction(input, process.platform)
+    const windowShortcutBindings = getWindowShortcutBindings?.()
+    const action = resolveWindowShortcutAction(input, process.platform, windowShortcutBindings)
+    const customAction = resolveCustomWindowShortcutAction(input, windowShortcutBindings)
     if (input.isAutoRepeat) {
       if (action?.type === 'dictationKeyDown' && shouldForwardDictationShortcut?.()) {
         event.preventDefault()
       }
       return
     }
-    if (action?.type === 'worktreeHistoryNavigate') {
-      // Why: preventDefault unconditionally — if we cannot resolve the
-      // renderer (torn-down tab or teardown race), dropping the keystroke
-      // into the guest's webContents would let Chromium / the guest page
-      // handle Cmd+Alt+Arrow as their own chord (e.g. guest-side text
-      // navigation). Consistency with the main-window path is preserved
-      // only by suppressing the event here too.
+    if (customAction) {
+      if (customAction.type === 'dictationKeyDown' && !shouldForwardDictationShortcut?.()) {
+        return
+      }
+      // Why: custom bindings may include Alt or chords that overlap guest
+      // browser shortcuts. Resolve the shared policy before the guest-specific
+      // fallbacks so recorded shortcuts behave the same from focused webviews.
       event.preventDefault()
       const renderer = resolveRenderer(browserTabId)
-      renderer?.send('ui:worktreeHistoryNavigate', action.direction)
+      if (renderer) {
+        sendResolvedWindowShortcutAction(renderer, customAction, shouldForwardDictationShortcut)
+      }
       return
     }
-
-    if (action?.type === 'toggleFloatingTerminal') {
+    if (action?.type === 'worktreeHistoryNavigate' || action?.type === 'toggleFloatingTerminal') {
       event.preventDefault()
       const renderer = resolveRenderer(browserTabId)
-      renderer?.send('ui:toggleFloatingTerminal')
+      if (renderer) {
+        sendResolvedWindowShortcutAction(renderer, action, shouldForwardDictationShortcut)
+      }
       return
     }
 
@@ -358,19 +427,10 @@ export function setupGuestShortcutForwarding(args: {
       renderer.send('ui:closeActiveTab')
     } else if (input.shift && (input.code === 'BracketRight' || input.code === 'BracketLeft')) {
       renderer.send('ui:switchTab', input.code === 'BracketRight' ? 1 : -1)
-    } else if (action?.type === 'toggleWorktreePalette') {
-      renderer.send('ui:toggleWorktreePalette')
-    } else if (action?.type === 'openQuickOpen') {
-      renderer.send('ui:openQuickOpen')
-    } else if (action?.type === 'openNewWorkspace') {
-      renderer.send('ui:openNewWorkspace')
-    } else if (action?.type === 'jumpToWorktreeIndex') {
-      renderer.send('ui:jumpToWorktreeIndex', action.index)
-    } else if (action?.type === 'dictationKeyDown') {
-      if (!shouldForwardDictationShortcut?.()) {
+    } else if (action) {
+      if (!sendResolvedWindowShortcutAction(renderer, action, shouldForwardDictationShortcut)) {
         return
       }
-      renderer.send('ui:dictationKeyDown')
     } else {
       return
     }

@@ -78,6 +78,7 @@ import { getRepoIdFromWorktreeId, getWorktreePathBasenameFromId } from '../share
 import { normalizeTerminalQuickCommands } from '../shared/terminal-quick-commands'
 import { normalizeVisibleTaskProviders } from '../shared/task-providers'
 import { normalizeOpenInApplications } from '../shared/open-in-applications'
+import { normalizeWindowShortcutBindings } from '../shared/window-shortcut-bindings'
 import {
   DEFAULT_WORKSPACE_STATUS_ID,
   clampWorkspaceBoardColumnWidth,
@@ -2123,6 +2124,11 @@ export class Store {
     }
     if ('openInApplications' in updates) {
       sanitizedUpdates.openInApplications = normalizeOpenInApplications(updates.openInApplications)
+    }
+    if ('windowShortcutBindings' in updates) {
+      sanitizedUpdates.windowShortcutBindings = normalizeWindowShortcutBindings(
+        updates.windowShortcutBindings
+      )
     }
     // Why: `telemetry` is deep-merged for the same reason `notifications` is —
     // partial updates from the Privacy pane / consent flow (e.g., flipping

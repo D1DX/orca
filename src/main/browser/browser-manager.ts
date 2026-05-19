@@ -37,6 +37,7 @@ import {
 import { ANTI_DETECTION_SCRIPT } from './anti-detection'
 import { cleanElectronUserAgent } from './browser-session-ua'
 import type { BrowserViewportOverride } from '../../shared/types'
+import type { WindowShortcutBindings } from '../../shared/window-shortcut-bindings'
 import {
   type BrowserAnnotationViewportBridgeOptions,
   BROWSER_ANNOTATION_VIEWPORT_BRIDGE_WORLD_ID,
@@ -119,6 +120,7 @@ export class BrowserManager {
   private readonly policyAttachedGuestIds = new Set<number>()
   private readonly policyCleanupByGuestId = new Map<number, () => void>()
   private shouldForwardDictationShortcut: (() => boolean) | null = null
+  private getWindowShortcutBindings: (() => WindowShortcutBindings | undefined) | null = null
   private readonly pendingLoadFailuresByGuestId = new Map<
     number,
     { code: number; description: string; validatedUrl: string }
@@ -126,6 +128,12 @@ export class BrowserManager {
 
   setDictationShortcutForwardingPredicate(predicate: (() => boolean) | null): void {
     this.shouldForwardDictationShortcut = predicate
+  }
+
+  setWindowShortcutBindingsResolver(
+    resolver: (() => WindowShortcutBindings | undefined) | null
+  ): void {
+    this.getWindowShortcutBindings = resolver
   }
   private readonly pendingPermissionEventsByGuestId = new Map<number, PendingPermissionEvent[]>()
   private readonly pendingPopupEventsByGuestId = new Map<number, PendingPopupEvent[]>()
@@ -1282,7 +1290,8 @@ export class BrowserManager {
         guest,
         resolveRenderer: (tabId) =>
           resolveRendererWebContents(this.rendererWebContentsIdByTabId, tabId),
-        shouldForwardDictationShortcut: () => this.shouldForwardDictationShortcut?.() ?? false
+        shouldForwardDictationShortcut: () => this.shouldForwardDictationShortcut?.() ?? false,
+        getWindowShortcutBindings: () => this.getWindowShortcutBindings?.()
       })
     )
   }

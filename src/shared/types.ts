@@ -14,6 +14,7 @@ import type { GitLabProjectSettings } from './gitlab-types'
 import type { TaskProvider } from './task-providers'
 import type { FeatureTipId } from './feature-tips'
 import type { GitBranchChangeStatus } from './git-status-types'
+import type { WindowShortcutBindings } from './window-shortcut-bindings'
 
 // Re-exported for backward compat with renderer call sites that import
 // `WorkspaceCreateTelemetrySource` from '../../../shared/types'.
@@ -1510,6 +1511,9 @@ export type GlobalSettings = {
   /** Controls how Ctrl+Tab chooses the next visible tab. Optional for
    *  profiles saved before this setting existed; readers default to MRU. */
   ctrlTabOrderMode?: CtrlTabOrderMode
+  /** User-recorded window shortcut bindings. Defaults continue to work when
+   *  a key is not present, and malformed bindings are dropped on write. */
+  windowShortcutBindings?: WindowShortcutBindings
   /** Why: Floating Terminal is the default global shell surface so users can
    *  reach a terminal outside repo/worktree context immediately. */
   floatingTerminalEnabled: boolean

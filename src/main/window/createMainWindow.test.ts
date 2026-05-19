@@ -47,7 +47,8 @@ vi.mock('../../../resources/icon-dev.png?asset', () => ({
 vi.mock('../browser/browser-manager', () => ({
   browserManager: {
     attachGuestPolicies: attachGuestPoliciesMock,
-    setDictationShortcutForwardingPredicate: vi.fn()
+    setDictationShortcutForwardingPredicate: vi.fn(),
+    setWindowShortcutBindingsResolver: vi.fn()
   }
 }))
 

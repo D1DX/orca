@@ -1,3 +1,10 @@
+import {
+  normalizeWindowShortcutBindings,
+  resolveCustomWindowShortcutAction,
+  type WindowShortcutBindingActionId,
+  type WindowShortcutBindings
+} from './window-shortcut-bindings'
+
 export type WindowShortcutInput = {
   type?: string
   key?: string
@@ -125,12 +132,27 @@ function matchesLetterShortcut(
 
 export function resolveWindowShortcutAction(
   input: WindowShortcutInput,
-  platform: NodeJS.Platform
+  platform: NodeJS.Platform,
+  customBindings?: WindowShortcutBindings
 ): WindowShortcutAction | null {
+  const normalizedCustomBindings = normalizeWindowShortcutBindings(customBindings)
+  const isCustomized = (actionId: WindowShortcutBindingActionId): boolean =>
+    Boolean(normalizedCustomBindings[actionId])
+
+  const customAction = resolveCustomWindowShortcutAction(input, normalizedCustomBindings)
+  if (customAction) {
+    return customAction
+  }
+
   // Why: evaluate the history-navigate chord BEFORE the standard modifier-chord
   // gate because that gate rejects Alt. The predicate already narrows to
   // ArrowLeft/ArrowRight so only those two codes reach here.
   if (isHistoryNavigateChord(input, platform)) {
+    if (
+      isCustomized(input.code === 'ArrowLeft' ? 'worktreeHistoryBack' : 'worktreeHistoryForward')
+    ) {
+      return null
+    }
     return {
       type: 'worktreeHistoryNavigate',
       direction: input.code === 'ArrowLeft' ? 'back' : 'forward'
@@ -138,6 +160,9 @@ export function resolveWindowShortcutAction(
   }
 
   if (isFloatingTerminalChord(input, platform)) {
+    if (isCustomized('toggleFloatingTerminal')) {
+      return null
+    }
     return { type: 'toggleFloatingTerminal' }
   }
 
@@ -146,14 +171,23 @@ export function resolveWindowShortcutAction(
   }
 
   if (isZoomInShortcut(input)) {
+    if (isCustomized('zoomIn')) {
+      return null
+    }
     return { type: 'zoom', direction: 'in' }
   }
 
   if (isZoomOutShortcut(input)) {
+    if (isCustomized('zoomOut')) {
+      return null
+    }
     return { type: 'zoom', direction: 'out' }
   }
 
   if (input.key === '0' && !input.shift) {
+    if (isCustomized('zoomReset')) {
+      return null
+    }
     return { type: 'zoom', direction: 'reset' }
   }
 
@@ -161,6 +195,9 @@ export function resolveWindowShortcutAction(
     matchesLetterShortcut(input, 'j', 'KeyJ') &&
     ((platform === 'darwin' && !input.shift) || (platform !== 'darwin' && input.shift))
   ) {
+    if (isCustomized('toggleWorktreePalette')) {
+      return null
+    }
     return { type: 'toggleWorktreePalette' }
   }
 
@@ -169,14 +206,23 @@ export function resolveWindowShortcutAction(
   // the renderer's window-capture handler can preventDefault, causing ^B / ^L
   // to appear in the terminal alongside the sidebar toggle.
   if (matchesLetterShortcut(input, 'b', 'KeyB') && !input.shift) {
+    if (isCustomized('toggleLeftSidebar')) {
+      return null
+    }
     return { type: 'toggleLeftSidebar' }
   }
 
   if (matchesLetterShortcut(input, 'l', 'KeyL') && !input.shift) {
+    if (isCustomized('toggleRightSidebar')) {
+      return null
+    }
     return { type: 'toggleRightSidebar' }
   }
 
   if (matchesLetterShortcut(input, 'p', 'KeyP') && !input.shift) {
+    if (isCustomized('openQuickOpen')) {
+      return null
+    }
     return { type: 'openQuickOpen' }
   }
 
@@ -188,6 +234,9 @@ export function resolveWindowShortcutAction(
   // the unified composer now exposes source switching inside the name field.
   if (matchesLetterShortcut(input, 'n', 'KeyN')) {
     if (!input.alt) {
+      if (isCustomized('openNewWorkspace')) {
+        return null
+      }
       return { type: 'openNewWorkspace' }
     }
   }
@@ -201,6 +250,9 @@ export function resolveWindowShortcutAction(
   // dictation controller is responsible for forwarding the chord through to
   // the PTY when dictation is intentionally disabled or the user is mid-input.
   if (matchesLetterShortcut(input, 'e', 'KeyE') && !input.shift) {
+    if (isCustomized('dictationKeyDown')) {
+      return null
+    }
     return { type: 'dictationKeyDown' }
   }
 

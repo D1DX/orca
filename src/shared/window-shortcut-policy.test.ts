@@ -64,6 +64,50 @@ describe('resolveWindowShortcutAction', () => {
     ).toEqual({ type: 'jumpToWorktreeIndex', index: 2 })
   })
 
+  it('resolves user-recorded custom window shortcut bindings before defaults', () => {
+    expect(
+      resolveWindowShortcutAction(
+        { code: 'KeyK', key: 'k', meta: true, control: false, alt: true, shift: false },
+        'darwin',
+        {
+          openQuickOpen: { code: 'KeyK', key: 'k', meta: true, alt: true }
+        }
+      )
+    ).toEqual({ type: 'openQuickOpen' })
+  })
+
+  it('keeps default shortcuts available when custom bindings are absent', () => {
+    expect(
+      resolveWindowShortcutAction(
+        { code: 'KeyP', key: 'p', meta: true, control: false, alt: false, shift: false },
+        'darwin',
+        {}
+      )
+    ).toEqual({ type: 'openQuickOpen' })
+  })
+
+  it('replaces a default shortcut when that action has a user-recorded binding', () => {
+    expect(
+      resolveWindowShortcutAction(
+        { code: 'KeyP', key: 'p', meta: true, control: false, alt: false, shift: false },
+        'darwin',
+        {
+          openQuickOpen: { code: 'KeyK', key: 'k', meta: true, alt: true }
+        }
+      )
+    ).toBeNull()
+
+    expect(
+      resolveWindowShortcutAction(
+        { code: 'KeyK', key: 'k', meta: true, control: false, alt: true, shift: false },
+        'darwin',
+        {
+          openQuickOpen: { code: 'KeyK', key: 'k', meta: true, alt: true }
+        }
+      )
+    ).toEqual({ type: 'openQuickOpen' })
+  })
+
   it('requires shift for the non-mac worktree palette shortcut', () => {
     expect(
       resolveWindowShortcutAction(

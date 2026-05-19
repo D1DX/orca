@@ -173,6 +173,9 @@ export function createMainWindow(
     // dictation session whose final text would be dropped.
     return false
   })
+  browserManager.setWindowShortcutBindingsResolver(
+    () => store?.getSettings().windowShortcutBindings
+  )
   const blur = settings?.windowBackgroundBlur ?? false
   // Why: native blur requires platform-specific Electron APIs. macOS uses
   // vibrancy (needs transparent: true), Windows uses backgroundMaterial.
@@ -609,7 +612,11 @@ export function createMainWindow(
     // Why: keep the main-process interception surface as an explicit allowlist.
     // Anything outside this helper must continue to the renderer/PTTY so
     // readline control chords are not silently stolen above the terminal.
-    const action = resolveWindowShortcutAction(input, process.platform)
+    const action = resolveWindowShortcutAction(
+      input,
+      process.platform,
+      store?.getSettings().windowShortcutBindings
+    )
     if (!action) {
       return
     }
@@ -835,6 +842,7 @@ export function createMainWindow(
     ipcMain.removeListener(minimizeChannel, onMinimize)
     ipcMain.removeListener(maximizeChannel, onMaximize)
     browserManager.setDictationShortcutForwardingPredicate(null)
+    browserManager.setWindowShortcutBindingsResolver(null)
     ipcMain.removeListener(requestCloseChannel, onRequestClose)
     ipcMain.removeListener(popupMenuChannel, onPopupMenu)
     ipcMain.removeHandler(isMaximizedChannel)
