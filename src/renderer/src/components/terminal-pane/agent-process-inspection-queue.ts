@@ -14,6 +14,9 @@ const inspectionStarts: number[] = []
 const inspectionQueue: InspectionTask[] = []
 
 function canStartInspection(now: number): boolean {
+  if (inspectionStarts.length > 0 && now < inspectionStarts[0]!) {
+    inspectionStarts.length = 0
+  }
   while (inspectionStarts.length > 0 && now - inspectionStarts[0]! >= 1_000) {
     inspectionStarts.shift()
   }
@@ -50,7 +53,7 @@ function pumpInspectionQueue(): void {
   activeInspections += 1
   inspectionStarts.push(now)
   void next.run().finally(() => {
-    activeInspections -= 1
+    activeInspections = Math.max(0, activeInspections - 1)
     if (inspectionQueue.length > 0) {
       scheduleInspectionPump()
     }
@@ -64,4 +67,14 @@ function pumpInspectionQueue(): void {
 export function enqueueAgentProcessInspection(task: InspectionTask): void {
   inspectionQueue.push(task)
   pumpInspectionQueue()
+}
+
+export function resetAgentProcessInspectionQueueForTests(): void {
+  if (inspectionPumpTimer !== null) {
+    clearTimeout(inspectionPumpTimer)
+    inspectionPumpTimer = null
+  }
+  activeInspections = 0
+  inspectionStarts.length = 0
+  inspectionQueue.length = 0
 }

@@ -169,6 +169,9 @@ export function connectPanePty(
   let agentTaskCompleteNotificationGraceTimer: ReturnType<typeof setTimeout> | null = null
   let agentTaskCompleteNotificationMaxTimer: ReturnType<typeof setTimeout> | null = null
   let agentTaskCompleteStatusUnsubscribe: (() => void) | null = null
+  let agentTaskCompleteSettingsUnsubscribe: (() => void) | null = null
+  let agentTaskCompleteNotificationGeneration = 0
+  let wasAgentTaskCompleteNotificationEnabled = isAgentTaskCompleteNotificationEnabled()
   let terminalBellNotificationTimer: ReturnType<typeof setTimeout> | null = null
   let pendingTerminalBellNotification = false
   // Why: passphrase-gate waits register a teardown here so dispose() can
@@ -265,7 +268,9 @@ export function connectPanePty(
   const onTitleChange = (title: string, rawTitle: string): void => {
     manager.setPaneGpuRendering(pane.id, !isGeminiTerminalTitle(rawTitle))
     deps.setRuntimePaneTitle(deps.tabId, pane.id, title)
-    agentCompletionCoordinator.observeTitle(rawTitle)
+    if (syncAgentTaskCompleteNotificationEnabled()) {
+      agentCompletionCoordinator.observeTitle(rawTitle)
+    }
     // Why: only the focused pane should drive the tab title — otherwise two
     // agents in split panes cause rapid title flickering as each emits OSC
     // sequences. Only the active split's title propagates to the tab. When
@@ -379,12 +384,43 @@ export function connectPanePty(
     }
   }
 
+  const syncAgentTaskCompleteNotificationEnabled = (): boolean => {
+    const enabled = isAgentTaskCompleteNotificationEnabled()
+    if (!enabled && wasAgentTaskCompleteNotificationEnabled) {
+      // Why: disabling notifications is an event-time boundary. Drop pending
+      // timers and coordinator state so completions observed while off cannot
+      // replay if the user turns the setting back on.
+      agentTaskCompleteNotificationGeneration += 1
+      clearPendingAgentTaskCompleteNotification()
+      agentCompletionCoordinator.resetCompletionState({ requireFreshWorking: true })
+      if (pendingTerminalBellNotification) {
+        scheduleTerminalBellNotification()
+      }
+    } else if (enabled && !wasAgentTaskCompleteNotificationEnabled) {
+      // Why: a pane may have observed work while agent-complete was disabled.
+      // Re-enabling should not let the next idle event notify for that old task.
+      agentCompletionCoordinator.resetCompletionState({ requireFreshWorking: true })
+    }
+    wasAgentTaskCompleteNotificationEnabled = enabled
+    return enabled
+  }
+
   const scheduleAgentTaskCompleteNotification = (title: string): void => {
+    if (!syncAgentTaskCompleteNotificationEnabled()) {
+      return
+    }
     clearPendingAgentTaskCompleteNotification()
     let graceElapsed = false
+    const generationAtSchedule = agentTaskCompleteNotificationGeneration
 
     const dispatch = (): void => {
       clearPendingAgentTaskCompleteNotification()
+      if (
+        generationAtSchedule !== agentTaskCompleteNotificationGeneration ||
+        !syncAgentTaskCompleteNotificationEnabled()
+      ) {
+        return
+      }
       pendingTerminalBellNotification = false
       clearTerminalBellNotificationTimer()
       if (disposed) {
@@ -420,6 +456,9 @@ export function connectPanePty(
       AGENT_TASK_COMPLETE_NOTIFICATION_MAX_WAIT_MS
     )
   }
+  agentTaskCompleteSettingsUnsubscribe = useAppStore.subscribe(() => {
+    syncAgentTaskCompleteNotificationEnabled()
+  })
 
   // ─── Agent task-complete: OS notification, not tab attention ──────────
   //
@@ -451,12 +490,14 @@ export function connectPanePty(
     if (isClaudeAgent(title) && (settings === null || settings.promptCacheTimerEnabled)) {
       deps.setCacheTimerStartedAt(cacheKey, Date.now())
     }
-    if (isAgentTaskCompleteNotificationEnabled()) {
+    if (syncAgentTaskCompleteNotificationEnabled()) {
       agentCompletionCoordinator.observeClassifiedTitleCompletion(title)
     }
   }
   const onAgentBecameWorking = (): void => {
-    agentCompletionCoordinator.observeTitleWorking()
+    if (syncAgentTaskCompleteNotificationEnabled()) {
+      agentCompletionCoordinator.observeTitleWorking()
+    }
     // Why: a new API call refreshes the prompt-cache TTL, so clear any running
     // countdown. The timer will restart when the agent becomes idle again.
     deps.setCacheTimerStartedAt(cacheKey, null)
@@ -540,7 +581,7 @@ export function connectPanePty(
       const currentState = useAppStore.getState()
       const title = currentState.runtimePaneTitlesByTabId?.[deps.tabId]?.[pane.id]
       currentState.setAgentStatus(cacheKey, payload, title)
-      if (isAgentTaskCompleteNotificationEnabled()) {
+      if (syncAgentTaskCompleteNotificationEnabled()) {
         agentCompletionCoordinator.observeHookStatus(payload)
       }
     }
@@ -1414,7 +1455,6 @@ export function connectPanePty(
             // even if no later spawn event or layout snapshot runs.
             deps.syncPanePtyLayoutBinding(pane.id, spawnedPtyId)
             deps.updateTabPtyId(deps.tabId, spawnedPtyId)
-            agentCompletionCoordinator.startProcessTracking()
             transport.attach({
               existingPtyId: spawnedPtyId,
               cols,
@@ -1425,6 +1465,9 @@ export function connectPanePty(
                 onError: reportError
               }
             })
+            // Why: attach sets the transport's PTY id; starting process
+            // tracking before this point no-ops because getPtyId() is empty.
+            agentCompletionCoordinator.startProcessTracking()
           })
           .catch((err) => {
             reportError(err instanceof Error ? err.message : String(err))
@@ -1455,6 +1498,10 @@ export function connectPanePty(
       pendingTerminalBellNotification = false
       clearTerminalBellNotificationTimer()
       discardTerminalOutput(pane.terminal)
+      if (agentTaskCompleteSettingsUnsubscribe !== null) {
+        agentTaskCompleteSettingsUnsubscribe()
+        agentTaskCompleteSettingsUnsubscribe = null
+      }
       if (connectFrame !== null) {
         // Why: StrictMode and split-group remounts can dispose a pane binding
         // before its deferred PTY attach/spawn work runs. Cancel that queued

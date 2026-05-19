@@ -1,3 +1,4 @@
+/* oxlint-disable max-lines */
 import { detectAgentStatusFromTitle, type AgentStatus } from '../../../../shared/agent-detection'
 import type { ParsedAgentStatusPayload } from '../../../../shared/agent-status-types'
 import {
@@ -44,6 +45,7 @@ export function createAgentCompletionCoordinator(
   let lastCompletedTurn: number | null = null
   let lastCompletionSource: CompletionSource | null = null
   let lastForegroundAgent: RecognizedAgentProcess | null = null
+  let requiresFreshWorking = false
   let pollTimer: ReturnType<typeof setTimeout> | null = null
   let pendingTitleTimer: ReturnType<typeof setTimeout> | null = null
   let pendingTitle: {
@@ -53,6 +55,7 @@ export function createAgentCompletionCoordinator(
     firstInspectionFinished: boolean
   } | null = null
   let inspectionInFlight = false
+  let inspectionGeneration = 0
   let consecutiveInspectionErrors = 0
 
   function clearPollTimer(): void {
@@ -95,11 +98,7 @@ export function createAgentCompletionCoordinator(
   }
 
   function dispatchCompletion(source: CompletionSource, title: string): void {
-    if (
-      source === 'process-exit' &&
-      lastCompletedTurn === currentTurn &&
-      lastCompletionSource !== 'process-exit'
-    ) {
+    if (requiresFreshWorking || lastCompletedTurn === currentTurn) {
       return
     }
     if (!options.isLive() || !hasAgentRunEvidence) {
@@ -209,24 +208,33 @@ export function createAgentCompletionCoordinator(
       return
     }
     inspectionInFlight = true
+    const generationAtRequest = inspectionGeneration
     enqueueAgentProcessInspection({
       priority,
       run: async () => {
         try {
           const result = await options.inspectProcess(options.getSettings(), ptyId)
-          if (!disposed) {
+          if (!disposed && generationAtRequest === inspectionGeneration) {
             handleProcessInspectionResult(result)
           }
         } catch {
           consecutiveInspectionErrors += 1
         } finally {
           inspectionInFlight = false
-          if (pendingTitle) {
-            pendingTitle.firstInspectionFinished = true
-            dispatchPendingTitleIfEligible()
-            schedulePendingTitleExpiry()
+          if (generationAtRequest !== inspectionGeneration) {
+            if (pendingTitle) {
+              requestInspection('pending-title')
+            } else {
+              scheduleNextPoll()
+            }
+          } else {
+            if (pendingTitle) {
+              pendingTitle.firstInspectionFinished = true
+              dispatchPendingTitleIfEligible()
+              schedulePendingTitleExpiry()
+            }
+            scheduleNextPoll()
           }
-          scheduleNextPoll()
         }
       }
     })
@@ -256,10 +264,22 @@ export function createAgentCompletionCoordinator(
     }, nextPollInterval())
   }
 
-  function observeTitleWorking(): void {
+  function recordTitleWorking(): boolean {
+    if (
+      lastCompletionSource === 'hook' &&
+      Date.now() - lastCompletionAt < COMPLETION_REPLAY_GUARD_MS
+    ) {
+      return false
+    }
     workingStatusObserved = true
+    requiresFreshWorking = false
     currentTurn += 1
     dropPendingTitle()
+    return true
+  }
+
+  function observeTitleWorking(): void {
+    recordTitleWorking()
   }
 
   function observeTitle(title: string): void {
@@ -269,7 +289,9 @@ export function createAgentCompletionCoordinator(
     }
 
     if (status === 'working') {
-      observeTitleWorking()
+      if (!recordTitleWorking()) {
+        return
+      }
     } else if (lastTitleStatus === 'working') {
       if (agentIdentityEstablished && hasAgentRunEvidence) {
         dispatchCompletion('title', title)
@@ -297,6 +319,7 @@ export function createAgentCompletionCoordinator(
     }
     if (payload.state === 'working') {
       workingStatusObserved = true
+      requiresFreshWorking = false
       currentTurn += 1
       dropPendingTitle()
       return
@@ -305,12 +328,38 @@ export function createAgentCompletionCoordinator(
       if (isRecognizedAgentType(payload.agentType)) {
         establishAgentEvidence()
       }
+      if (
+        !workingStatusObserved &&
+        lastCompletionSource === 'hook' &&
+        lastCompletedTurn === currentTurn &&
+        Date.now() - lastCompletionAt >= COMPLETION_REPLAY_GUARD_MS
+      ) {
+        // Why: some hook producers only emit terminal states. Treat later
+        // done-only hook completions as new turns without letting title/process
+        // backstops duplicate the same completion.
+        currentTurn += 1
+      }
       dispatchCompletion('hook', payload.agentType ?? options.paneKey)
     }
   }
 
   function startProcessTracking(): void {
     scheduleNextPoll()
+  }
+
+  function resetCompletionState(options: { requireFreshWorking?: boolean } = {}): void {
+    dropPendingTitle()
+    agentIdentityEstablished = false
+    hasAgentRunEvidence = false
+    workingStatusObserved = false
+    lastTitleStatus = null
+    lastCompletionToken = null
+    lastCompletionAt = 0
+    lastCompletedTurn = null
+    lastCompletionSource = null
+    lastForegroundAgent = null
+    requiresFreshWorking = options.requireFreshWorking ?? false
+    inspectionGeneration += 1
   }
 
   function dispose(): void {
@@ -325,6 +374,7 @@ export function createAgentCompletionCoordinator(
     observeTitleWorking,
     observeHookStatus,
     startProcessTracking,
+    resetCompletionState,
     dispose
   }
 }

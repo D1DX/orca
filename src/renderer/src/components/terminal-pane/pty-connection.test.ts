@@ -1325,6 +1325,367 @@ describe('connectPanePty', () => {
     )
   })
 
+  it('does not dispatch generic title completions when agent-complete notifications are disabled', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('pty-codex')
+    transportFactoryQueue.push(transport)
+
+    vi.useFakeTimers()
+    mockStoreState.settings = {
+      ...mockStoreState.settings,
+      notifications: {
+        enabled: true,
+        agentTaskComplete: false,
+        terminalBell: true,
+        suppressWhenFocused: false,
+        customSoundPath: null
+      }
+    }
+    const api = (
+      globalThis as unknown as {
+        window: { api: { pty: { getForegroundProcess: ReturnType<typeof vi.fn> } } }
+      }
+    ).window.api
+    api.pty.getForegroundProcess.mockResolvedValue('codex')
+    const pane = createPane(1)
+    const manager = createManager(1)
+    const deps = createDeps()
+
+    connectPanePty(pane as never, manager as never, deps as never)
+
+    const titleHandler = createdTransportOptions[0]?.onTitleChange as
+      | ((title: string, rawTitle: string) => void)
+      | undefined
+    if (!titleHandler) {
+      throw new Error('Expected onTitleChange to be registered')
+    }
+
+    titleHandler('⠋ experimental-agent-observability', '⠋ experimental-agent-observability')
+    titleHandler('experimental-agent-observability', 'experimental-agent-observability')
+    await flushAsyncTicks()
+    vi.advanceTimersByTime(1_000)
+
+    expect(deps.dispatchNotification).not.toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'agent-task-complete' })
+    )
+  })
+
+  it('does not replay disabled generic title completions after notifications are re-enabled', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('pty-codex')
+    transportFactoryQueue.push(transport)
+
+    vi.useFakeTimers()
+    mockStoreState.settings = {
+      ...mockStoreState.settings,
+      notifications: {
+        enabled: true,
+        agentTaskComplete: false,
+        terminalBell: true,
+        suppressWhenFocused: false,
+        customSoundPath: null
+      }
+    }
+    const inspection = createDeferred<string | null>()
+    const api = (
+      globalThis as unknown as {
+        window: { api: { pty: { getForegroundProcess: ReturnType<typeof vi.fn> } } }
+      }
+    ).window.api
+    api.pty.getForegroundProcess.mockReturnValue(inspection.promise)
+    const pane = createPane(1)
+    const manager = createManager(1)
+    const deps = createDeps()
+
+    connectPanePty(pane as never, manager as never, deps as never)
+
+    const titleHandler = createdTransportOptions[0]?.onTitleChange as
+      | ((title: string, rawTitle: string) => void)
+      | undefined
+    if (!titleHandler) {
+      throw new Error('Expected onTitleChange to be registered')
+    }
+
+    titleHandler('⠋ experimental-agent-observability', '⠋ experimental-agent-observability')
+    titleHandler('experimental-agent-observability', 'experimental-agent-observability')
+    mockStoreState.settings = {
+      ...mockStoreState.settings,
+      notifications: {
+        ...mockStoreState.settings.notifications,
+        agentTaskComplete: true
+      }
+    }
+    inspection.resolve('codex')
+    await flushAsyncTicks()
+    vi.advanceTimersByTime(1_000)
+
+    expect(deps.dispatchNotification).not.toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'agent-task-complete' })
+    )
+  })
+
+  it('clears title completion state when notifications are disabled', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('pty-codex')
+    transportFactoryQueue.push(transport)
+
+    vi.useFakeTimers()
+    mockStoreState.settings = {
+      ...mockStoreState.settings,
+      notifications: {
+        enabled: true,
+        agentTaskComplete: true,
+        terminalBell: true,
+        suppressWhenFocused: false,
+        customSoundPath: null
+      }
+    }
+    const pane = createPane(1)
+    const manager = createManager(1)
+    const deps = createDeps()
+
+    connectPanePty(pane as never, manager as never, deps as never)
+
+    const titleHandler = createdTransportOptions[0]?.onTitleChange as
+      | ((title: string, rawTitle: string) => void)
+      | undefined
+    if (!titleHandler) {
+      throw new Error('Expected onTitleChange to be registered')
+    }
+
+    titleHandler('Claude working', 'Claude working')
+    mockStoreState.settings = {
+      ...mockStoreState.settings,
+      notifications: {
+        ...mockStoreState.settings.notifications,
+        agentTaskComplete: false
+      }
+    }
+    notifyStoreSubscribers()
+    titleHandler('Claude done', 'Claude done')
+    mockStoreState.settings = {
+      ...mockStoreState.settings,
+      notifications: {
+        ...mockStoreState.settings.notifications,
+        agentTaskComplete: true
+      }
+    }
+    notifyStoreSubscribers()
+    titleHandler('Claude done', 'Claude done')
+    vi.advanceTimersByTime(1_000)
+
+    expect(deps.dispatchNotification).not.toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'agent-task-complete' })
+    )
+  })
+
+  it('cancels scheduled agent completion when notifications are disabled before dispatch', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('pty-codex')
+    transportFactoryQueue.push(transport)
+
+    vi.useFakeTimers()
+    mockStoreState.settings = {
+      ...mockStoreState.settings,
+      notifications: {
+        enabled: true,
+        agentTaskComplete: true,
+        terminalBell: true,
+        suppressWhenFocused: false,
+        customSoundPath: null
+      }
+    }
+    const pane = createPane(1)
+    const manager = createManager(1)
+    const deps = createDeps()
+
+    connectPanePty(pane as never, manager as never, deps as never)
+
+    const idleHandler = createdTransportOptions[0]?.onAgentBecameIdle as
+      | ((title: string) => void)
+      | undefined
+    if (!idleHandler) {
+      throw new Error('Expected onAgentBecameIdle to be registered')
+    }
+
+    idleHandler('* Codex done')
+    mockStoreState.settings = {
+      ...mockStoreState.settings,
+      notifications: {
+        ...mockStoreState.settings.notifications,
+        agentTaskComplete: false
+      }
+    }
+    notifyStoreSubscribers()
+    mockStoreState.settings = {
+      ...mockStoreState.settings,
+      notifications: {
+        ...mockStoreState.settings.notifications,
+        agentTaskComplete: true
+      }
+    }
+    notifyStoreSubscribers()
+    vi.advanceTimersByTime(1_000)
+
+    expect(deps.dispatchNotification).not.toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'agent-task-complete' })
+    )
+  })
+
+  it('restores a suppressed terminal bell when disabling pending agent completion', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('pty-codex')
+    transportFactoryQueue.push(transport)
+
+    vi.useFakeTimers()
+    mockStoreState.settings = {
+      ...mockStoreState.settings,
+      notifications: {
+        enabled: true,
+        agentTaskComplete: true,
+        terminalBell: true,
+        suppressWhenFocused: false,
+        customSoundPath: null
+      }
+    }
+    const pane = createPane(1)
+    const manager = createManager(1)
+    const deps = createDeps()
+
+    connectPanePty(pane as never, manager as never, deps as never)
+
+    const bellHandler = createdTransportOptions[0]?.onBell as (() => void) | undefined
+    const idleHandler = createdTransportOptions[0]?.onAgentBecameIdle as
+      | ((title: string) => void)
+      | undefined
+    if (!bellHandler || !idleHandler) {
+      throw new Error('Expected bell and idle handlers to be registered')
+    }
+
+    bellHandler()
+    idleHandler('* Codex done')
+    vi.advanceTimersByTime(250)
+    expect(deps.dispatchNotification).not.toHaveBeenCalledWith({ source: 'terminal-bell' })
+
+    mockStoreState.settings = {
+      ...mockStoreState.settings,
+      notifications: {
+        ...mockStoreState.settings.notifications,
+        agentTaskComplete: false
+      }
+    }
+    notifyStoreSubscribers()
+    vi.advanceTimersByTime(250)
+
+    expect(deps.dispatchNotification).toHaveBeenCalledWith({ source: 'terminal-bell' })
+  })
+
+  it('requires fresh working evidence after notifications are disabled', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('pty-codex')
+    transportFactoryQueue.push(transport)
+
+    vi.useFakeTimers()
+    mockStoreState.settings = {
+      ...mockStoreState.settings,
+      notifications: {
+        enabled: true,
+        agentTaskComplete: true,
+        terminalBell: true,
+        suppressWhenFocused: false,
+        customSoundPath: null
+      }
+    }
+    const pane = createPane(1)
+    const manager = createManager(1)
+    const deps = createDeps()
+
+    connectPanePty(pane as never, manager as never, deps as never)
+
+    const workingHandler = createdTransportOptions[0]?.onAgentBecameWorking as
+      | (() => void)
+      | undefined
+    const idleHandler = createdTransportOptions[0]?.onAgentBecameIdle as
+      | ((title: string) => void)
+      | undefined
+    if (!workingHandler || !idleHandler) {
+      throw new Error('Expected working and idle handlers to be registered')
+    }
+
+    workingHandler()
+    mockStoreState.settings = {
+      ...mockStoreState.settings,
+      notifications: {
+        ...mockStoreState.settings.notifications,
+        agentTaskComplete: false
+      }
+    }
+    notifyStoreSubscribers()
+    mockStoreState.settings = {
+      ...mockStoreState.settings,
+      notifications: {
+        ...mockStoreState.settings.notifications,
+        agentTaskComplete: true
+      }
+    }
+    notifyStoreSubscribers()
+    idleHandler('* Codex done')
+    vi.advanceTimersByTime(1_000)
+
+    expect(deps.dispatchNotification).not.toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'agent-task-complete' })
+    )
+  })
+
+  it('requires fresh working evidence when notifications start disabled then re-enable', async () => {
+    const { connectPanePty } = await import('./pty-connection')
+    const transport = createMockTransport('pty-codex')
+    transportFactoryQueue.push(transport)
+
+    vi.useFakeTimers()
+    mockStoreState.settings = {
+      ...mockStoreState.settings,
+      notifications: {
+        enabled: true,
+        agentTaskComplete: false,
+        terminalBell: true,
+        suppressWhenFocused: false,
+        customSoundPath: null
+      }
+    }
+    const pane = createPane(1)
+    const manager = createManager(1)
+    const deps = createDeps()
+
+    connectPanePty(pane as never, manager as never, deps as never)
+
+    const workingHandler = createdTransportOptions[0]?.onAgentBecameWorking as
+      | (() => void)
+      | undefined
+    const idleHandler = createdTransportOptions[0]?.onAgentBecameIdle as
+      | ((title: string) => void)
+      | undefined
+    if (!workingHandler || !idleHandler) {
+      throw new Error('Expected working and idle handlers to be registered')
+    }
+
+    workingHandler()
+    mockStoreState.settings = {
+      ...mockStoreState.settings,
+      notifications: {
+        ...mockStoreState.settings.notifications,
+        agentTaskComplete: true
+      }
+    }
+    notifyStoreSubscribers()
+    idleHandler('* Codex done')
+    vi.advanceTimersByTime(1_000)
+
+    expect(deps.dispatchNotification).not.toHaveBeenCalledWith(
+      expect.objectContaining({ source: 'agent-task-complete' })
+    )
+  })
+
   it('dispatches agent-task-complete for generic Codex spinner titles after process identity is confirmed', async () => {
     const { connectPanePty } = await import('./pty-connection')
     const transport = createMockTransport('pty-codex')

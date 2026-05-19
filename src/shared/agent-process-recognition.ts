@@ -42,11 +42,24 @@ for (const [agent, config] of Object.entries(TUI_AGENT_CONFIG) as [
   }
 }
 
+function agentForNormalizedProcess(normalized: string): TuiAgent | undefined {
+  const exact = PROCESS_TO_AGENT.get(normalized)
+  if (exact) {
+    return exact
+  }
+  // Why: node-pty can report Codex's packaged platform binary
+  // (for example codex-aarch64-ap) instead of the launch command.
+  if (normalized.startsWith('codex-')) {
+    return PROCESS_TO_AGENT.get('codex')
+  }
+  return undefined
+}
+
 export function recognizeAgentProcess(
   processName: string | null | undefined
 ): RecognizedAgentProcess | null {
   const normalized = normalizeProcessName(processName)
-  const agent = PROCESS_TO_AGENT.get(normalized)
+  const agent = agentForNormalizedProcess(normalized)
   if (!agent) {
     return null
   }
@@ -59,6 +72,6 @@ export function isRecognizedAgentType(agentType: AgentType | null | undefined): 
   }
   return (
     AGENT_TYPE_IDS.has(agentType as TuiAgent) ||
-    PROCESS_TO_AGENT.has(normalizeProcessName(agentType))
+    agentForNormalizedProcess(normalizeProcessName(agentType)) !== undefined
   )
 }
