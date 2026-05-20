@@ -843,6 +843,10 @@ export type GitHubWorkItem = {
   author: string | null
   branchName?: string
   baseRefName?: string
+  // Why: PR checks are keyed by head commit; carrying this lets task rows use
+  // the cached check-runs endpoint instead of one `gh pr checks` call per row.
+  headSha?: string
+  prRepo?: GitHubRepositoryIdentity
   additions?: number
   deletions?: number
   changedFiles?: number

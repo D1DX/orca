@@ -426,11 +426,21 @@ function normalizedRepoIdentity(repo: GitHubOwnerRepo): string {
   return `${repo.owner.toLowerCase()}/${repo.repo.toLowerCase()}`
 }
 
-export function prChecksCacheSuffix(prNumber: number, prRepo?: GitHubOwnerRepo | null): string {
-  if (!prRepo) {
-    return `pr-checks::${prNumber}`
-  }
-  return `pr-checks::${normalizedRepoIdentity(prRepo)}::${prNumber}`
+function normalizedHeadSha(headSha?: string): string | null {
+  const trimmed = headSha?.trim()
+  return trimmed ? trimmed.toLowerCase() : null
+}
+
+export function prChecksCacheSuffix(
+  prNumber: number,
+  prRepo?: GitHubOwnerRepo | null,
+  headSha?: string
+): string {
+  const headSuffix = normalizedHeadSha(headSha)
+  const base = prRepo
+    ? `pr-checks::${normalizedRepoIdentity(prRepo)}::${prNumber}`
+    : `pr-checks::${prNumber}`
+  return headSuffix ? `${base}::head::${headSuffix}` : base
 }
 
 export function prCommentsCacheSuffix(prNumber: number, prRepo?: GitHubOwnerRepo | null): string {
@@ -1549,9 +1559,16 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
     options
   ): Promise<PRCheckDetail[]> => {
     const repoId = options?.repoId ?? get().repos?.find((repo) => repo.path === repoPath)?.id
-    const cacheKey = repoScopedCacheKey(repoPath, repoId, prChecksCacheSuffix(prNumber, prRepo))
-    const inflightKey = `${cacheKey}::${headSha ?? 'unknown'}`
-    const cached = get().checksCache[cacheKey]
+    const cacheKey = repoScopedCacheKey(
+      repoPath,
+      repoId,
+      prChecksCacheSuffix(prNumber, prRepo, headSha)
+    )
+    const legacyCacheKey = headSha
+      ? repoScopedCacheKey(repoPath, repoId, prChecksCacheSuffix(prNumber, prRepo))
+      : cacheKey
+    const inflightKey = cacheKey
+    const cached = get().checksCache[cacheKey] ?? get().checksCache[legacyCacheKey]
     if (
       !options?.force &&
       isFresh(cached, CHECKS_CACHE_TTL) &&
@@ -1630,7 +1647,7 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
         return checks
       } catch (err) {
         console.error('Failed to fetch PR checks:', err)
-        const latestCached = get().checksCache[cacheKey]
+        const latestCached = get().checksCache[cacheKey] ?? get().checksCache[legacyCacheKey]
         if (latestCached?.data && (!headSha || latestCached.headSha === headSha)) {
           return latestCached.data
         }

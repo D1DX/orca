@@ -329,14 +329,14 @@ export async function getAuthenticatedViewer(): Promise<GitHubViewer | null> {
 type MainWorkItem = Omit<GitHubWorkItem, 'repoId'>
 
 const WORK_ITEM_PR_LIST_JSON_FIELDS =
-  'number,title,state,url,labels,updatedAt,author,isDraft,headRefName,baseRefName,headRepositoryOwner,reviewRequests'
+  'number,title,state,url,labels,updatedAt,author,isDraft,headRefName,baseRefName,headRefOid,headRepositoryOwner,reviewRequests'
 
 // Why: these fields are intentionally excluded from `gh pr list` because
 // statusCheckRollup/review decision/merge metadata fan out into expensive
 // GraphQL work across every row. Requested reviewers are kept in the list
 // payload because the Tasks table renders that column on first paint.
 const WORK_ITEM_PR_DETAIL_JSON_FIELDS =
-  'number,title,state,url,labels,updatedAt,author,isDraft,headRefName,baseRefName,headRepositoryOwner,additions,deletions,changedFiles,reviewDecision,reviewRequests,latestReviews,assignees,statusCheckRollup,mergeable,mergeStateStatus,maintainerCanModify'
+  'number,title,state,url,labels,updatedAt,author,isDraft,headRefName,baseRefName,headRefOid,headRepositoryOwner,additions,deletions,changedFiles,reviewDecision,reviewRequests,latestReviews,assignees,statusCheckRollup,mergeable,mergeStateStatus,maintainerCanModify'
 
 function mapIssueWorkItem(item: Record<string, unknown>): MainWorkItem {
   return {
@@ -548,10 +548,10 @@ function deriveWorkItemCheckSummary(value: unknown): GitHubWorkItem['checksSumma
 
 function mapPullRequestWorkItem(
   item: Record<string, unknown>,
-  baseOwnerLogin: string | null = null
+  baseOwnerRepo: OwnerRepo | null = null
 ): MainWorkItem {
   // Why: fork PRs are disabled in the Start-from picker. We compare the PR head's
-  // owner to the selected repo's owner; when baseOwnerLogin is unknown we default
+  // owner to the selected repo's owner; when the base repo is unknown we default
   // to false so non-picker call sites see the same shape as before.
   const headOwnerLogin = extractHeadOwnerLogin(item)
   // Why: only emit isCrossRepository when we actually know the head owner. If
@@ -559,7 +559,9 @@ function mapPullRequestWorkItem(
   // that fixture, or gh not returning it), leave the field undefined instead
   // of falsely claiming "not a fork".
   const isCrossRepository =
-    headOwnerLogin !== null && baseOwnerLogin !== null ? headOwnerLogin !== baseOwnerLogin : null
+    headOwnerLogin !== null && baseOwnerRepo !== null
+      ? headOwnerLogin !== baseOwnerRepo.owner
+      : null
   const state = String(item.state ?? '').toLowerCase()
   const additions = numberFromUnknown(item.additions)
   const deletions = numberFromUnknown(item.deletions)
@@ -569,6 +571,14 @@ function mapPullRequestWorkItem(
       (item.files as { totalCount?: unknown } | undefined)?.totalCount
   )
   const mergeable = normalizePRMergeable(item.mergeable)
+  const headSha =
+    typeof item.headRefOid === 'string'
+      ? item.headRefOid
+      : typeof item.head === 'object' && item.head !== null
+        ? typeof (item.head as { sha?: unknown }).sha === 'string'
+          ? (item.head as { sha: string }).sha
+          : undefined
+        : undefined
   return {
     id: `pr:${String(item.number)}`,
     type: 'pr',
@@ -607,6 +617,8 @@ function mapPullRequestWorkItem(
       typeof item.base === 'object' && item.base !== null && 'ref' in item.base
         ? String((item.base as { ref?: unknown }).ref ?? '')
         : String(item.baseRefName ?? ''),
+    ...(headSha ? { headSha } : {}),
+    ...(baseOwnerRepo ? { prRepo: { owner: baseOwnerRepo.owner, repo: baseOwnerRepo.repo } } : {}),
     ...(additions !== undefined ? { additions } : {}),
     ...(deletions !== undefined ? { deletions } : {}),
     ...(changedFiles !== undefined ? { changedFiles } : {}),
@@ -674,7 +686,7 @@ async function fetchPullRequestWorkItem(
       ['api', `repos/${ownerRepo.owner}/${ownerRepo.repo}/pulls/${number}`],
       ghOptions
     )
-    return mapPullRequestWorkItem(JSON.parse(stdout) as Record<string, unknown>, ownerRepo.owner)
+    return mapPullRequestWorkItem(JSON.parse(stdout) as Record<string, unknown>, ownerRepo)
   }
 
   const { stdout } = await ghExecFileAsync(
@@ -843,7 +855,7 @@ async function listRecentWorkItems(
     let prs: MainWorkItem[] = []
     if (prsSettled.status === 'fulfilled') {
       prs = (JSON.parse(prsSettled.value.stdout) as Record<string, unknown>[]).map((item) =>
-        mapPullRequestWorkItem(item, prOwnerRepo?.owner ?? null)
+        mapPullRequestWorkItem(item, prOwnerRepo)
       )
     } else {
       // Why: PR-side failures must preserve the pre-diff behavior of
@@ -971,7 +983,7 @@ async function listQueriedWorkItems(
     try {
       const { stdout } = await ghExecFileAsync(args, ghOptions)
       return (JSON.parse(stdout) as Record<string, unknown>[]).map((item) =>
-        mapPullRequestWorkItem(item, prOwnerRepo?.owner ?? null)
+        mapPullRequestWorkItem(item, prOwnerRepo)
       )
     } catch (err) {
       console.warn('listQueriedWorkItems PRs partial failure:', err)

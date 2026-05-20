@@ -3,7 +3,7 @@ envelope, and IssueSourceIndicator suppression tests in one file keeps the
 GitHub slice's cross-cutting invariants verifiable in one place. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { create } from 'zustand'
-import { createGitHubSlice, workItemsCacheKey } from './github'
+import { createGitHubSlice, prChecksCacheSuffix, workItemsCacheKey } from './github'
 import type { AppState } from '../types'
 import type { GitHubWorkItem, PRInfo } from '../../../../shared/types'
 import {
@@ -441,10 +441,14 @@ describe('createGitHubSlice.fetchPRChecks', () => {
       )
 
     expect(
-      store.getState().checksCache[`${repoId}::pr-checks::acme/widgets::12`]?.data?.[0].name
+      store.getState().checksCache[
+        `${repoId}::${prChecksCacheSuffix(12, { owner: 'Acme', repo: 'Widgets' }, 'head-a')}`
+      ]?.data?.[0].name
     ).toBe('upstream')
     expect(
-      store.getState().checksCache[`${repoId}::pr-checks::fork/widgets::12`]?.data?.[0].name
+      store.getState().checksCache[
+        `${repoId}::${prChecksCacheSuffix(12, { owner: 'Fork', repo: 'Widgets' }, 'head-b')}`
+      ]?.data?.[0].name
     ).toBe('fork')
     expect(mockApi.gh.prChecks).toHaveBeenNthCalledWith(1, {
       repoPath,
@@ -492,7 +496,9 @@ describe('createGitHubSlice.fetchPRChecks', () => {
 
     expect(store.getState().prCache[prCacheKey]?.data?.checksStatus).toBe('pending')
     expect(
-      store.getState().checksCache[`${repoId}::pr-checks::acme/widgets::12`]?.data?.[0].name
+      store.getState().checksCache[
+        `${repoId}::${prChecksCacheSuffix(12, { owner: 'Acme', repo: 'Widgets' }, 'head-a')}`
+      ]?.data?.[0].name
     ).toBe('build')
   })
 

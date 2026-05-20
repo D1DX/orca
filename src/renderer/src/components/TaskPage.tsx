@@ -111,6 +111,7 @@ import {
   selectTaskPageWorkItemsCacheEntries,
   type TaskPageRepoSourceState
 } from '@/components/task-page-cache-selectors'
+import { deriveTaskPagePRCheckSummary } from '@/components/task-page-pr-check-summary'
 import type {
   GitHubOwnerRepo,
   GitHubAssignableUser,
@@ -223,6 +224,7 @@ const LINEAR_PRESETS: LinearPreset[] = [
 
 const TASK_SEARCH_DEBOUNCE_MS = 300
 const LINEAR_ITEM_LIMIT = 36
+const PR_CHECKS_EAGER_PREFETCH_LIMIT = 20
 
 const GITHUB_TASK_GRID_CLASS =
   'min-w-[860px] grid-cols-[72px_minmax(260px,2fr)_minmax(130px,0.8fr)_100px_92px_158px]'
@@ -881,6 +883,17 @@ function getChecksTone(item: GitHubWorkItem): string {
   return 'border-border/60 bg-background/70 text-muted-foreground'
 }
 
+function sameOptionalGitHubOwnerRepo(
+  left: GitHubOwnerRepo | null | undefined,
+  right: GitHubOwnerRepo | null | undefined
+): boolean {
+  const leftValue = left ?? null
+  const rightValue = right ?? null
+  return leftValue === null && rightValue === null
+    ? true
+    : sameGitHubOwnerRepo(leftValue, rightValue)
+}
+
 function getMergeLabel(item: GitHubWorkItem): string {
   if (item.mergeable === undefined && item.mergeStateStatus === undefined) {
     return 'Merge'
@@ -1360,11 +1373,39 @@ function PRReviewCell({
 
 function PRChecksCell({
   item,
-  onOpen
+  onOpen,
+  onLoadChecks
 }: {
   item: GitHubWorkItem
   onOpen: () => void
+  onLoadChecks: () => void
 }): React.JSX.Element {
+  const triggerRef = useRef<HTMLButtonElement | null>(null)
+
+  useEffect(() => {
+    if (item.type !== 'pr' || item.checksSummary) {
+      return
+    }
+    const node = triggerRef.current
+    if (!node || typeof IntersectionObserver === 'undefined') {
+      return
+    }
+    let requested = false
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (requested || !entries.some((entry) => entry.isIntersecting)) {
+          return
+        }
+        requested = true
+        onLoadChecks()
+        observer.disconnect()
+      },
+      { rootMargin: '160px 0px' }
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [item.checksSummary, item.type, onLoadChecks])
+
   if (item.type !== 'pr') {
     return <span className="text-[11px] text-muted-foreground">Issue</span>
   }
@@ -1381,9 +1422,13 @@ function PRChecksCell({
     <Tooltip>
       <TooltipTrigger asChild>
         <button
+          ref={triggerRef}
           type="button"
+          onFocus={onLoadChecks}
+          onMouseEnter={onLoadChecks}
           onClick={(event) => {
             event.stopPropagation()
+            onLoadChecks()
             onOpen()
           }}
           className={cn(
@@ -1647,6 +1692,7 @@ export default function TaskPage(): React.JSX.Element {
   const openModal = useAppStore((s) => s.openModal)
   const updateSettings = useAppStore((s) => s.updateSettings)
   const fetchWorkItemsAcrossRepos = useAppStore((s) => s.fetchWorkItemsAcrossRepos)
+  const fetchPRChecks = useAppStore((s) => s.fetchPRChecks)
   const getCachedWorkItems = useAppStore((s) => s.getCachedWorkItems)
   const setIssueSourcePreference = useAppStore((s) => s.setIssueSourcePreference)
   // Why: bumped by `setIssueSourcePreference` after cache eviction so the
@@ -1941,13 +1987,20 @@ export default function TaskPage(): React.JSX.Element {
   )
 
   const patchTaskPageWorkItemRows = useCallback(
-    (itemKey: { id: string; repoId: string }, patch: Partial<GitHubWorkItem>): void => {
+    (
+      itemKey: { id: string; repoId: string },
+      patch: Partial<GitHubWorkItem>,
+      shouldPatch?: (item: GitHubWorkItem) => boolean
+    ): void => {
       setPages((current) => {
         let changed = false
         const nextPages = current.map((page) => {
           let pageChanged = false
           const nextPage = page.map((item) => {
             if (item.id !== itemKey.id || item.repoId !== itemKey.repoId) {
+              return item
+            }
+            if (shouldPatch && !shouldPatch(item)) {
               return item
             }
             pageChanged = true
@@ -2660,6 +2713,48 @@ export default function TaskPage(): React.JSX.Element {
   const githubTaskGridClass = showPRManagementColumns
     ? GITHUB_PR_TASK_GRID_CLASS
     : GITHUB_TASK_GRID_CLASS
+
+  const ensurePRChecksLoaded = useCallback(
+    (item: GitHubWorkItem): void => {
+      if (item.type !== 'pr' || item.checksSummary) {
+        return
+      }
+      const repo = repoMap.get(item.repoId)
+      if (!repo) {
+        return
+      }
+      const requestedHeadSha = item.headSha
+      const requestedPRRepo = item.prRepo ?? null
+      void fetchPRChecks(
+        repo.path,
+        item.number,
+        item.branchName,
+        item.headSha,
+        item.prRepo ?? null,
+        { repoId: repo.id }
+      ).then((checks) => {
+        patchTaskPageWorkItemRows(
+          { id: item.id, repoId: item.repoId },
+          { checksSummary: deriveTaskPagePRCheckSummary(checks) },
+          (currentItem) =>
+            currentItem.type === 'pr' &&
+            currentItem.headSha === requestedHeadSha &&
+            sameOptionalGitHubOwnerRepo(currentItem.prRepo, requestedPRRepo)
+        )
+      })
+    },
+    [fetchPRChecks, patchTaskPageWorkItemRows, repoMap]
+  )
+
+  useEffect(() => {
+    if (taskSource !== 'github' || githubMode !== 'items' || !showPRManagementColumns) {
+      return
+    }
+
+    for (const item of filteredWorkItems.slice(0, PR_CHECKS_EAGER_PREFETCH_LIMIT)) {
+      ensurePRChecksLoaded(item)
+    }
+  }, [ensurePRChecksLoaded, filteredWorkItems, githubMode, showPRManagementColumns, taskSource])
 
   // Why: totalPages is derived from the search API count when available,
   // so the pagination bar shows the full range (with ellipsis) upfront.
@@ -4327,6 +4422,7 @@ export default function TaskPage(): React.JSX.Element {
                               <PRChecksCell
                                 item={item}
                                 onOpen={() => setDialogWorkItem(item, 'checks')}
+                                onLoadChecks={() => ensurePRChecksLoaded(item)}
                               />
                             </div>
 
