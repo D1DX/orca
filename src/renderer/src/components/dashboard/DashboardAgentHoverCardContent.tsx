@@ -3,6 +3,7 @@ import { AgentStateDot, agentStateLabel, type AgentDotState } from '@/components
 import { AgentIcon } from '@/lib/agent-catalog'
 import { agentTypeToIconAgent, formatAgentTypeLabel } from '@/lib/agent-status'
 import CommentMarkdown from '@/components/sidebar/CommentMarkdown'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import type { DashboardAgentRow as DashboardAgentRowData } from './useDashboardData'
 
 type AgentHoverSectionProps = {
@@ -48,8 +49,10 @@ export function DashboardAgentHoverCardContent({
   const hasBodyDetails = prompt.length > 0 || hasToolDetails || lastAssistantMessage.length > 0
 
   return (
-    <div
-      className="max-h-[min(70vh,520px)] overflow-y-auto"
+    <ScrollArea
+      className="max-h-[min(70vh,520px)]"
+      type="auto"
+      viewportClassName="max-h-[min(70vh,520px)]"
       onClick={(event) => event.stopPropagation()}
       onMouseDown={(event) => event.stopPropagation()}
     >
@@ -93,7 +96,7 @@ export function DashboardAgentHoverCardContent({
                 </code>
               )}
               {toolInput && (
-                <pre className="max-h-40 overflow-auto rounded-md bg-accent p-2 font-mono text-[11px] leading-snug text-accent-foreground [overflow-wrap:anywhere]">
+                <pre className="whitespace-pre-wrap rounded-md bg-accent p-2 font-mono text-[11px] leading-snug text-accent-foreground [overflow-wrap:anywhere]">
                   {toolInput}
                 </pre>
               )}
@@ -113,6 +116,6 @@ export function DashboardAgentHoverCardContent({
           <div className="text-xs text-muted-foreground">No agent details yet.</div>
         )}
       </div>
-    </div>
+    </ScrollArea>
   )
 }
