@@ -47,6 +47,22 @@ export const EXPERIMENTAL_PANE_SEARCH_ENTRIES: SettingsSearchEntry[] = [
       'env',
       'node_modules'
     ]
+  },
+  {
+    title: 'Multi-repo workspaces',
+    description:
+      'Allow the new workspace composer to associate one workspace with multiple repos for sidebar organization.',
+    keywords: [
+      'experimental',
+      'multi repo',
+      'multiple repos',
+      'workspace',
+      'workspaces',
+      'projects',
+      'project',
+      'repo groups',
+      'organization'
+    ]
   }
 ]
 
@@ -64,5 +80,6 @@ function findEntry(title: string): SettingsSearchEntry {
 export const EXPERIMENTAL_SEARCH_ENTRY = {
   pet: findEntry('Pet'),
   activity: findEntry('Agents View'),
-  symlinks: findEntry('Symlinks on worktrees')
+  symlinks: findEntry('Symlinks on worktrees'),
+  multiRepoWorkspaces: findEntry('Multi-repo workspaces')
 } as const

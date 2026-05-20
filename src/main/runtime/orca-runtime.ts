@@ -44,6 +44,7 @@ import type {
   TuiAgent
 } from '../../shared/types'
 import { splitWorktreeId } from '../../shared/worktree-id'
+import { normalizeWorktreeRepoIds } from '../../shared/worktree-repo-ids'
 import { isFolderRepo } from '../../shared/repo-kind'
 import { buildSetupRunnerCommand } from '../../shared/setup-runner-command'
 import { FIRST_PANE_ID } from '../../shared/pane-key'
@@ -5748,6 +5749,7 @@ export class OrcaRuntimeService {
 
   async createManagedWorktree(args: {
     repoSelector: string
+    repoIds?: string[]
     name: string
     baseBranch?: string
     branchNameOverride?: string
@@ -5909,6 +5911,7 @@ export class OrcaRuntimeService {
 
     const worktreeId = `${repo.id}::${created.path}`
     const now = Date.now()
+    const repoIds = normalizeWorktreeRepoIds(repo.id, args.repoIds)
     const displayNameMeta = requestedDisplayName
       ? { displayName: requestedDisplayName }
       : shouldSetDisplayName(requestedName, branchName, sanitizedName)
@@ -5925,6 +5928,7 @@ export class OrcaRuntimeService {
       // push it down before the user has had a chance to notice it. Smart-sort
       // uses max(lastActivityAt, createdAt + CREATE_GRACE_MS).
       createdAt: now,
+      ...(repoIds.length > 1 ? { repoIds } : {}),
       ...displayNameMeta,
       baseRef: baseBranch,
       ...(configuredPushTarget ? { pushTarget: configuredPushTarget } : {}),
@@ -6134,6 +6138,7 @@ export class OrcaRuntimeService {
     repo: Repo,
     args: {
       name: string
+      repoIds?: string[]
       baseBranch?: string
       branchNameOverride?: string
       linkedIssue?: number | null
@@ -6164,6 +6169,7 @@ export class OrcaRuntimeService {
     const result = await createRemoteWorktree(
       {
         repoId: repo.id,
+        ...(args.repoIds ? { repoIds: args.repoIds } : {}),
         name: args.name,
         ...(args.displayName ? { displayName: args.displayName } : {}),
         ...(args.baseBranch ? { baseBranch: args.baseBranch } : {}),

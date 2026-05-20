@@ -30,6 +30,7 @@ import SparseCheckoutPresetSelect from '@/components/sparse/SparseCheckoutPreset
 import SmartWorkspaceNameField, {
   type SmartWorkspaceNameSelection
 } from '@/components/new-workspace/SmartWorkspaceNameField'
+import WorkspaceRepoPillSelect from '@/components/new-workspace/WorkspaceRepoPillSelect'
 import type { SetupConfig } from '@/lib/new-workspace'
 import type { WorkspaceCreateErrorDisplay } from '@/lib/workspace-create-error-format'
 import type { SshConnectionStatus } from '../../../shared/ssh-types'
@@ -46,7 +47,10 @@ type NewWorkspaceComposerCardProps = {
   onQuickAgentChange: (agent: TuiAgent | null) => void
   eligibleRepos: RepoOption[]
   repoId: string
+  repoIds: string[]
   onRepoChange: (value: string) => void
+  onRepoIdsChange: (value: string[]) => void
+  multiRepoSelectionEnabled: boolean
   name: string
   onNameValueChange: (value: string) => void
   onSmartGitHubItemSelect: (item: GitHubWorkItem) => void
@@ -208,7 +212,10 @@ export default function NewWorkspaceComposerCard({
   onQuickAgentChange,
   eligibleRepos,
   repoId,
+  repoIds,
   onRepoChange,
+  onRepoIdsChange,
+  multiRepoSelectionEnabled,
   name,
   onNameValueChange,
   onSmartGitHubItemSelect,
@@ -305,7 +312,16 @@ export default function NewWorkspaceComposerCard({
       <div className="min-w-0 space-y-4 pt-3">
         <div className="space-y-1">
           <div className="flex items-center justify-between gap-2">
-            <label className="text-xs font-medium text-muted-foreground">Project</label>
+            <div className="flex items-center gap-1.5">
+              <label className="text-xs font-medium text-muted-foreground">
+                {multiRepoSelectionEnabled ? 'Projects' : 'Project'}
+              </label>
+              {multiRepoSelectionEnabled ? (
+                <span className="rounded-full border border-border bg-muted/45 px-1.5 py-0.5 text-[9px] font-medium uppercase leading-none text-muted-foreground">
+                  experimental
+                </span>
+              ) : null}
+            </div>
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -324,21 +340,30 @@ export default function NewWorkspaceComposerCard({
               </TooltipContent>
             </Tooltip>
           </div>
-          <RepoCombobox
-            repos={eligibleRepos}
-            value={repoId}
-            onValueChange={onRepoChange}
-            onValueSelected={focusNameInput}
-            placeholder="Choose project"
-            // Why: programmatic .focus() from the Dialog's onOpenAutoFocus
-            // handler does not reliably trigger :focus-visible in Chromium.
-            // Mirror the Input component's standard ring (border-ring +
-            // ring-ring/50, 3px) onto :focus so the autofocused repo trigger
-            // paints the familiar field ring instead of leaving no visible
-            // focus state.
-            triggerClassName="h-9 w-full border-input text-sm focus:border-ring focus:ring-[3px] focus:ring-ring/50"
-            showStandaloneAddButton={false}
-          />
+          {multiRepoSelectionEnabled ? (
+            <WorkspaceRepoPillSelect
+              repos={eligibleRepos}
+              value={repoIds}
+              onValueChange={onRepoIdsChange}
+              placeholder="Choose projects"
+            />
+          ) : (
+            <RepoCombobox
+              repos={eligibleRepos}
+              value={repoId}
+              onValueChange={onRepoChange}
+              onValueSelected={focusNameInput}
+              placeholder="Choose project"
+              // Why: programmatic .focus() from the Dialog's onOpenAutoFocus
+              // handler does not reliably trigger :focus-visible in Chromium.
+              // Mirror the Input component's standard ring (border-ring +
+              // ring-ring/50, 3px) onto :focus so the autofocused repo trigger
+              // paints the familiar field ring instead of leaving no visible
+              // focus state.
+              triggerClassName="h-9 w-full border-input text-sm focus:border-ring focus:ring-[3px] focus:ring-ring/50"
+              showStandaloneAddButton={false}
+            />
+          )}
           {selectedRepoRequiresConnection && selectedRepoConnectionId ? (
             <div
               role="status"

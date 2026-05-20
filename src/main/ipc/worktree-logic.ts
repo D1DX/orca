@@ -1,6 +1,7 @@
 import { basename, join, resolve, relative, isAbsolute, posix, win32 } from 'path'
 import type { GitWorktreeInfo, Worktree, WorktreeMeta } from '../../shared/types'
 import { splitWorktreeId } from '../../shared/worktree-id'
+import { normalizeWorktreeRepoIds } from '../../shared/worktree-repo-ids'
 import { DEFAULT_WORKSPACE_STATUS_ID } from '../../shared/workspace-statuses'
 import { getWslHome, parseWslPath } from '../wsl'
 
@@ -174,10 +175,12 @@ export function mergeWorktree(
   defaultDisplayName?: string
 ): Worktree {
   const branchShort = git.branch.replace(/^refs\/heads\//, '')
+  const repoIds = normalizeWorktreeRepoIds(repoId, meta?.repoIds)
   return {
     id: `${repoId}::${git.path}`,
     ...(meta?.instanceId !== undefined ? { instanceId: meta.instanceId } : {}),
     repoId,
+    ...(repoIds.length > 1 ? { repoIds } : {}),
     path: git.path,
     head: git.head,
     branch: git.branch,

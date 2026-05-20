@@ -67,6 +67,7 @@ function areWorktreesEqual(current: Worktree[] | undefined, next: Worktree[]): b
       worktree.id === candidate.id &&
       worktree.instanceId === candidate.instanceId &&
       worktree.repoId === candidate.repoId &&
+      arraysShallowEqual(worktree.repoIds, candidate.repoIds) &&
       worktree.path === candidate.path &&
       worktree.head === candidate.head &&
       worktree.branch === candidate.branch &&
@@ -613,7 +614,8 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
     createdWithAgent,
     linkedLinearIssue,
     branchNameOverride,
-    workspaceStatus
+    workspaceStatus,
+    repoIds
   ) => {
     const retryableConflictPatterns = [
       /already exists locally/i,
@@ -649,7 +651,8 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
             ...(pushTarget ? { pushTarget } : {}),
             ...(createdWithAgent ? { createdWithAgent } : {}),
             ...(linkedLinearIssue !== undefined ? { linkedLinearIssue } : {}),
-            ...(workspaceStatus !== undefined ? { workspaceStatus } : {})
+            ...(workspaceStatus !== undefined ? { workspaceStatus } : {}),
+            ...(repoIds && repoIds.length > 1 ? { repoIds } : {})
           }
           const target = getActiveRuntimeTarget(get().settings)
           const result =
@@ -673,7 +676,8 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
                     ...(pushTarget ? { pushTarget } : {}),
                     ...(createdWithAgent ? { createdWithAgent } : {}),
                     ...(linkedLinearIssue !== undefined ? { linkedLinearIssue } : {}),
-                    ...(workspaceStatus !== undefined ? { workspaceStatus } : {})
+                    ...(workspaceStatus !== undefined ? { workspaceStatus } : {}),
+                    ...(repoIds && repoIds.length > 1 ? { repoIds } : {})
                   },
                   { timeoutMs: 10 * 60_000 }
                 )

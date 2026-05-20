@@ -35,6 +35,7 @@ const WorktreeCreate = z
       .unknown()
       .transform((v) => (typeof v === 'string' ? v : ''))
       .pipe(z.string().min(1, 'Missing repo selector')),
+    repoIds: z.array(z.string()).optional(),
     name: OptionalString,
     baseBranch: OptionalString,
     branchNameOverride: OptionalString,
@@ -96,6 +97,7 @@ const WorktreeCreate = z
   })
 
 const WorktreeSet = WorktreeSelector.extend({
+  repoIds: z.array(z.string()).optional(),
   displayName: OptionalString,
   // Why: empty comments are meaningful metadata updates, so use the plain
   // string parser instead of OptionalString's empty-as-undefined behavior.
@@ -190,6 +192,7 @@ export const WORKTREE_METHODS: RpcMethod[] = [
     handler: async (params, { runtime }) =>
       runtime.createManagedWorktree({
         repoSelector: params.repo,
+        repoIds: params.repoIds,
         name: params.name ?? '',
         baseBranch: params.baseBranch,
         branchNameOverride: params.branchNameOverride,
@@ -220,6 +223,7 @@ export const WORKTREE_METHODS: RpcMethod[] = [
     params: WorktreeSet,
     handler: async (params, { runtime }) => ({
       worktree: await runtime.updateManagedWorktreeMeta(params.worktree, {
+        repoIds: params.repoIds,
         displayName: params.displayName,
         linkedIssue: params.linkedIssue,
         linkedPR: params.linkedPR,

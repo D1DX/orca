@@ -252,6 +252,28 @@ describe('mergeWorktree', () => {
     })
   })
 
+  it('normalizes persisted repo associations', () => {
+    const result = mergeWorktree('repo1', baseGit, {
+      displayName: '',
+      comment: '',
+      linkedIssue: null,
+      linkedPR: null,
+      linkedLinearIssue: null,
+      linkedGitLabMR: null,
+      linkedGitLabIssue: null,
+      repoIds: ['repo2', 'repo1', 'repo3', 'repo2'],
+      isArchived: false,
+      isUnread: false,
+      isPinned: false,
+      sortOrder: 0,
+      lastActivityAt: 0,
+      workspaceStatus: 'in-progress',
+      diffComments: []
+    })
+
+    expect(result.repoIds).toEqual(['repo1', 'repo2', 'repo3'])
+  })
+
   it('uses defaults when metadata is undefined', () => {
     const result = mergeWorktree('repo1', baseGit, undefined)
     expect(result.displayName).toBe('feature-x')

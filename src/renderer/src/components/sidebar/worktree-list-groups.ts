@@ -20,6 +20,7 @@ import {
   ConductorReviewIcon
 } from './workspace-status-icons'
 import { cloneDefaultWorkspaceStatuses } from '../../../../shared/workspace-statuses'
+import { getWorktreeRepoGroupKey, getWorktreeRepoIds } from '../../../../shared/worktree-repo-ids'
 import type { SortBy } from './smart-sort'
 
 export { branchName }
@@ -41,12 +42,14 @@ export type GroupHeaderRow = {
   tone: string
   icon?: React.ComponentType<{ className?: string }>
   repo?: Repo
+  repos?: Repo[]
 }
 
 export type WorktreeRow = {
   type: 'item'
   worktree: Worktree
   repo: Repo | undefined
+  repos: Repo[]
   depth: number
   lineageTrail: boolean[]
   isLastLineageChild: boolean
@@ -204,6 +207,41 @@ function emitPinnedGroup(
   return new Set(pinned.map((w) => w.id))
 }
 
+function getAssociatedRepos(worktree: Worktree, repoMap: Map<string, Repo>): Repo[] {
+  return getWorktreeRepoIds(worktree)
+    .map((repoId) => repoMap.get(repoId))
+    .filter((repo): repo is Repo => repo !== undefined)
+}
+
+function getCanonicalAssociatedRepos(
+  worktree: Worktree,
+  repoMap: Map<string, Repo>,
+  repoOrder?: Map<string, number>
+): Repo[] {
+  const repos = getAssociatedRepos(worktree, repoMap)
+
+  if (repos.length <= 1) {
+    return repos
+  }
+
+  return [...repos].sort((a, b) => {
+    const aRank = repoOrder?.get(a.id) ?? Number.POSITIVE_INFINITY
+    const bRank = repoOrder?.get(b.id) ?? Number.POSITIVE_INFINITY
+    if (aRank !== bRank) {
+      return aRank - bRank
+    }
+    return a.displayName.localeCompare(b.displayName)
+  })
+}
+
+function buildRepoGroupKey(worktree: Worktree, repoMap: Map<string, Repo>): string {
+  const knownRepoIds = getWorktreeRepoIds(worktree).filter((repoId) => repoMap.has(repoId))
+  return getWorktreeRepoGroupKey({
+    repoId: knownRepoIds[0] ?? worktree.repoId,
+    repoIds: knownRepoIds.length > 0 ? knownRepoIds : [worktree.repoId]
+  })
+}
+
 function buildWorktreeRow(
   worktree: Worktree,
   repoMap: Map<string, Repo>,
@@ -217,6 +255,7 @@ function buildWorktreeRow(
     type: 'item',
     worktree,
     repo: repoMap.get(worktree.repoId),
+    repos: getAssociatedRepos(worktree, repoMap),
     depth,
     lineageTrail,
     isLastLineageChild,
@@ -363,15 +402,20 @@ export function buildRows(
     return result
   }
 
-  const grouped = new Map<string, { label: string; items: Worktree[]; repo?: Repo }>()
+  const grouped = new Map<
+    string,
+    { label: string; items: Worktree[]; repo?: Repo; repos?: Repo[] }
+  >()
   for (const w of unpinned) {
     let key: string
     let label: string
     let repo: Repo | undefined
+    let repos: Repo[] | undefined
     if (groupBy === 'repo') {
-      repo = repoMap.get(w.repoId)
-      key = `repo:${w.repoId}`
-      label = repo?.displayName ?? 'Unknown'
+      repos = getCanonicalAssociatedRepos(w, repoMap, repoOrder)
+      repo = repos.length === 1 ? repos[0] : undefined
+      key = buildRepoGroupKey(w, repoMap)
+      label = repos.length > 0 ? repos.map((entry) => entry.displayName).join(' + ') : 'Unknown'
     } else if (groupBy === 'workspace-status') {
       const workspaceStatus = getWorkspaceStatus(w, workspaceStatuses)
       key = getWorkspaceStatusGroupKey(workspaceStatus)
@@ -383,12 +427,15 @@ export function buildRows(
       label = PR_GROUP_META[prGroup].label
     }
     if (!grouped.has(key)) {
-      grouped.set(key, { label, items: [], repo })
+      grouped.set(key, { label, items: [], repo, repos })
     }
     grouped.get(key)!.items.push(w)
   }
 
-  const orderedGroups: [string, { label: string; items: Worktree[]; repo?: Repo }][] = []
+  const orderedGroups: [
+    string,
+    { label: string; items: Worktree[]; repo?: Repo; repos?: Repo[] }
+  ][] = []
   if (groupBy === 'pr-status') {
     for (const prGroup of PR_GROUP_ORDER) {
       const key = `pr:${prGroup}`
@@ -413,14 +460,14 @@ export function buildRows(
     // order so repo-header drag has a stable source of truth.
     const entries = Array.from(grouped.entries())
     if (repoGroupOrdering === 'manual' && repoOrder) {
-      const rankFor = (key: string): number => {
-        const repoId = key.startsWith('repo:') ? key.slice('repo:'.length) : key
-        const rank = repoOrder.get(repoId)
+      const rankFor = (group: { repo?: Repo; repos?: Repo[] }): number => {
+        const repoId = group.repo?.id ?? group.repos?.[0]?.id
+        const rank = repoId ? repoOrder.get(repoId) : undefined
         return rank === undefined ? Number.POSITIVE_INFINITY : rank
       }
       entries.sort((a, b) => {
-        const ra = rankFor(a[0])
-        const rb = rankFor(b[0])
+        const ra = rankFor(a[1])
+        const rb = rankFor(b[1])
         if (ra !== rb) {
           return ra - rb
         }
@@ -442,7 +489,8 @@ export function buildRows(
             count: group.items.length,
             tone: REPO_GROUP_META.tone,
             icon: REPO_GROUP_META.icon,
-            repo
+            repo,
+            repos: group.repos
           }
         : groupBy === 'workspace-status'
           ? (() => {
@@ -500,7 +548,7 @@ export function getGroupKeyForWorktree(
     return getWorkspaceStatusGroupKey(getWorkspaceStatus(worktree, workspaceStatuses))
   }
   if (groupBy === 'repo') {
-    return `repo:${worktree.repoId}`
+    return buildRepoGroupKey(worktree, repoMap)
   }
   return `pr:${getPRGroupKey(worktree, repoMap, prCache)}`
 }

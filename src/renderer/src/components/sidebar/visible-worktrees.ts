@@ -4,6 +4,7 @@ import { tabHasLivePty } from '@/lib/tab-has-live-pty'
 import { isWebTerminalSurfaceTabId } from '@/runtime/web-terminal-surface-id'
 import { useAppStore } from '@/store'
 import { getAllWorktreesFromState, getRepoMapFromState } from '@/store/selectors'
+import { getWorktreeRepoIds } from '../../../../shared/worktree-repo-ids'
 
 /**
  * Whether a worktree represents the repo's default-branch row that the
@@ -109,7 +110,7 @@ export function computeVisibleWorktreeIds(
   // Filter by repo
   if (opts.filterRepoIds.length > 0) {
     const selectedRepoIds = new Set(opts.filterRepoIds)
-    all = all.filter((w) => selectedRepoIds.has(w.repoId))
+    all = all.filter((w) => getWorktreeRepoIds(w).some((repoId) => selectedRepoIds.has(repoId)))
   }
 
   // Filter active only

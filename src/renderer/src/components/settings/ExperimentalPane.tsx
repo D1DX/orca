@@ -27,6 +27,9 @@ export function ExperimentalPane({
   const showWorktreeSymlinks = matchesSettingsSearch(searchQuery, [
     EXPERIMENTAL_SEARCH_ENTRY.symlinks
   ])
+  const showMultiRepoWorkspaces = matchesSettingsSearch(searchQuery, [
+    EXPERIMENTAL_SEARCH_ENTRY.multiRepoWorkspaces
+  ])
 
   return (
     <div className="space-y-4">
@@ -139,6 +142,46 @@ export function ExperimentalPane({
               <span
                 className={`inline-block h-3.5 w-3.5 transform rounded-full bg-background shadow-sm transition-transform ${
                   settings.experimentalWorktreeSymlinks ? 'translate-x-4' : 'translate-x-0.5'
+                }`}
+              />
+            </button>
+          </div>
+        </SearchableSetting>
+      ) : null}
+
+      {showMultiRepoWorkspaces ? (
+        <SearchableSetting
+          title="Multi-repo workspaces"
+          description="Associate one workspace with multiple repos for sidebar organization."
+          keywords={EXPERIMENTAL_SEARCH_ENTRY.multiRepoWorkspaces.keywords}
+          className="space-y-3 px-1 py-2"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0 shrink space-y-0.5">
+              <Label>Multi-repo workspaces</Label>
+              <p className="text-xs text-muted-foreground">
+                Adds an ordered project picker to the new workspace dialog. The first project is
+                used for the worktree location; the rest organize sidebar badges and repo groups.
+              </p>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={settings.experimentalMultiRepoWorkspaces}
+              onClick={() =>
+                updateSettings({
+                  experimentalMultiRepoWorkspaces: !settings.experimentalMultiRepoWorkspaces
+                })
+              }
+              className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-transparent transition-colors ${
+                settings.experimentalMultiRepoWorkspaces
+                  ? 'bg-foreground'
+                  : 'bg-muted-foreground/30'
+              }`}
+            >
+              <span
+                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-background shadow-sm transition-transform ${
+                  settings.experimentalMultiRepoWorkspaces ? 'translate-x-4' : 'translate-x-0.5'
                 }`}
               />
             </button>

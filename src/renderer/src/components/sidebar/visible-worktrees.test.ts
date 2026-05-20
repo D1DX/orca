@@ -259,6 +259,22 @@ describe('computeVisibleWorktreeIds', () => {
     expect(result).toEqual([feature2.id])
   })
 
+  it('keeps multi-repo workspaces visible when filtering by a secondary repo', () => {
+    const multiRepo = makeWorktree('multi-repo', 'repo1')
+    multiRepo.repoIds = ['repo1', 'repo2']
+    const repo1Only = makeWorktree('repo1-only', 'repo1')
+
+    const result = computeVisibleWorktreeIds(
+      { repo1: [multiRepo, repo1Only] },
+      [multiRepo.id, repo1Only.id],
+      visibleOptions({
+        filterRepoIds: ['repo2']
+      })
+    )
+
+    expect(result).toEqual([multiRepo.id])
+  })
+
   it('includes valid lineage parents even when another filter would hide the parent', () => {
     const parent = makeWorktree('parent')
     const child = makeWorktree('child')

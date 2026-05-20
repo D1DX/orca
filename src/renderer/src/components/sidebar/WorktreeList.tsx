@@ -1169,6 +1169,8 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                 firstHeaderIndex
               })
               const isRepoHeader = groupBy === 'repo' && row.repo !== undefined
+              const repoHeaderRepos =
+                groupBy === 'repo' ? (row.repos ?? (row.repo ? [row.repo] : [])) : []
               const repoIdForHeader = isRepoHeader ? row.repo!.id : undefined
               const isDraggingThis =
                 canReorderRepoHeaders &&
@@ -1234,7 +1236,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                       // headers keep their spacer measured while the painted
                       // header stays flush to the scrollport top.
                       isActiveStickyHeader && hasHeaderTopSpacing && '-translate-y-2',
-                      row.repo && 'overflow-hidden'
+                      repoHeaderRepos.length > 0 && 'overflow-hidden'
                     )}
                     onDragOver={
                       isPinnedHeader
@@ -1272,18 +1274,35 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                         }
                         className={cn(
                           'flex size-4 shrink-0 items-center justify-center rounded-[4px]',
-                          row.repo ? 'text-muted-foreground' : row.tone
+                          repoHeaderRepos.length > 0 ? 'text-muted-foreground' : row.tone
                         )}
                       >
-                        <row.icon className={row.repo ? 'size-3.5' : 'size-3'} />
+                        <row.icon className={repoHeaderRepos.length > 0 ? 'size-3.5' : 'size-3'} />
                       </div>
                     ) : null}
 
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-1.5">
-                        <div className="truncate text-[13px] font-semibold leading-none">
-                          {row.label}
-                        </div>
+                        {repoHeaderRepos.length > 0 ? (
+                          <div className="flex min-w-0 items-center gap-1 overflow-hidden">
+                            {repoHeaderRepos.map((repo) => (
+                              <span
+                                key={repo.id}
+                                className="inline-flex min-w-0 max-w-[7rem] items-center gap-1.5 rounded-[4px] border border-sidebar-border bg-sidebar-accent/55 px-1.5 py-0.5 text-[11px] font-semibold leading-none text-sidebar-foreground"
+                              >
+                                <span
+                                  className="size-1.5 shrink-0 rounded-full"
+                                  style={{ backgroundColor: repo.badgeColor }}
+                                />
+                                <span className="truncate lowercase">{repo.displayName}</span>
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="truncate text-[13px] font-semibold leading-none">
+                            {row.label}
+                          </div>
+                        )}
                         <div className="rounded-full bg-black/12 px-1.5 py-0.5 text-[9px] font-medium leading-none text-muted-foreground/90">
                           {row.count}
                         </div>
@@ -1428,6 +1447,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                   <WorktreeCard
                     worktree={itemRow.worktree}
                     repo={itemRow.repo}
+                    repos={itemRow.repos}
                     isActive={activeWorktreeId === itemRow.worktree.id}
                     // Why: a child-active parent should look active without
                     // running active-card side effects such as SSH reconnect UI.
@@ -1506,17 +1526,22 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                           {child.worktree.displayName}
                         </div>
                         <div className="mt-1 flex min-w-0 items-center gap-1.5">
-                          {child.repo && groupBy !== 'repo' ? (
-                            <span className="flex h-[16px] shrink-0 items-center gap-1.5 rounded-[4px] border border-border bg-accent px-1.5 text-[10px] font-semibold leading-none text-foreground dark:bg-accent/50 dark:border-border/60">
-                              <span
-                                className="size-1.5 rounded-full"
-                                style={{ backgroundColor: child.repo.badgeColor }}
-                              />
-                              <span className="max-w-[6rem] truncate lowercase">
-                                {child.repo.displayName}
-                              </span>
-                            </span>
-                          ) : null}
+                          {child.repos.length > 0 && (groupBy !== 'repo' || child.repos.length > 1)
+                            ? child.repos.map((repo) => (
+                                <span
+                                  key={repo.id}
+                                  className="flex h-[16px] shrink-0 items-center gap-1.5 rounded-[4px] border border-border bg-accent px-1.5 text-[10px] font-semibold leading-none text-foreground dark:bg-accent/50 dark:border-border/60"
+                                >
+                                  <span
+                                    className="size-1.5 rounded-full"
+                                    style={{ backgroundColor: repo.badgeColor }}
+                                  />
+                                  <span className="max-w-[6rem] truncate lowercase">
+                                    {repo.displayName}
+                                  </span>
+                                </span>
+                              ))
+                            : null}
                           <span className="truncate text-[10.5px] leading-none text-muted-foreground">
                             {branchDisplayName(child.worktree.branch)}
                           </span>

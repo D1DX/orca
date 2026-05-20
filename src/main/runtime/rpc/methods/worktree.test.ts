@@ -19,6 +19,7 @@ describe('worktree RPC methods', () => {
     await dispatcher.dispatch(
       makeRequest('worktree.create', {
         repo: 'repo-1',
+        repoIds: ['repo-1', 'repo-2'],
         name: 'feature',
         branchNameOverride: 'feature/something',
         baseBranch: 'origin/main',
@@ -35,6 +36,7 @@ describe('worktree RPC methods', () => {
 
     expect(runtime.createManagedWorktree).toHaveBeenCalledWith({
       repoSelector: 'repo-1',
+      repoIds: ['repo-1', 'repo-2'],
       name: 'feature',
       branchNameOverride: 'feature/something',
       baseBranch: 'origin/main',

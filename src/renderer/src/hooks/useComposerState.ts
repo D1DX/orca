@@ -33,6 +33,7 @@ import type {
   WorkspaceCreateTelemetrySource
 } from '../../../shared/types'
 import { isWorkspaceStatusId } from '../../../shared/workspace-statuses'
+import { normalizeWorktreeRepoIds } from '../../../shared/worktree-repo-ids'
 import {
   ADD_ATTACHMENT_SHORTCUT,
   CLIENT_PLATFORM,
@@ -114,7 +115,10 @@ export type UseComposerStateOptions = {
 export type ComposerCardProps = {
   eligibleRepos: ReturnType<typeof useAppStore.getState>['repos']
   repoId: string
+  repoIds: string[]
   onRepoChange: (value: string) => void
+  onRepoIdsChange: (value: string[]) => void
+  multiRepoSelectionEnabled: boolean
   name: string
   onNameValueChange: (value: string) => void
   onSmartGitHubItemSelect: (item: GitHubWorkItem) => void
@@ -302,7 +306,20 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
           : (eligibleRepos[0]?.id ?? '')
 
   const [internalRepoId, setInternalRepoId] = useState<string>(resolvedInitialRepoId)
+  const [associatedRepoIds, setAssociatedRepoIds] = useState<string[]>([resolvedInitialRepoId])
   const repoId = repoIdOverride ?? internalRepoId
+  const multiRepoSelectionEnabled =
+    settings?.experimentalMultiRepoWorkspaces === true && !repoIdOverride
+  const selectedRepoIds = useMemo(() => {
+    if (!multiRepoSelectionEnabled) {
+      return repoId ? [repoId] : []
+    }
+    const eligibleRepoIds = new Set(eligibleRepos.map((repo) => repo.id))
+    const normalized = normalizeWorktreeRepoIds(repoId, associatedRepoIds).filter((id) =>
+      eligibleRepoIds.has(id)
+    )
+    return normalized.length > 0 ? normalized : repoId ? [repoId] : []
+  }, [associatedRepoIds, eligibleRepos, multiRepoSelectionEnabled, repoId])
   const selectedRepo = eligibleRepos.find((repo) => repo.id === repoId)
   const selectedRepoConnectionId = selectedRepo?.connectionId ?? null
   const selectedRepoSshState = selectedRepoConnectionId
@@ -747,6 +764,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
   useEffect(() => {
     if (!repoId && eligibleRepos[0]?.id) {
       setRepoId(eligibleRepos[0].id)
+      setAssociatedRepoIds([eligibleRepos[0].id])
     }
   }, [eligibleRepos, repoId, setRepoId])
 
@@ -1344,7 +1362,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     [handleAddAttachment]
   )
 
-  const handleRepoChange = useCallback(
+  const applyPrimaryRepoChange = useCallback(
     (value: string): void => {
       if (value === repoId) {
         setRepoId(value)
@@ -1383,6 +1401,30 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       setStartFromResetHint(hint)
     },
     [baseBranch, linkedWorkItem, repoId, setRepoId]
+  )
+
+  const handleRepoChange = useCallback(
+    (value: string): void => {
+      applyPrimaryRepoChange(value)
+      setAssociatedRepoIds(value ? [value] : [])
+    },
+    [applyPrimaryRepoChange]
+  )
+
+  const handleRepoIdsChange = useCallback(
+    (values: string[]): void => {
+      const eligibleRepoIds = new Set(eligibleRepos.map((repo) => repo.id))
+      const normalized = values.filter((repoId, index) => {
+        return eligibleRepoIds.has(repoId) && values.indexOf(repoId) === index
+      })
+      const nextPrimaryRepoId = normalized[0]
+      if (!nextPrimaryRepoId) {
+        return
+      }
+      applyPrimaryRepoChange(nextPrimaryRepoId)
+      setAssociatedRepoIds(normalized)
+    },
+    [applyPrimaryRepoChange, eligibleRepos]
   )
 
   const handleSparseSelectPreset = useCallback((preset: SparsePreset | null): void => {
@@ -1713,7 +1755,8 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         tuiAgent,
         linkedLinearIssue,
         effectiveBranchNameOverride,
-        resolvedInitialWorkspaceStatus
+        resolvedInitialWorkspaceStatus,
+        selectedRepoIds
       )
       const worktree = result.worktree
 
@@ -1813,6 +1856,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     resolvedSetupDecision,
     resolvedInitialWorkspaceStatus,
     selectedRepo,
+    selectedRepoIds,
     selectedRepoRequiresConnection,
     settings?.agentCmdOverrides,
     settings?.rightSidebarOpenByDefault,
@@ -1911,7 +1955,8 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
           agent ?? undefined,
           linkedLinearIssue,
           effectiveBranchNameOverride,
-          resolvedInitialWorkspaceStatus
+          resolvedInitialWorkspaceStatus,
+          selectedRepoIds
         )
         const worktree = result.worktree
 
@@ -2054,6 +2099,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       resolvedSetupDecision,
       resolvedInitialWorkspaceStatus,
       selectedRepo,
+      selectedRepoIds,
       selectedRepoRequiresConnection,
       settings?.agentCmdOverrides,
       settings?.rightSidebarOpenByDefault,
@@ -2092,7 +2138,10 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
   const cardProps: ComposerCardProps = {
     eligibleRepos,
     repoId,
+    repoIds: selectedRepoIds,
     onRepoChange: handleRepoChange,
+    onRepoIdsChange: handleRepoIdsChange,
+    multiRepoSelectionEnabled,
     name,
     onNameValueChange: handleNameValueChange,
     onSmartGitHubItemSelect: handleSmartGitHubItemSelect,

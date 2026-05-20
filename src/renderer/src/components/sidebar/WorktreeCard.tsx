@@ -37,6 +37,7 @@ import { getWorktreeCardPrDisplay } from './worktree-card-pr-display'
 type WorktreeCardProps = {
   worktree: Worktree
   repo: Repo | undefined
+  repos?: readonly Repo[]
   isActive: boolean
   isActiveSurface?: boolean
   isMultiSelected?: boolean
@@ -64,6 +65,7 @@ function isWebClient(): boolean {
 const WorktreeCard = React.memo(function WorktreeCard({
   worktree,
   repo,
+  repos,
   isActive,
   isActiveSurface = isActive,
   isMultiSelected = false,
@@ -145,6 +147,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
   )
 
   const branch = branchDisplayName(worktree.branch)
+  const associatedRepos = repos && repos.length > 0 ? repos : repo ? [repo] : []
   const isFolder = repo ? isFolderRepo(repo) : false
   const hostedReviewCacheKey =
     repo && branch ? getHostedReviewCacheKey(repo.path, branch, settings, repo.id) : ''
@@ -545,17 +548,22 @@ const WorktreeCard = React.memo(function WorktreeCard({
              so long lineage labels truncate instead of painting underneath icons. */}
         <div className="flex items-center gap-1.5 min-w-0">
           <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden">
-            {repo && !hideRepoBadge && (
-              <div className="flex items-center gap-1.5 shrink-0 px-1.5 py-0.5 rounded-[4px] bg-accent border border-border dark:bg-accent/50 dark:border-border/60">
-                <div
-                  className="size-1.5 rounded-full"
-                  style={{ backgroundColor: repo.badgeColor }}
-                />
-                <span className="text-[10px] font-semibold text-foreground truncate max-w-[6rem] leading-none lowercase">
-                  {repo.displayName}
-                </span>
-              </div>
-            )}
+            {associatedRepos.length > 0 && (!hideRepoBadge || associatedRepos.length > 1)
+              ? associatedRepos.map((associatedRepo) => (
+                  <div
+                    key={associatedRepo.id}
+                    className="flex shrink-0 items-center gap-1.5 rounded-[4px] border border-border bg-accent px-1.5 py-0.5 dark:bg-accent/50 dark:border-border/60"
+                  >
+                    <div
+                      className="size-1.5 rounded-full"
+                      style={{ backgroundColor: associatedRepo.badgeColor }}
+                    />
+                    <span className="max-w-[6rem] truncate text-[10px] font-semibold leading-none text-foreground lowercase">
+                      {associatedRepo.displayName}
+                    </span>
+                  </div>
+                ))
+              : null}
 
             {isFolder ? (
               <Badge

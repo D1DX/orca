@@ -148,6 +148,10 @@ export type Worktree = {
   id: string // `${repoId}::${path}`
   instanceId?: string
   repoId: string
+  /** Ordered repo associations for experimental multi-repo workspaces. The
+   *  first ID is the physical worktree repo and always matches `repoId`;
+   *  later IDs are organization-only secondary repos. */
+  repoIds?: string[]
   displayName: string
   comment: string
   linkedIssue: number | null
@@ -200,6 +204,8 @@ export type GitPushTarget = {
 export type WorktreeMeta = {
   /** Immutable per-workspace-instance ID used to reject stale lineage after path reuse. */
   instanceId?: string
+  /** See {@link Worktree.repoIds}. Persisted to orca-data.json. */
+  repoIds?: string[]
   displayName: string
   comment: string
   linkedIssue: number | null
@@ -1227,6 +1233,10 @@ export type SparsePreset = {
 
 export type CreateWorktreeArgs = {
   repoId: string
+  /** Ordered repo associations for experimental multi-repo workspaces. The
+   *  first ID must be the physical `repoId`; additional IDs are used only for
+   *  sidebar organization and badge display. */
+  repoIds?: string[]
   name: string
   /** Optional user-facing label to persist separately from the git-safe
    *  branch/path seed. Used when a workspace is created from a GitHub or
@@ -1737,6 +1747,10 @@ export type GlobalSettings = {
    *  configuration surface and edge cases (conflicts with existing paths,
    *  cleanup on worktree delete) are still being worked out. */
   experimentalWorktreeSymlinks: boolean
+  /** Experimental: allow the new workspace composer to associate a workspace
+   *  with multiple repos. Only the first repo determines the physical worktree
+   *  location; secondary repos are organizational metadata. */
+  experimentalMultiRepoWorkspaces: boolean
   /** Active non-local runtime environment for client-routed RPC. `null`
    *  preserves the current local desktop behavior. */
   activeRuntimeEnvironmentId?: string | null

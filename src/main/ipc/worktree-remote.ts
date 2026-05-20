@@ -24,6 +24,7 @@ import { listWorktrees, addWorktree, addSparseWorktree } from '../git/worktree'
 import { getGitUsername, getDefaultBaseRef, getBranchConflictKind } from '../git/repo'
 import { validateGitPushTarget } from '../git/push-target-validation'
 import { assertGitPushTargetShape } from '../../shared/git-push-target-validation'
+import { normalizeWorktreeRepoIds } from '../../shared/worktree-repo-ids'
 import { gitExecFileAsync } from '../git/runner'
 import { parseGitHubOwnerRepo } from '../github/gh-utils'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
@@ -516,6 +517,7 @@ export async function createRemoteWorktree(
       preparedPushTarget
     )
   }
+  const repoIds = normalizeWorktreeRepoIds(repo.id, args.repoIds)
   const metaUpdates: Partial<WorktreeMeta> = {
     // Why: path-derived worktree IDs can be reused after external deletion.
     // Fresh creations must rotate instance identity so stale lineage cannot
@@ -530,6 +532,7 @@ export async function createRemoteWorktree(
     // window elapses. See smart-sort.ts `CREATE_GRACE_MS`.
     createdAt: now,
     baseRef: baseBranch,
+    ...(repoIds.length > 1 ? { repoIds } : {}),
     ...(configuredPushTarget ? { pushTarget: configuredPushTarget } : {}),
     ...(requestedDisplayName
       ? { displayName: requestedDisplayName }
@@ -821,6 +824,7 @@ export async function createLocalWorktree(
 
   const worktreeId = `${repo.id}::${created.path}`
   const now = Date.now()
+  const repoIds = normalizeWorktreeRepoIds(repo.id, args.repoIds)
   const metaUpdates: Partial<WorktreeMeta> = {
     // Why: path-derived worktree IDs can be reused after external deletion.
     // Fresh creations must rotate instance identity so stale lineage cannot
@@ -834,6 +838,7 @@ export async function createLocalWorktree(
     // worktree from ambient PTY bumps in other worktrees for CREATE_GRACE_MS.
     createdAt: now,
     baseRef: baseBranch,
+    ...(repoIds.length > 1 ? { repoIds } : {}),
     ...(configuredPushTarget ? { pushTarget: configuredPushTarget } : {}),
     ...(requestedDisplayName
       ? { displayName: requestedDisplayName }

@@ -352,6 +352,51 @@ describe('buildRows repo grouping order', () => {
     const headerKeys = rows.filter((r) => r.type === 'header').map((r) => r.key)
     expect(headerKeys).toEqual(['repo:repo-b', 'repo:repo-a', 'repo:repo-c'])
   })
+
+  it('groups the same repo set together even when physical primary order differs', () => {
+    const repoOrder = new Map([
+      [repoA.id, 0],
+      [repoB.id, 1],
+      [repoC.id, 2]
+    ])
+    const wAB: Worktree = {
+      ...wA,
+      id: 'wt-ab',
+      repoId: repoA.id,
+      repoIds: [repoA.id, repoB.id]
+    }
+    const wBA: Worktree = {
+      ...wB,
+      id: 'wt-ba',
+      repoId: repoB.id,
+      repoIds: [repoB.id, repoA.id]
+    }
+
+    const rows = buildRows('repo', [wAB, wBA], map, null, new Set(), repoOrder)
+
+    expect(rows).toMatchObject([
+      {
+        type: 'header',
+        key: 'repo:repo-a+repo-b',
+        label: 'alpha + beta',
+        count: 2,
+        repos: [{ id: repoA.id }, { id: repoB.id }]
+      },
+      {
+        type: 'item',
+        worktree: { id: 'wt-ab', repoId: repoA.id },
+        repos: [{ id: repoA.id }, { id: repoB.id }]
+      },
+      {
+        type: 'item',
+        worktree: { id: 'wt-ba', repoId: repoB.id },
+        repos: [{ id: repoB.id }, { id: repoA.id }]
+      }
+    ])
+    expect(getGroupKeyForWorktree('repo', wAB, map, null)).toBe(
+      getGroupKeyForWorktree('repo', wBA, map, null)
+    )
+  })
 })
 
 describe('getRepoGroupOrdering', () => {

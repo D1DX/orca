@@ -7,6 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
 import { cn } from '@/lib/utils'
 import type { Repo, Worktree } from '../../../../shared/types'
+import { getWorktreeRepoIds } from '../../../../shared/worktree-repo-ids'
 import WorktreeCard from './WorktreeCard'
 import { WorktreeActivityStatusIndicator } from './WorktreeActivityStatusIndicator'
 import WorktreeContextMenu from './WorktreeContextMenu'
@@ -19,6 +20,7 @@ type WorkspaceKanbanCardProps = {
   isActive: boolean
   isSelected: boolean
   selectedWorktrees?: readonly Worktree[]
+  associatedRepos?: readonly Repo[]
   compact: boolean
   nativeDragEnabled?: boolean
   onActivate: () => void
@@ -41,11 +43,20 @@ function WorkspaceKanbanCard({
   onSelectionGesture,
   onContextMenuSelect
 }: WorkspaceKanbanCardProps): React.JSX.Element {
+  const allRepos = useAppStore((s) => s.repos)
+  const associatedRepos = useMemo(() => {
+    const repoMap = new Map(allRepos.map((entry) => [entry.id, entry]))
+    return getWorktreeRepoIds(worktree)
+      .map((repoId) => repoMap.get(repoId))
+      .filter((entry): entry is Repo => entry !== undefined)
+  }, [allRepos, worktree])
+
   if (compact) {
     return (
       <WorkspaceKanbanCompactCard
         worktree={worktree}
         repo={repo}
+        associatedRepos={associatedRepos}
         isActive={isActive}
         isSelected={isSelected}
         selectedWorktrees={selectedWorktrees}
@@ -80,6 +91,7 @@ function WorkspaceKanbanCard({
       <WorktreeCard
         worktree={worktree}
         repo={repo}
+        repos={associatedRepos}
         isActive={isActive}
         isMultiSelected={isSelected}
         selectedWorktrees={contextWorktrees}
@@ -97,6 +109,7 @@ export default React.memo(WorkspaceKanbanCard)
 function WorkspaceKanbanCompactCard({
   worktree,
   repo,
+  associatedRepos,
   isActive,
   isSelected,
   selectedWorktrees,
@@ -221,24 +234,27 @@ function WorkspaceKanbanCompactCard({
           >
             <WorktreeActivityStatusIndicator worktreeId={worktree.id} className="mr-1" />
             <span className="min-w-0 flex-1 truncate">{worktree.displayName}</span>
-            {repo ? (
+            {associatedRepos && associatedRepos.length > 0 ? (
               <Tooltip>
                 <TooltipTrigger asChild>
                   <span
                     className="ml-2 flex max-w-[25%] shrink-0 items-center gap-1 rounded-[4px] border border-border bg-accent px-1.5 py-0.5 leading-none dark:border-border/60 dark:bg-accent/50"
                     data-workspace-board-repo-badge=""
                   >
-                    <span
-                      className="size-1.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: repo.badgeColor }}
-                    />
+                    {associatedRepos.slice(0, 3).map((entry) => (
+                      <span
+                        key={entry.id}
+                        className="size-1.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: entry.badgeColor }}
+                      />
+                    ))}
                     <span className="min-w-0 truncate text-[10px] font-semibold lowercase text-foreground">
-                      {repo.displayName}
+                      {associatedRepos.map((entry) => entry.displayName).join(' + ')}
                     </span>
                   </span>
                 </TooltipTrigger>
                 <TooltipContent side="top" sideOffset={4}>
-                  {repo.displayName}
+                  {associatedRepos.map((entry) => entry.displayName).join(' + ')}
                 </TooltipContent>
               </Tooltip>
             ) : null}
@@ -253,6 +269,7 @@ function WorkspaceKanbanCompactCard({
           <WorktreeCard
             worktree={worktree}
             repo={repo}
+            repos={associatedRepos}
             isActive={isActive}
             onActivate={onActivate}
           />
