@@ -17,6 +17,7 @@ import { isPwshAvailable } from '../pwsh'
 import { LocalPtyProvider } from '../providers/local-pty-provider'
 import type { IPtyProvider, PtySpawnOptions, PtySpawnResult } from '../providers/types'
 import { SSH_SESSION_EXPIRED_ERROR, isSshPtyNotFoundError } from '../providers/ssh-pty-provider'
+import { toAppSshPtyId, toRelaySshPtyId } from '../providers/ssh-pty-id'
 import { mintPtySessionId, isSafePtySessionId } from '../daemon/pty-session-id'
 import { addNodePtyRecoveryHint } from '../daemon/node-pty-error-hints'
 import type { ClaudeRuntimeAuthPreparation } from '../claude-accounts/runtime-auth-service'
@@ -181,6 +182,14 @@ function getProviderForPty(ptyId: string): IPtyProvider {
   return getProvider(connectionId)
 }
 
+function getAppPtyId(connectionId: string | null | undefined, ptyId: string): string {
+  return connectionId ? toAppSshPtyId(connectionId, ptyId) : ptyId
+}
+
+function getRelayPtyId(connectionId: string | null | undefined, ptyId: string): string {
+  return connectionId ? toRelaySshPtyId(connectionId, ptyId) : ptyId
+}
+
 function tryGetProviderForPty(ptyId: string): IPtyProvider | undefined {
   try {
     return getProviderForPty(ptyId)
@@ -216,7 +225,7 @@ function finishPtyShutdown(
 ): void {
   clearProviderPtyState(id)
   if (connectionId) {
-    store?.markSshRemotePtyLease(connectionId, id, 'terminated')
+    store?.markSshRemotePtyLease(connectionId, getRelayPtyId(connectionId, id), 'terminated')
   }
   ptyOwnership.delete(id)
   markClaudePtyExited(id)
@@ -1164,6 +1173,14 @@ export function registerPtyHandlers(
       const isMintedSessionId = args.sessionId === undefined && isDaemonHostSpawn
       const effectiveSessionId =
         args.sessionId ?? (isDaemonHostSpawn ? mintPtySessionId(args.worktreeId) : undefined)
+      const effectiveSessionAppId =
+        effectiveSessionId !== undefined
+          ? getAppPtyId(args.connectionId, effectiveSessionId)
+          : undefined
+      const effectiveSessionRelayId =
+        effectiveSessionId !== undefined
+          ? getRelayPtyId(args.connectionId, effectiveSessionId)
+          : undefined
       // Why: the renderer sets pane env for SSH too. Only forward it to the
       // remote when the relay hook path is enabled; otherwise a newer relay
       // could emit statuses this Orca build is not prepared to route.
@@ -1319,7 +1336,10 @@ export function registerPtyHandlers(
         // Why: daemon PTYs can emit prompt/startup bytes before spawn()
         // resolves. Runtime headless snapshots need the real pane geometry
         // for those early bytes; otherwise they default to 80x24 and wrap TUIs.
-        ptySizes.set(effectiveSessionId, { cols: args.cols, rows: args.rows })
+        ptySizes.set(effectiveSessionAppId ?? effectiveSessionId, {
+          cols: args.cols,
+          rows: args.rows
+        })
       }
       if (process.platform === 'win32' && !args.connectionId) {
         // Why: the renderer only models PowerShell as one shell family. Thread
@@ -1339,21 +1359,23 @@ export function registerPtyHandlers(
       } catch (err) {
         const rawMessage = err instanceof Error ? err.message : String(err)
         const spawnError = normalizeNodePtySpawnError(err)
-        if (effectiveSessionId !== undefined) {
-          ptySizes.delete(effectiveSessionId)
+        if (effectiveSessionAppId !== undefined) {
+          ptySizes.delete(effectiveSessionAppId)
         }
         if (
           args.connectionId &&
-          effectiveSessionId !== undefined &&
+          effectiveSessionRelayId !== undefined &&
           (spawnError.message.includes(SSH_SESSION_EXPIRED_ERROR) ||
             rawMessage.includes(SSH_SESSION_EXPIRED_ERROR))
         ) {
           // Why: expired remote reattach means the relay has already dropped
           // the backing PTY. Clear the durable lease so later session writes
           // cannot restore the stale pane binding.
-          clearProviderPtyState(effectiveSessionId)
-          deletePtyOwnership(effectiveSessionId)
-          store?.markSshRemotePtyLease(args.connectionId, effectiveSessionId, 'expired')
+          if (effectiveSessionAppId !== undefined) {
+            clearProviderPtyState(effectiveSessionAppId)
+            deletePtyOwnership(effectiveSessionAppId)
+          }
+          store?.markSshRemotePtyLease(args.connectionId, effectiveSessionRelayId, 'expired')
         }
         // Why: when buildPtyHostEnv materialized a Pi overlay for this id
         // but provider.spawn failed, the overlay would leak.
@@ -1392,13 +1414,14 @@ export function registerPtyHandlers(
         }
       }
       ptyOwnership.set(result.id, args.connectionId ?? null)
+      const relayResultId = getRelayPtyId(args.connectionId, result.id)
       if (store && args.connectionId) {
         // Why: remote PTYs live in the SSH relay grace window after Orca
         // detaches. Persist their IDs immediately so reconnect can reattach
         // instead of treating the tab as a fresh shell.
         store.upsertSshRemotePtyLease({
           targetId: args.connectionId,
-          ptyId: result.id,
+          ptyId: relayResultId,
           ...(typeof args.worktreeId === 'string' ? { worktreeId: args.worktreeId } : {}),
           ...(typeof args.tabId === 'string' ? { tabId: args.tabId } : {}),
           ...(validatedLeafId ? { leafId: validatedLeafId } : {}),
@@ -1442,7 +1465,7 @@ export function registerPtyHandlers(
             deletePtyOwnership(result.id)
           }
           if (!result.isReattach && args.connectionId && store) {
-            store.removeSshRemotePtyLease(args.connectionId, result.id)
+            store.removeSshRemotePtyLease(args.connectionId, relayResultId)
           }
           throw new Error(createTerminalSessionStateSaveFailureMessage())
         }

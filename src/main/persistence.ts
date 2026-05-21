@@ -63,6 +63,7 @@ import {
   ONBOARDING_FINAL_STEP
 } from '../shared/constants'
 import { parseWorkspaceSession } from '../shared/workspace-session-schema'
+import { toRelaySshPtyId } from './providers/ssh-pty-id'
 import {
   isTerminalLeafId,
   makePaneKey,
@@ -2581,6 +2582,14 @@ export class Store {
     return !leases?.some((lease) => lease.state === 'terminated' || lease.state === 'expired')
   }
 
+  private getRelayPtyIdForSshLeaseBinding(targetId: string, ptyId: string): string {
+    try {
+      return toRelaySshPtyId(targetId, ptyId)
+    } catch {
+      return ptyId
+    }
+  }
+
   private sshRemotePtyLeaseMatchesBinding(
     lease: SshRemotePtyLease,
     binding: {
@@ -2591,7 +2600,8 @@ export class Store {
       leafId?: string
     }
   ): boolean {
-    if (lease.ptyId !== binding.ptyId) {
+    const bindingPtyId = this.getRelayPtyIdForSshLeaseBinding(lease.targetId, binding.ptyId)
+    if (lease.ptyId !== bindingPtyId) {
       return false
     }
     // Why: remote PTY ids are scoped to a relay target. Workspace PTY bindings
@@ -2635,7 +2645,8 @@ export class Store {
       leafId?: string
     }
   ): boolean {
-    if (lease.targetId !== binding.targetId || lease.ptyId !== binding.ptyId) {
+    const bindingPtyId = this.getRelayPtyIdForSshLeaseBinding(binding.targetId, binding.ptyId)
+    if (lease.targetId !== binding.targetId || lease.ptyId !== bindingPtyId) {
       return false
     }
     // Why: target removal is destructive. Legacy/contextless leases should

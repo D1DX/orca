@@ -22,6 +22,7 @@ function createMockMux(): MockMultiplexer {
 describe('SshPtyProvider', () => {
   let mux: MockMultiplexer
   let provider: SshPtyProvider
+  const scopedPty1 = 'ssh:conn-1@@pty-1'
 
   beforeEach(() => {
     mux = createMockMux()
@@ -44,7 +45,7 @@ describe('SshPtyProvider', () => {
         cwd: undefined,
         env: undefined
       })
-      expect(result).toEqual({ id: 'pty-1' })
+      expect(result).toEqual({ id: scopedPty1 })
     })
 
     it('passes cwd and env through', async () => {
@@ -77,7 +78,29 @@ describe('SshPtyProvider', () => {
         suppressReplayNotification: true
       })
       expect(result).toEqual({
+        id: 'ssh:conn-1@@pty-old',
+        isReattach: true,
+        replay: 'buffered-output'
+      })
+    })
+
+    it('reattaches scoped app ids using raw relay ids', async () => {
+      mux.request.mockResolvedValue({ replay: 'buffered-output' })
+
+      const result = await provider.spawn({
+        cols: 80,
+        rows: 24,
+        sessionId: 'ssh:conn-1@@pty-old'
+      })
+
+      expect(mux.request).toHaveBeenCalledWith('pty.attach', {
         id: 'pty-old',
+        cols: 80,
+        rows: 24,
+        suppressReplayNotification: true
+      })
+      expect(result).toEqual({
+        id: 'ssh:conn-1@@pty-old',
         isReattach: true,
         replay: 'buffered-output'
       })
@@ -111,12 +134,12 @@ describe('SshPtyProvider', () => {
   })
 
   it('attach sends pty.attach request', async () => {
-    await provider.attach('pty-1')
+    await provider.attach(scopedPty1)
     expect(mux.request).toHaveBeenCalledWith('pty.attach', { id: 'pty-1' })
   })
 
   it('write sends pty.data notification', () => {
-    provider.write('pty-1', 'hello')
+    provider.write(scopedPty1, 'hello')
     expect(mux.notify).toHaveBeenCalledWith('pty.data', { id: 'pty-1', data: 'hello' })
   })
 
@@ -180,7 +203,7 @@ describe('SshPtyProvider', () => {
     const processes = [{ id: 'pty-1', cwd: '/home', title: 'zsh' }]
     mux.request.mockResolvedValue(processes)
     const result = await provider.listProcesses()
-    expect(result).toEqual(processes)
+    expect(result).toEqual([{ id: scopedPty1, cwd: '/home', title: 'zsh' }])
   })
 
   it('getDefaultShell returns shell path', async () => {
@@ -198,7 +221,7 @@ describe('SshPtyProvider', () => {
       const notifHandler = mux.onNotification.mock.calls[0][0]
       notifHandler('pty.data', { id: 'pty-1', data: 'output' })
 
-      expect(handler).toHaveBeenCalledWith({ id: 'pty-1', data: 'output' })
+      expect(handler).toHaveBeenCalledWith({ id: scopedPty1, data: 'output' })
     })
 
     it('forwards pty.replay notifications to replay listeners', () => {
@@ -208,7 +231,7 @@ describe('SshPtyProvider', () => {
       const notifHandler = mux.onNotification.mock.calls[0][0]
       notifHandler('pty.replay', { id: 'pty-1', data: 'buffered output' })
 
-      expect(handler).toHaveBeenCalledWith({ id: 'pty-1', data: 'buffered output' })
+      expect(handler).toHaveBeenCalledWith({ id: scopedPty1, data: 'buffered output' })
     })
 
     it('forwards pty.exit notifications to exit listeners', () => {
@@ -218,7 +241,7 @@ describe('SshPtyProvider', () => {
       const notifHandler = mux.onNotification.mock.calls[0][0]
       notifHandler('pty.exit', { id: 'pty-1', code: 0 })
 
-      expect(handler).toHaveBeenCalledWith({ id: 'pty-1', code: 0 })
+      expect(handler).toHaveBeenCalledWith({ id: scopedPty1, code: 0 })
     })
 
     it('allows unsubscribing from events', () => {
@@ -243,6 +266,21 @@ describe('SshPtyProvider', () => {
 
       expect(handler1).toHaveBeenCalled()
       expect(handler2).toHaveBeenCalled()
+    })
+
+    it('namespaces identical relay ids from different SSH connections', () => {
+      const otherMux = createMockMux()
+      const otherProvider = new SshPtyProvider('conn-2', otherMux as never)
+      const firstHandler = vi.fn()
+      const secondHandler = vi.fn()
+      provider.onData(firstHandler)
+      otherProvider.onData(secondHandler)
+
+      mux.onNotification.mock.calls[0][0]('pty.data', { id: 'pty-1', data: 'first' })
+      otherMux.onNotification.mock.calls[0][0]('pty.data', { id: 'pty-1', data: 'second' })
+
+      expect(firstHandler).toHaveBeenCalledWith({ id: scopedPty1, data: 'first' })
+      expect(secondHandler).toHaveBeenCalledWith({ id: 'ssh:conn-2@@pty-1', data: 'second' })
     })
   })
 })
