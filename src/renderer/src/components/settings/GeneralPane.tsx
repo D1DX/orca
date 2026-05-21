@@ -219,13 +219,13 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
         <div className="space-y-1">
           <h3 className="text-sm font-semibold">Workspace</h3>
           <p className="text-xs text-muted-foreground">
-            Configure where new worktrees are created.
+            Configure where new workspaces are created.
           </p>
         </div>
 
         <SearchableSetting
           title="Workspace Directory"
-          description="Root directory where worktree folders are created."
+          description="Root directory where workspace folders are created."
           keywords={['workspace', 'folder', 'path', 'worktree']}
           className="space-y-2"
         >
@@ -247,20 +247,20 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
             </Button>
           </div>
           <p className="text-xs text-muted-foreground">
-            Root directory where worktree folders are created.
+            Root directory where workspace folders are created.
           </p>
         </SearchableSetting>
 
         <SearchableSetting
           title="Nest Workspaces"
-          description="Create worktrees inside a repo-named subfolder."
+          description="Create workspaces inside a repo-named subfolder."
           keywords={['nested', 'subfolder', 'directory']}
           className="flex items-center justify-between gap-4 px-1 py-2"
         >
           <div className="space-y-0.5">
             <Label>Nest Workspaces</Label>
             <p className="text-xs text-muted-foreground">
-              Create worktrees inside a repo-named subfolder.
+              Create workspaces inside a repo-named subfolder.
             </p>
           </div>
           <button
@@ -357,7 +357,7 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
 
         <SearchableSetting
           title="Open In Menu"
-          description="Add custom launchers to the worktree Open in menu."
+          description="Add custom launchers to the workspace Open in menu."
           keywords={['open in', 'editor', 'launcher', 'cursor', 'zed', 'command', 'vscode']}
           className="space-y-3"
         >
@@ -365,7 +365,7 @@ export function GeneralPane({ settings, updateSettings }: GeneralPaneProps): Rea
             <Label>Open In Menu</Label>
             <p className="text-xs text-muted-foreground">
               VS Code is always included first. Add executables to show extra entries in each
-              worktree&apos;s Open in menu.
+              workspace&apos;s Open in menu.
             </p>
             <p className="text-xs text-muted-foreground">
               Commands are not shell-parsed. Use only an executable command name. For flags, use a

@@ -427,7 +427,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
         entries.push({
           id: '__header_worktrees__',
           type: 'section-header',
-          label: hasQuery ? 'Worktrees' : 'Recent Worktrees'
+          label: hasQuery ? 'Workspaces' : 'Recent Workspaces'
         })
       }
       entries.push(...visibleWorktreeItems)
@@ -435,7 +435,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
         entries.push({
           id: '__hint_worktree_cap__',
           type: 'hint',
-          label: `Type to see all ${worktreeItems.length} worktrees`
+          label: `Type to see all ${worktreeItems.length} workspaces`
         })
       }
     }
@@ -592,7 +592,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
     (worktreeId: string) => {
       const worktree = findWorktreeById(useAppStore.getState().worktreesByRepo, worktreeId)
       if (!worktree) {
-        toast.error('Worktree no longer exists')
+        toast.error('Workspace no longer exists')
         return
       }
       activateAndRevealWorktree(worktreeId)
@@ -618,7 +618,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
       const { worktree, workspace, page } = selection
       const activated = activateAndRevealWorktree(worktree.id)
       if (!activated) {
-        toast.error('Worktree no longer exists')
+        toast.error('Workspace no longer exists')
         return
       }
 
@@ -1109,7 +1109,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-[14px] font-semibold tracking-[-0.01em] text-foreground">
-                    {`Create worktree "${createWorktreeName}"`}
+                    {`Create workspace "${createWorktreeName}"`}
                   </div>
                 </div>
               </CommandItem>

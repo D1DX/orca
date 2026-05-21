@@ -32,7 +32,7 @@ export type SidebarFilterState = {
  *
  * Why include hideDefaultBranchWorkspace here: without it, a user whose only
  * worktree is the default-branch row and who toggles hide-on would see the
- * "No worktrees found" message with no in-sidebar recovery path.
+ * "No workspaces found" message with no in-sidebar recovery path.
  */
 export function sidebarHasActiveFilters(state: SidebarFilterState): boolean {
   return state.showActiveOnly || state.filterRepoIds.length > 0 || state.hideDefaultBranchWorkspace

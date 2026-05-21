@@ -80,7 +80,7 @@ const LOCAL_HOOK_FIELDS: {
   {
     name: 'archive',
     label: 'Local archive command',
-    description: 'Runs before a local worktree is archived or removed.',
+    description: 'Runs before a local workspace is archived or removed.',
     placeholder: 'echo "Cleaning up $ORCA_WORKSPACE_NAME"'
   }
 ]

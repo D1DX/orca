@@ -898,9 +898,9 @@ export default function ChecksPanel(): React.JSX.Element {
   if (!activeWorktree) {
     return (
       <div className="px-4 py-6">
-        <div className="text-sm font-medium text-foreground">No worktree selected</div>
+        <div className="text-sm font-medium text-foreground">No workspace selected</div>
         <div className="mt-1 text-xs text-muted-foreground">
-          Select a worktree to view PR checks
+          Select a workspace to view PR checks
         </div>
       </div>
     )

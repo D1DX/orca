@@ -256,7 +256,7 @@ const WorktreeMetaDialog = React.memo(function WorktreeMetaDialog() {
         <DialogHeader>
           <DialogTitle className="text-sm">Edit Worktree Details</DialogTitle>
           <DialogDescription className="text-xs">
-            Edit GitHub links and notes for this worktree.
+            Edit GitHub links and notes for this workspace.
           </DialogDescription>
         </DialogHeader>
 

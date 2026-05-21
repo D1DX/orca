@@ -1206,7 +1206,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                               size="icon-xs"
                               className="size-5 shrink-0 rounded-md text-muted-foreground hover:bg-accent/70 hover:text-foreground transition-opacity"
                               aria-label={
-                                createState?.ariaLabel ?? `Create worktree for ${row.label}`
+                                createState?.ariaLabel ?? `Create workspace for ${row.label}`
                               }
                               onKeyDown={stopRepoHeaderKeyboardToggle}
                               onClick={(event) => {
@@ -1222,7 +1222,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                           )}
                         </TooltipTrigger>
                         <TooltipContent side="bottom" sideOffset={6}>
-                          {createState?.tooltip ?? `Create worktree for ${row.label}`}
+                          {createState?.tooltip ?? `Create workspace for ${row.label}`}
                         </TooltipContent>
                       </Tooltip>
                     ) : null}
@@ -2043,7 +2043,7 @@ const WorktreeList = React.memo(function WorktreeList({
   // empty-sidebar escape hatch (Clear Filters button below) is reachable when
   // it's the only reason the list is empty — otherwise a user whose only
   // worktree is a default-branch row and who just toggled hide on would see
-  // "No worktrees found" with no way back short of reopening the filter menu.
+  // "No workspaces found" with no way back short of reopening the filter menu.
   const filterState = useMemo(
     () => ({ showActiveOnly, filterRepoIds, hideDefaultBranchWorkspace }),
     [showActiveOnly, filterRepoIds, hideDefaultBranchWorkspace]
@@ -2071,7 +2071,7 @@ const WorktreeList = React.memo(function WorktreeList({
       <div data-worktree-sidebar-container className="relative min-h-0 flex-1">
         <div className="worktree-sidebar-scrollbar flex h-full flex-col overflow-y-scroll overflow-x-hidden pl-1 scrollbar-sleek pt-px">
           <div className="flex flex-col items-center gap-2 px-4 py-6 text-center text-[11px] text-muted-foreground">
-            <span>No worktrees found</span>
+            <span>No workspaces found</span>
             {hasFilters && (
               <button
                 onClick={clearFilters}

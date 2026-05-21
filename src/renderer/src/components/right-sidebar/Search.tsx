@@ -315,7 +315,7 @@ export default function Search(): React.JSX.Element {
   if (!activeWorktreeId) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground text-xs">
-        Select a worktree to search
+        Select a workspace to search
       </div>
     )
   }

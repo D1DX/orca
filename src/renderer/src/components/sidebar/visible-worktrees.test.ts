@@ -383,7 +383,7 @@ describe('sidebarHasActiveFilters', () => {
   it('returns true when only hideDefaultBranchWorkspace is active', () => {
     // Why: regression guard for the empty-sidebar escape hatch. If hide is
     // omitted from the filter union, a user whose only worktree is the
-    // default-branch row sees "No worktrees found" with no way back.
+    // default-branch row sees "No workspaces found" with no way back.
     expect(sidebarHasActiveFilters(filterState({ hideDefaultBranchWorkspace: true }))).toBe(true)
   })
 
@@ -407,7 +407,7 @@ describe('computeClearFilterActions', () => {
 
   it('flags only hideDefaultBranchWorkspace for reset when it is the sole filter', () => {
     // Why: verifies the empty-sidebar escape hatch actually clears the hide
-    // flag. A regression here would leave users stuck on "No worktrees found"
+    // flag. A regression here would leave users stuck on "No workspaces found"
     // because the only active filter would never clear.
     expect(computeClearFilterActions(filterState({ hideDefaultBranchWorkspace: true }))).toEqual({
       resetShowActiveOnly: false,

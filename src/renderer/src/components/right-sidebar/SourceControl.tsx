@@ -662,7 +662,7 @@ function SourceControlInner(): React.JSX.Element {
 
   const pendingDiffCommentsClearDescription = pendingDiffCommentsClear
     ? pendingDiffCommentsClear.kind === 'all'
-      ? `Clear ${pendingDiffCommentsClearCount} ${pendingDiffCommentsClearCount === 1 ? 'note' : 'notes'} from this worktree?`
+      ? `Clear ${pendingDiffCommentsClearCount} ${pendingDiffCommentsClearCount === 1 ? 'note' : 'notes'} from this workspace?`
       : `Clear ${pendingDiffCommentsClearCount} ${pendingDiffCommentsClearCount === 1 ? 'note' : 'notes'} from ${pendingDiffCommentsClear.filePath}?`
     : ''
 
@@ -2720,7 +2720,7 @@ function SourceControlInner(): React.JSX.Element {
   if (!activeWorktree || !activeRepo || !worktreePath) {
     return (
       <div className="flex items-center justify-center h-full text-xs text-muted-foreground px-4 text-center">
-        Select a worktree to view changes
+        Select a workspace to view changes
       </div>
     )
   }
@@ -2978,7 +2978,7 @@ function SourceControlInner(): React.JSX.Element {
           {scope === 'all' && showGenericEmptyState && !normalizedFilter ? (
             <EmptyState
               heading="No changes on this branch"
-              supportingText={`This worktree is clean and this branch has no changes ahead of ${branchSummary.baseRef}`}
+              supportingText={`This workspace is clean and this branch has no changes ahead of ${branchSummary.baseRef}`}
             />
           ) : null}
 
