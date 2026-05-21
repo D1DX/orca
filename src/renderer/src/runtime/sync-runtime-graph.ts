@@ -69,7 +69,6 @@ const NO_TRANSPORT_GRACE_MS = 10_000
 const EMPTY_ACTIVE_BROWSER_TAB_ID_BY_WORKTREE: AppState['activeBrowserTabIdByWorktree'] = {}
 const EMPTY_BROWSER_TABS_BY_WORKTREE: AppState['browserTabsByWorktree'] = {}
 const EMPTY_BROWSER_PAGES_BY_WORKSPACE: AppState['browserPagesByWorkspace'] = {}
-const EMPTY_AGENT_STATUS_BY_PANE_KEY: AppState['agentStatusByPaneKey'] = {}
 const EMPTY_LAYOUT_BY_WORKTREE: AppState['layoutByWorktree'] = {}
 let syncScheduled = false
 let syncInFlight = false
@@ -179,6 +178,7 @@ export type RuntimeMobileSessionSyncKey = {
   activeFileIdByWorktree: AppState['activeFileIdByWorktree']
   activeTabId: AppState['activeTabId']
   activeBrowserTabIdByWorktree: AppState['activeBrowserTabIdByWorktree']
+  agentStatusEpoch: number
   agentStatusByPaneKey: AppState['agentStatusByPaneKey']
   // Why: these projections still need value-level inspection because the
   // underlying references churn even when the mobile-relevant shape is
@@ -188,6 +188,32 @@ export type RuntimeMobileSessionSyncKey = {
   openFilesProjection: string
   browserProjection: string
   editorDraftsProjection: string
+}
+
+export function canSkipRuntimeMobileSessionSyncKeyBuild(
+  state: AppState,
+  previousState: AppState
+): boolean {
+  return (
+    state.tabsByWorktree === previousState.tabsByWorktree &&
+    state.groupsByWorktree === previousState.groupsByWorktree &&
+    state.activeGroupIdByWorktree === previousState.activeGroupIdByWorktree &&
+    state.layoutByWorktree === previousState.layoutByWorktree &&
+    state.unifiedTabsByWorktree === previousState.unifiedTabsByWorktree &&
+    state.tabBarOrderByWorktree === previousState.tabBarOrderByWorktree &&
+    state.activeFileId === previousState.activeFileId &&
+    state.activeFileIdByWorktree === previousState.activeFileIdByWorktree &&
+    state.browserTabsByWorktree === previousState.browserTabsByWorktree &&
+    state.browserPagesByWorkspace === previousState.browserPagesByWorkspace &&
+    state.activeBrowserTabIdByWorktree === previousState.activeBrowserTabIdByWorktree &&
+    state.openFiles === previousState.openFiles &&
+    state.editorDrafts === previousState.editorDrafts &&
+    state.activeTabId === previousState.activeTabId &&
+    state.terminalLayoutsByTabId === previousState.terminalLayoutsByTabId &&
+    state.runtimePaneTitlesByTabId === previousState.runtimePaneTitlesByTabId &&
+    state.agentStatusEpoch === previousState.agentStatusEpoch &&
+    state.agentStatusByPaneKey === previousState.agentStatusByPaneKey
+  )
 }
 
 export function getRuntimeMobileSessionSyncKey(
@@ -218,9 +244,11 @@ export function getRuntimeMobileSessionSyncKey(
     activeTabId: state.activeTabId,
     activeBrowserTabIdByWorktree:
       state.activeBrowserTabIdByWorktree ?? EMPTY_ACTIVE_BROWSER_TAB_ID_BY_WORKTREE,
-    // Why: explicit hook status is published with terminal surfaces so paired
-    // web can render the same per-worktree agent rows before a PTY is opened.
-    agentStatusByPaneKey: state.agentStatusByPaneKey ?? EMPTY_AGENT_STATUS_BY_PANE_KEY,
+    // Why: paired web/mobile snapshots include full agentStatus details; the
+    // epoch keeps freshness timers cheap, while map identity preserves prompt
+    // and tool updates that do not change the visible state enum.
+    agentStatusEpoch: state.agentStatusEpoch ?? 0,
+    agentStatusByPaneKey: state.agentStatusByPaneKey,
     // Why: background agent title ticks can change runtimePaneTitlesByTabId
     // many times per second while the user types elsewhere. Reuse unchanged
     // projections so those ticks do not rescan all tabs, files, and drafts.
@@ -367,6 +395,7 @@ export function runtimeMobileSessionSyncKeysEqual(
     a.activeFileIdByWorktree === b.activeFileIdByWorktree &&
     a.activeTabId === b.activeTabId &&
     a.activeBrowserTabIdByWorktree === b.activeBrowserTabIdByWorktree &&
+    a.agentStatusEpoch === b.agentStatusEpoch &&
     a.agentStatusByPaneKey === b.agentStatusByPaneKey &&
     a.tabsProjection === b.tabsProjection &&
     a.openFilesProjection === b.openFilesProjection &&

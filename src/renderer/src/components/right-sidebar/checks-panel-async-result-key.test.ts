@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   checksPanelAsyncResultKey,
-  shouldCommitChecksPanelAsyncResult
+  shouldCommitChecksPanelAsyncResult,
+  shouldPollChecksPanel
 } from './checks-panel-async-result-key'
 
 describe('checksPanelAsyncResultKey', () => {
@@ -30,6 +31,14 @@ describe('checksPanelAsyncResultKey', () => {
     expect(checksPanelAsyncResultKey('repo-id', 'feature/test', 12, null, 'head-a')).toBe(
       'repo-id::feature/test::none::12::head-a'
     )
+  })
+})
+
+describe('shouldPollChecksPanel', () => {
+  it('skips checks polling only while the window is hidden', () => {
+    expect(shouldPollChecksPanel({ documentVisible: false, windowFocused: true })).toBe(false)
+    expect(shouldPollChecksPanel({ documentVisible: true, windowFocused: false })).toBe(true)
+    expect(shouldPollChecksPanel({ documentVisible: true, windowFocused: true })).toBe(true)
   })
 })
 

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { useAppStore } from '@/store'
 import { isExplicitAgentStatusFresh } from '@/lib/agent-status'
 import { type DashboardAgentRow } from './useDashboardData'
@@ -148,14 +149,8 @@ export function useRetainedAgentsSync(): void {
   const retainAgents = useAppStore((s) => s.retainAgents)
   const pruneRetainedAgents = useAppStore((s) => s.pruneRetainedAgents)
   const clearRetentionSuppressedPaneKeys = useAppStore((s) => s.clearRetentionSuppressedPaneKeys)
-  const retentionSignature = useAppStore((s) =>
-    buildRetainedAgentsSyncSignature({
-      repos: s.repos,
-      worktreesByRepo: s.worktreesByRepo,
-      tabsByWorktree: s.tabsByWorktree,
-      agentStatusByPaneKey: s.agentStatusByPaneKey,
-      agentStatusEpoch: s.agentStatusEpoch
-    })
+  const [repos, worktreesByRepo, tabsByWorktree, agentStatusEpoch] = useAppStore(
+    useShallow((s) => [s.repos, s.worktreesByRepo, s.tabsByWorktree, s.agentStatusEpoch] as const)
   )
   const prevAgentsRef = useRef<RetainedAgentSnapshot>(new Map())
 
@@ -170,9 +165,9 @@ export function useRetainedAgentsSync(): void {
       now: Date.now()
     })
 
-    // Why: read retention state via getState() instead of subscribing. This
-    // effect's driving input is the retention signature — retention decisions
-    // only need to happen when live identity/state/freshness or worktree
+    // Why: read retention state via getState() after the cheap ref/epoch gate
+    // fires. Building the full retention snapshot scans all agents, so do it
+    // only when live identity/state/freshness/final-done data or worktree
     // membership changes. Subscribing to retainedAgentsByPaneKey would create
     // a feedback loop because this effect calls retainAgents.
     const { retainedAgentsByPaneKey: retainedNow, retentionSuppressedPaneKeys } = state
@@ -194,7 +189,15 @@ export function useRetainedAgentsSync(): void {
     if (consumedSuppressedPaneKeys.length > 0) {
       clearRetentionSuppressedPaneKeys(consumedSuppressedPaneKeys)
     }
-  }, [retentionSignature, retainAgents, pruneRetainedAgents, clearRetentionSuppressedPaneKeys])
+  }, [
+    repos,
+    worktreesByRepo,
+    tabsByWorktree,
+    agentStatusEpoch,
+    retainAgents,
+    pruneRetainedAgents,
+    clearRetentionSuppressedPaneKeys
+  ])
 }
 
 export function collectRetainedAgentsOnDisappear(args: {

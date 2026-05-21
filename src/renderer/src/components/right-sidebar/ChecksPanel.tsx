@@ -36,7 +36,8 @@ import {
 import { hostedReviewSummaryFromGitHubPRInfo } from '../../../../shared/hosted-review-github'
 import {
   checksPanelAsyncResultKey,
-  shouldCommitChecksPanelAsyncResult
+  shouldCommitChecksPanelAsyncResult,
+  shouldPollChecksPanel
 } from './checks-panel-async-result-key'
 
 export default function ChecksPanel(): React.JSX.Element {
@@ -51,9 +52,15 @@ export default function ChecksPanel(): React.JSX.Element {
     (s) => s.getHostedReviewCreationEligibility
   )
   const enqueueGitHubPRRefresh = useAppStore((s) => s.enqueueGitHubPRRefresh)
-  const gitConflictOperationByWorktree = useAppStore((s) => s.gitConflictOperationByWorktree)
-  const gitStatusByWorktree = useAppStore((s) => s.gitStatusByWorktree)
-  const remoteStatusesByWorktree = useAppStore((s) => s.remoteStatusesByWorktree)
+  const conflictOperation = useAppStore((s) =>
+    activeWorktreeId ? (s.gitConflictOperationByWorktree[activeWorktreeId] ?? 'unknown') : 'unknown'
+  )
+  const hasUncommittedChanges = useAppStore((s) =>
+    activeWorktreeId ? (s.gitStatusByWorktree[activeWorktreeId]?.length ?? 0) > 0 : false
+  )
+  const remoteStatus = useAppStore((s) =>
+    activeWorktreeId ? s.remoteStatusesByWorktree[activeWorktreeId] : undefined
+  )
   const pushBranch = useAppStore((s) => s.pushBranch)
   const fetchUpstreamStatus = useAppStore((s) => s.fetchUpstreamStatus)
   const setRightSidebarOpen = useAppStore((s) => s.setRightSidebarOpen)
@@ -135,13 +142,6 @@ export default function ChecksPanel(): React.JSX.Element {
     prCacheKey ? s.prRefreshStates[prCacheKey] : undefined
   )
   const prNumber = pr?.number ?? null
-  const remoteStatus = activeWorktreeId ? remoteStatusesByWorktree[activeWorktreeId] : undefined
-  const hasUncommittedChanges = activeWorktreeId
-    ? (gitStatusByWorktree[activeWorktreeId]?.length ?? 0) > 0
-    : false
-  const conflictOperation = activeWorktreeId
-    ? (gitConflictOperationByWorktree[activeWorktreeId] ?? 'unknown')
-    : 'unknown'
 
   // Why: select only timestamps (not whole cache records) so the entry-refresh
   // effect doesn't re-run on every cache mutation. See
@@ -389,24 +389,62 @@ export default function ChecksPanel(): React.JSX.Element {
     pollIntervalRef.current = 30_000
     prevChecksRef.current = ''
     let cancelled = false
-    void fetchChecks()
 
-    const schedulePoll = (): void => {
+    const shouldPollNow = (): boolean =>
+      shouldPollChecksPanel({
+        documentVisible: document.visibilityState === 'visible',
+        windowFocused: document.hasFocus()
+      })
+
+    const clearScheduledPoll = (): void => {
+      if (pollRef.current) {
+        clearTimeout(pollRef.current)
+        pollRef.current = null
+      }
+    }
+
+    let fetchInFlight: Promise<void> | null = null
+    function schedulePoll(): void {
+      clearScheduledPoll()
+      if (cancelled || !shouldPollNow()) {
+        return
+      }
       pollRef.current = setTimeout(() => {
-        void fetchChecks().then(() => {
-          if (!cancelled) {
-            schedulePoll()
-          }
-        })
+        pollRef.current = null
+        fetchAndSchedule()
       }, pollIntervalRef.current)
     }
-    schedulePoll()
+
+    function fetchAndSchedule(): void {
+      clearScheduledPoll()
+      if (cancelled || !shouldPollNow() || fetchInFlight) {
+        return
+      }
+      fetchInFlight = fetchChecks().finally(() => {
+        fetchInFlight = null
+        schedulePoll()
+      })
+    }
+
+    const reconcileVisibility = (): void => {
+      if (shouldPollNow()) {
+        fetchAndSchedule()
+      } else {
+        clearScheduledPoll()
+      }
+    }
+
+    fetchAndSchedule()
+    window.addEventListener('focus', reconcileVisibility)
+    window.addEventListener('blur', reconcileVisibility)
+    document.addEventListener('visibilitychange', reconcileVisibility)
 
     return () => {
       cancelled = true
-      if (pollRef.current) {
-        clearTimeout(pollRef.current)
-      }
+      clearScheduledPoll()
+      window.removeEventListener('focus', reconcileVisibility)
+      window.removeEventListener('blur', reconcileVisibility)
+      document.removeEventListener('visibilitychange', reconcileVisibility)
     }
   }, [fetchChecks, isPanelVisible, prNumber])
 

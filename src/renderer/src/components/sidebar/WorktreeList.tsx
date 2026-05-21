@@ -87,6 +87,10 @@ import {
   sidebarHasActiveFilters
 } from './visible-worktrees'
 import {
+  getVisibleWorktreeBrowserActivityTabs,
+  getVisibleWorktreeTerminalActivityTabs
+} from './visible-worktree-activity-inputs'
+import {
   VIRTUALIZED_SCROLL_ANCHOR_RECORD_EVENT,
   useVirtualizedScrollAnchor,
   type VirtualizedScrollAnchor
@@ -134,6 +138,18 @@ const WORKTREE_SIDEBAR_SCROLL_STYLE: React.CSSProperties = {
   // Why: TanStack Virtual owns scroll correction. Native browser anchoring can
   // fight virtual row measurement/remounts and produce visible jumps.
   overflowAnchor: 'none'
+}
+
+const recordKeyCountCache = new WeakMap<Record<string, unknown>, number>()
+
+export function countRecordKeysByReference(record: Record<string, unknown>): number {
+  const cached = recordKeyCountCache.get(record)
+  if (cached !== undefined) {
+    return cached
+  }
+  const count = Object.keys(record).length
+  recordKeyCountCache.set(record, count)
+  return count
 }
 
 export function shouldAdjustWorktreeSidebarMeasuredRowScroll(args: {
@@ -483,7 +499,7 @@ function getVirtualRowKey(element: Element): string | null {
   return element.getAttribute('data-worktree-virtual-row-key')
 }
 
-const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewport({
+export const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewport({
   rows,
   activeWorktreeId,
   groupBy,
@@ -527,6 +543,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   const [worktreeDragState, setWorktreeDragState] = useState<WorktreeRowDragState>(
     WORKTREE_ROW_DRAG_INITIAL_STATE
   )
+  const [documentVisibilityRevision, setDocumentVisibilityRevision] = useState(0)
   const worktreeDragSessionRef = useRef<WorktreeDragSession | null>(null)
   const worktreePointerDragRef = useRef<WorktreePointerDrag | null>(null)
   const suppressWorktreeClickUntilRef = useRef(0)
@@ -540,6 +557,14 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   const sshConnectedGeneration = useAppStore((s) => s.sshConnectedGeneration)
   const prVisibleRefreshGeneration = useAppStore((s) => s.prVisibleRefreshGeneration)
   const settings = useAppStore((s) => s.settings)
+
+  useEffect(
+    () =>
+      installWorktreeVisibleRefreshVisibilityListener(() => {
+        setDocumentVisibilityRevision((revision) => revision + 1)
+      }),
+    []
+  )
 
   // Drag is only meaningful when repo headers are using manual order. The
   // controller is still constructed for hook order stability when inert.
@@ -901,8 +926,8 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     settings
   ])
 
-  const prCacheLen = useAppStore((s) => Object.keys(s.prCache).length)
-  const issueCacheLen = useAppStore((s) => Object.keys(s.issueCache).length)
+  const prCacheLen = useAppStore((s) => countRecordKeysByReference(s.prCache))
+  const issueCacheLen = useAppStore((s) => countRecordKeysByReference(s.issueCache))
   const renderRowKeySignature = useMemo(
     () => renderRows.map(getRenderRowKey).join('\n'),
     [renderRows]
@@ -1530,6 +1555,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     reportVisibleGitHubPRRefreshCandidates(visibleWorktreeIds, Date.now())
   }, [
     cardProps,
+    documentVisibilityRevision,
     groupBy,
     renderRows,
     reportVisibleGitHubPRRefreshCandidates,
@@ -2297,6 +2323,11 @@ type WorktreeListProps = {
   scrollAnchorRef: React.MutableRefObject<VirtualizedScrollAnchor>
 }
 
+export function installWorktreeVisibleRefreshVisibilityListener(onChange: () => void): () => void {
+  document.addEventListener('visibilitychange', onChange)
+  return () => document.removeEventListener('visibilitychange', onChange)
+}
+
 const WorktreeList = React.memo(function WorktreeList({
   scrollOffsetRef,
   scrollAnchorRef
@@ -2327,10 +2358,12 @@ const WorktreeList = React.memo(function WorktreeList({
 
   // Read tabsByWorktree when needed for filtering or sorting
   const needsActivityMaps = !showSleepingWorkspaces || sortBy === 'smart'
-  const tabsByWorktree = useAppStore((s) => (needsActivityMaps ? s.tabsByWorktree : null))
+  const tabsByWorktree = useAppStore((s) =>
+    needsActivityMaps ? getVisibleWorktreeTerminalActivityTabs(s.tabsByWorktree) : null
+  )
   const ptyIdsByTabId = useAppStore((s) => (needsActivityMaps ? s.ptyIdsByTabId : null))
   const browserTabsByWorktree = useAppStore((s) =>
-    !showSleepingWorkspaces ? s.browserTabsByWorktree : null
+    !showSleepingWorkspaces ? getVisibleWorktreeBrowserActivityTabs(s.browserTabsByWorktree) : null
   )
 
   const cardProps = useAppStore((s) => s.worktreeCardProperties)

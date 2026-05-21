@@ -248,6 +248,13 @@ const PENDING_ANNOTATION_CARD_HEIGHT = 330
 const WHEEL_DELTA_LINE = 1
 const WHEEL_DELTA_PAGE = 2
 
+export function getBrowserPagesForWorkspace(
+  browserPagesByWorkspace: Record<string, BrowserPageState[]>,
+  workspaceId: string
+): BrowserPageState[] {
+  return browserPagesByWorkspace[workspaceId] ?? EMPTY_BROWSER_PAGES
+}
+
 function createBrowserAnnotationId(): string {
   return `browser-annotation-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
 }
@@ -497,6 +504,13 @@ function getBrowserDisplayTitle(title: string | null | undefined, url: string): 
 
 function isChromiumErrorPage(url: string): boolean {
   return url.startsWith('chrome-error://')
+}
+
+export function shouldPollChromiumErrorPage(args: {
+  isActive: boolean
+  loading: boolean
+}): boolean {
+  return args.isActive && args.loading
 }
 
 function fileUrlToAbsolutePath(url: string): string | null {
@@ -776,8 +790,9 @@ export default function BrowserPane({
   const activeRuntimeEnvironmentId = useAppStore(
     (s) => s.settings?.activeRuntimeEnvironmentId ?? null
   )
-  const browserPagesByWorkspace = useAppStore((s) => s.browserPagesByWorkspace)
-  const browserPages = browserPagesByWorkspace[browserTab.id] ?? EMPTY_BROWSER_PAGES
+  const browserPages = useAppStore((s) =>
+    getBrowserPagesForWorkspace(s.browserPagesByWorkspace, browserTab.id)
+  )
   const activeBrowserPage =
     browserPages.find((page) => page.id === browserTab.activePageId) ?? browserPages[0] ?? null
   const updateBrowserPageState = useAppStore((s) => s.updateBrowserPageState)
@@ -3663,7 +3678,7 @@ function BrowserPagePane({
   }, [browserTab.url, focusWebviewNow])
 
   useEffect(() => {
-    if (!browserTab.loading) {
+    if (!shouldPollChromiumErrorPage({ isActive, loading: browserTab.loading })) {
       return
     }
 
@@ -3696,12 +3711,13 @@ function BrowserPagePane({
 
     // Why: some Electron builds paint Chromium's internal chrome-error page
     // without delivering a timely did-fail-load event to the renderer webview.
-    // Polling only while the tab is "loading" gives Orca a last-resort path to
-    // swap the black guest surface for the explicit unreachable-page overlay.
+    // Polling only while the active tab is "loading" gives Orca a last-resort
+    // path to swap the black guest surface without waking every retained
+    // inactive browser pane on a 250ms loop.
     detectChromiumErrorPage()
     const intervalId = window.setInterval(detectChromiumErrorPage, 250)
     return () => window.clearInterval(intervalId)
-  }, [browserTab.id, browserTab.loading])
+  }, [browserTab.id, browserTab.loading, isActive])
 
   const startGrabIntent = useCallback(
     (nextIntent: GrabIntent): void => {

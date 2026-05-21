@@ -12,6 +12,7 @@ import { remapOpenEditorTabsForPathChange } from '@/lib/remap-open-editor-tabs-f
 import { requestEditorSaveQuiesce } from '@/components/editor/editor-autosave'
 import { commitFileExplorerOp } from './fileExplorerUndoRedo'
 import { renameRuntimePath } from '@/runtime/runtime-file-client'
+import { getActiveWorktreeOpenFiles } from '@/components/terminal/active-worktree-open-files'
 
 function extractIpcErrorMessage(err: unknown, fallback: string): string {
   if (!(err instanceof Error)) {
@@ -100,7 +101,7 @@ export function useFileExplorerDragDrop({
   refreshDir,
   scrollRef
 }: UseFileExplorerDragDropParams): UseFileExplorerDragDropResult {
-  const openFiles = useAppStore((s) => s.openFiles)
+  const openFiles = useAppStore((s) => getActiveWorktreeOpenFiles(s.openFiles, activeWorktreeId))
 
   const [isRootDragOver, setIsRootDragOver] = useState(false)
   const rootDragCounterRef = useRef(0)
