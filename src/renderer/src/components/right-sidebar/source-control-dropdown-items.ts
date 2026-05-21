@@ -301,8 +301,10 @@ export function resolveDropdownItems(inputs: PrimaryActionInputs): DropdownEntry
     hostedReviewCreation.blockedReason === 'needs_push'
   const pushCreatePRItem: DropdownItem = {
     kind: 'push_create_pr',
-    label: 'Push & Create PR',
-    title: canPushAndCreate ? 'Push local commits, then create a pull request' : createBlockedHint,
+    label: 'Push before PR',
+    title: canPushAndCreate
+      ? 'Push local commits before creating a pull request'
+      : createBlockedHint,
     hint: canPushAndCreate ? undefined : createBlockedHint,
     disabled: !canPushAndCreate
   }

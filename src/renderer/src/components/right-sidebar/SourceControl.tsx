@@ -127,9 +127,10 @@ import {
 } from '@/runtime/runtime-git-client'
 import { getRuntimeRepoBaseRefDefault } from '@/runtime/runtime-repo-client'
 import { PullRequestIcon } from './checks-panel-content'
-import { CreatePullRequestDialog } from './CreatePullRequestDialog'
+import { stripBaseRef, useCreatePullRequestDialogFields } from './useCreatePullRequestDialogFields'
 import { GitHistoryPanel, type GitHistoryPanelState } from './GitHistoryPanel'
 import type { GitHistoryItem } from '../../../../shared/git-history'
+import { normalizeHostedReviewHeadRef } from '../../../../shared/hosted-review-refs'
 import type {
   DiffComment,
   GitBranchChangeEntry,
@@ -566,6 +567,7 @@ function SourceControlInner(): React.JSX.Element {
   const getHostedReviewCreationEligibility = useAppStore(
     (s) => s.getHostedReviewCreationEligibility
   )
+  const createHostedReview = useAppStore((s) => s.createHostedReview)
   const fetchPRForBranch = useAppStore((s) => s.fetchPRForBranch)
   const prCache = useAppStore((s) => s.prCache)
   const enqueueGitHubPRRefresh = useAppStore((s) => s.enqueueGitHubPRRefresh)
@@ -773,8 +775,13 @@ function SourceControlInner(): React.JSX.Element {
   const generateError = generateErrors[activeWorktreeId ?? ''] ?? null
   const [hostedReviewCreation, setHostedReviewCreation] =
     useState<HostedReviewCreationEligibility | null>(null)
-  const [createPrDialogOpen, setCreatePrDialogOpen] = useState(false)
-  const [createPrPushFirst, setCreatePrPushFirst] = useState(false)
+  const createPrInFlightRef = useRef<Record<string, boolean>>({})
+  const [createPrInFlightByWorktree, setCreatePrInFlightByWorktree] = useState<
+    Record<string, boolean>
+  >({})
+  const [createPrErrors, setCreatePrErrors] = useState<Record<string, string | null>>({})
+  const isCreatingPr = createPrInFlightByWorktree[activeWorktreeId ?? ''] ?? false
+  const createPrError = createPrErrors[activeWorktreeId ?? ''] ?? null
   const commitMessageAi = useAppStore((s) => s.settings?.commitMessageAi)
   const effectiveCommitMessageAgentId = useMemo(
     () => resolveCommitMessageAgentChoice(commitMessageAi?.agentId, settings?.defaultTuiAgent),
@@ -1258,8 +1265,6 @@ function SourceControlInner(): React.JSX.Element {
     // repos and back to re-trigger the resolver.
     setFilterQuery('')
     setIsExecutingBulk(false)
-    setCreatePrDialogOpen(false)
-    setCreatePrPushFirst(false)
     // Why: no reset for commit-in-flight state — it now lives in a per-worktree
     // map, so it cannot leak across worktrees. Resetting here would actually
     // clear in-flight state for the *incoming* worktree if the user is coming
@@ -1544,44 +1549,6 @@ function SourceControlInner(): React.JSX.Element {
     [handleCommit, runRemoteAction]
   )
 
-  const openCreatePullRequestDialog = useCallback((pushFirst: boolean): void => {
-    setCreatePrPushFirst(pushFirst)
-    setCreatePrDialogOpen(true)
-  }, [])
-
-  const pushBeforeCreatePullRequest = useCallback(async (): Promise<boolean> => {
-    if (!activeWorktreeId || !worktreePath) {
-      return false
-    }
-    const connectionId = getConnectionId(activeWorktreeId) ?? undefined
-    try {
-      await pushBranch(
-        activeWorktreeId,
-        worktreePath,
-        false,
-        connectionId,
-        activeWorktree?.pushTarget
-      )
-      await refreshActiveGitStatusAfterMutation()
-      return true
-    } catch {
-      return false
-    }
-  }, [
-    activeWorktree?.pushTarget,
-    activeWorktreeId,
-    pushBranch,
-    refreshActiveGitStatusAfterMutation,
-    worktreePath
-  ])
-
-  const handleBranchChangedByPullRequestGeneration = useCallback(async (): Promise<void> => {
-    // Why: AI PR detail generation rebases before summarizing; if HEAD moved,
-    // the dialog must not create a PR from stale push/create eligibility.
-    setCreatePrPushFirst(true)
-    await refreshActiveGitStatusAfterMutation()
-  }, [refreshActiveGitStatusAfterMutation])
-
   const handlePullRequestCreated = useCallback(
     async (result: { number: number; url: string }): Promise<void> => {
       if (!activeRepo || !branchName) {
@@ -1628,6 +1595,141 @@ function SourceControlInner(): React.JSX.Element {
     setRightSidebarTab('checks')
   }, [setRightSidebarOpen, setRightSidebarTab])
 
+  const handleBranchChangedByPullRequestGeneration = useCallback(async (): Promise<void> => {
+    // Why: AI PR detail generation may rebase before summarizing; if HEAD moved,
+    // refresh status before letting the user submit the generated draft.
+    await refreshActiveGitStatusAfterMutation()
+  }, [refreshActiveGitStatusAfterMutation])
+
+  const {
+    aiGenerationEnabled: prAiGenerationEnabled,
+    base: prBase,
+    setBase: setPrBase,
+    title: prTitle,
+    setTitle: setPrTitle,
+    body: prBody,
+    setBody: setPrBody,
+    draft: prDraft,
+    setDraft: setPrDraft,
+    baseQuery: prBaseQuery,
+    setBaseQuery: setPrBaseQuery,
+    baseResults: prBaseResults,
+    setBaseResults: setPrBaseResults,
+    baseSearchError: prBaseSearchError,
+    generating: prGenerating,
+    generateError: prGenerateError,
+    generateDisabled: prGenerateDisabled,
+    generateDisabledReason: prGenerateDisabledReason,
+    handleGenerate: handleGeneratePullRequestFields,
+    handleCancelGenerate: handleCancelGeneratePullRequestFields
+  } = useCreatePullRequestDialogFields({
+    open: hostedReviewCreation?.canCreate === true,
+    repoId: activeRepo?.id ?? '',
+    worktreeId: activeWorktreeId,
+    worktreePath: worktreePath ?? '',
+    branch: branchName,
+    eligibility: hostedReviewCreation,
+    settings,
+    submitting: isCreatingPr,
+    onBranchChangedByGeneration: handleBranchChangedByPullRequestGeneration
+  })
+
+  const handleCreatePullRequest = useCallback(async (): Promise<void> => {
+    if (
+      !activeRepo ||
+      !activeWorktreeId ||
+      !worktreePath ||
+      !hostedReviewCreation?.canCreate ||
+      createPrInFlightRef.current[activeWorktreeId]
+    ) {
+      return
+    }
+
+    const base = stripBaseRef(prBase).trim()
+    const title = prTitle.trim()
+
+    if (!title) {
+      setCreatePrErrors((prev) => ({
+        ...prev,
+        [activeWorktreeId]: 'Enter a pull request title.'
+      }))
+      return
+    }
+
+    if (!base || stripBaseRef(base).toLowerCase() === stripBaseRef(branchName).toLowerCase()) {
+      setCreatePrErrors((prev) => ({
+        ...prev,
+        [activeWorktreeId]: 'Choose a different base branch before creating a pull request.'
+      }))
+      return
+    }
+
+    createPrInFlightRef.current[activeWorktreeId] = true
+    setCreatePrInFlightByWorktree((prev) => ({ ...prev, [activeWorktreeId]: true }))
+    setCreatePrErrors((prev) => ({ ...prev, [activeWorktreeId]: null }))
+    try {
+      const result = await createHostedReview(activeRepo.path, {
+        provider: 'github',
+        base,
+        head: normalizeHostedReviewHeadRef(branchName),
+        title,
+        body: prBody,
+        draft: prDraft,
+        worktreePath
+      })
+
+      if (result.ok) {
+        toast.success(`Pull request #${result.number} created`, {
+          action: {
+            label: 'Open on GitHub',
+            onClick: () => window.api.shell.openUrl(result.url)
+          }
+        })
+        await handlePullRequestCreated(result)
+        return
+      }
+
+      if (result.existingReview?.url) {
+        const number = result.existingReview.number
+        toast.success(
+          number ? `Pull request #${number} is already open` : 'Pull request is already open',
+          {
+            action: {
+              label: 'Open on GitHub',
+              onClick: () => window.api.shell.openUrl(result.existingReview!.url)
+            }
+          }
+        )
+        if (number) {
+          await handlePullRequestCreated({ number, url: result.existingReview.url })
+          return
+        }
+      }
+
+      setCreatePrErrors((prev) => ({ ...prev, [activeWorktreeId]: result.error }))
+    } catch (error) {
+      setCreatePrErrors((prev) => ({
+        ...prev,
+        [activeWorktreeId]: error instanceof Error ? error.message : 'Failed to create pull request'
+      }))
+    } finally {
+      createPrInFlightRef.current[activeWorktreeId] = false
+      setCreatePrInFlightByWorktree((prev) => ({ ...prev, [activeWorktreeId]: false }))
+    }
+  }, [
+    activeRepo,
+    activeWorktreeId,
+    branchName,
+    createHostedReview,
+    handlePullRequestCreated,
+    hostedReviewCreation,
+    prBase,
+    prBody,
+    prDraft,
+    prTitle,
+    worktreePath
+  ])
+
   const hasUnstagedChanges = grouped.unstaged.length > 0 || grouped.untracked.length > 0
   const hasPartiallyStagedChanges = useMemo(() => {
     if (grouped.staged.length === 0 || grouped.unstaged.length === 0) {
@@ -1637,41 +1739,43 @@ function SourceControlInner(): React.JSX.Element {
     return grouped.staged.some((entry) => unstagedPaths.has(entry.path))
   }, [grouped.staged, grouped.unstaged])
 
-  const primaryAction: PrimaryAction = useMemo(
-    () =>
-      resolvePrimaryAction({
-        stagedCount: grouped.staged.length,
-        hasUnstagedChanges,
-        hasPartiallyStagedChanges,
-        hasMessage: commitMessage.trim().length > 0,
-        hasUnresolvedConflicts: unresolvedConflicts.length > 0,
-        isCommitting,
-        isRemoteOperationActive,
-        upstreamStatus: remoteStatus,
-        prState: hostedReview?.state ?? null,
-        isPRStateLoading: isHostedReviewStateLoading,
-        inFlightRemoteOpKind,
-        hostedReviewCreation,
-        branchCommitsAhead:
-          branchSummary?.status === 'ready' ? (branchSummary.commitsAhead ?? 0) : undefined
-      }),
-    [
-      commitMessage,
-      grouped.staged.length,
+  const primaryAction: PrimaryAction = useMemo(() => {
+    const action = resolvePrimaryAction({
+      stagedCount: grouped.staged.length,
       hasUnstagedChanges,
       hasPartiallyStagedChanges,
+      hasMessage: commitMessage.trim().length > 0,
+      hasUnresolvedConflicts: unresolvedConflicts.length > 0,
       isCommitting,
       isRemoteOperationActive,
+      upstreamStatus: remoteStatus,
+      prState: hostedReview?.state ?? null,
+      isPRStateLoading: isHostedReviewStateLoading,
       inFlightRemoteOpKind,
       hostedReviewCreation,
-      isHostedReviewStateLoading,
-      hostedReview?.state,
-      branchSummary?.commitsAhead,
-      branchSummary?.status,
-      remoteStatus,
-      unresolvedConflicts.length
-    ]
-  )
+      branchCommitsAhead:
+        branchSummary?.status === 'ready' ? (branchSummary.commitsAhead ?? 0) : undefined
+    })
+    return isCreatingPr && action.kind === 'create_pr'
+      ? { ...action, title: 'Creating pull request...', disabled: true }
+      : action
+  }, [
+    commitMessage,
+    grouped.staged.length,
+    hasUnstagedChanges,
+    hasPartiallyStagedChanges,
+    isCommitting,
+    isRemoteOperationActive,
+    inFlightRemoteOpKind,
+    hostedReviewCreation,
+    isHostedReviewStateLoading,
+    hostedReview?.state,
+    isCreatingPr,
+    branchSummary?.commitsAhead,
+    branchSummary?.status,
+    remoteStatus,
+    unresolvedConflicts.length
+  ])
 
   const dropdownItems: DropdownEntry[] = useMemo(
     () =>
@@ -1726,10 +1830,10 @@ function SourceControlInner(): React.JSX.Element {
           void runCompoundCommitAction('sync')
           return
         case 'create_pr':
-          openCreatePullRequestDialog(false)
+          void handleCreatePullRequest()
           return
         case 'push_create_pr':
-          openCreatePullRequestDialog(true)
+          void runRemoteAction('push')
           return
         case 'push':
         case 'pull':
@@ -1747,7 +1851,7 @@ function SourceControlInner(): React.JSX.Element {
         }
       }
     },
-    [handleCommit, openCreatePullRequestDialog, runCompoundCommitAction, runRemoteAction]
+    [handleCommit, handleCreatePullRequest, runCompoundCommitAction, runRemoteAction]
   )
 
   const handleOpenDiff = useCallback(
@@ -2052,7 +2156,7 @@ function SourceControlInner(): React.JSX.Element {
 
   // Why: PrimaryActionKind is narrowed to the single-action kinds the
   // primary can emit ('commit' | 'stage' | 'push' | 'pull' | 'sync' |
-  // 'publish') — compound commit_* kinds are dropdown-only. An exhaustive
+  // 'publish' | 'create_pr') — compound commit_* kinds are dropdown-only. An exhaustive
   // switch keeps the mapping honest: if a new PrimaryActionKind is added,
   // TypeScript lights up the missing case instead of silently falling
   // through. 'stage' routes to a dedicated primary-only handler because
@@ -2744,20 +2848,6 @@ function SourceControlInner(): React.JSX.Element {
 
   return (
     <>
-      <CreatePullRequestDialog
-        open={createPrDialogOpen}
-        repoId={activeRepo.id}
-        repoPath={activeRepo.path}
-        worktreeId={currentWorktreeId}
-        worktreePath={activeWorktree.path}
-        branch={branchName}
-        eligibility={hostedReviewCreation}
-        pushBeforeCreate={createPrPushFirst}
-        onOpenChange={setCreatePrDialogOpen}
-        onPushBeforeCreate={pushBeforeCreatePullRequest}
-        onBranchChangedByGeneration={handleBranchChangedByPullRequestGeneration}
-        onCreated={handlePullRequestCreated}
-      />
       <div ref={sourceControlRef} className="relative flex h-full flex-col overflow-hidden">
         <div className="flex items-center px-3 pt-2 border-b border-border">
           {(['all', 'uncommitted'] as const).map((value) => (
@@ -3008,47 +3098,78 @@ function SourceControlInner(): React.JSX.Element {
               clears. Active merge/rebase/cherry-pick operations are the
               exception: commits would be misleading before the user continues
               or aborts the operation. */}
-          {shouldRenderCommitArea(scope, unresolvedConflicts.length, conflictOperation) && (
-            <CommitArea
-              worktreeId={activeWorktreeId}
-              commitMessage={commitMessage}
-              commitError={commitError}
-              remoteActionError={remoteActionError?.message ?? null}
-              isCommitting={isCommitting}
-              aiEnabled={commitMessageAi?.enabled === true}
-              aiAgentConfigured={
-                commitMessageAi?.enabled === true &&
-                effectiveCommitMessageAgentId !== null &&
-                // Why: 'custom' is configured only once the user types a command.
-                // Without this guard, Generate would spawn an empty command and
-                // fail with a confusing error.
-                (!isCustomAgentId(effectiveCommitMessageAgentId) ||
-                  (commitMessageAi.customAgentCommand ?? '').trim().length > 0)
-              }
-              isGenerating={isGenerating}
-              generateError={generateError}
-              stagedCount={grouped.staged.length}
-              hasUnresolvedConflicts={unresolvedConflicts.length > 0}
-              isRemoteOperationActive={isRemoteOperationActive}
-              inFlightRemoteOpKind={inFlightRemoteOpKind}
-              primaryAction={primaryAction}
-              dropdownItems={dropdownItems}
-              onCommitMessageChange={(value) => {
-                if (!activeWorktreeId) {
-                  return
+          {shouldRenderCommitArea(scope, unresolvedConflicts.length, conflictOperation) &&
+            (primaryAction.kind === 'create_pr' ? (
+              <PullRequestComposer
+                branch={branchName}
+                base={prBase}
+                setBase={setPrBase}
+                title={prTitle}
+                setTitle={setPrTitle}
+                body={prBody}
+                setBody={setPrBody}
+                draft={prDraft}
+                setDraft={setPrDraft}
+                baseQuery={prBaseQuery}
+                setBaseQuery={setPrBaseQuery}
+                baseResults={prBaseResults}
+                setBaseResults={setPrBaseResults}
+                baseSearchError={prBaseSearchError}
+                aiGenerationEnabled={prAiGenerationEnabled}
+                generating={prGenerating}
+                generateDisabled={prGenerateDisabled}
+                generateDisabledReason={prGenerateDisabledReason}
+                generateError={prGenerateError}
+                createError={createPrError}
+                isCreating={isCreatingPr}
+                primaryAction={primaryAction}
+                dropdownItems={dropdownItems}
+                onGenerate={() => void handleGeneratePullRequestFields()}
+                onCancelGenerate={handleCancelGeneratePullRequestFields}
+                onPrimaryAction={handlePrimaryClick}
+                onDropdownAction={handleActionInvoke}
+              />
+            ) : (
+              <CommitArea
+                worktreeId={activeWorktreeId}
+                commitMessage={commitMessage}
+                commitError={commitError}
+                remoteActionError={remoteActionError?.message ?? null}
+                isCommitting={isCommitting}
+                aiEnabled={commitMessageAi?.enabled === true}
+                aiAgentConfigured={
+                  commitMessageAi?.enabled === true &&
+                  effectiveCommitMessageAgentId !== null &&
+                  // Why: 'custom' is configured only once the user types a command.
+                  // Without this guard, Generate would spawn an empty command and
+                  // fail with a confusing error.
+                  (!isCustomAgentId(effectiveCommitMessageAgentId) ||
+                    (commitMessageAi.customAgentCommand ?? '').trim().length > 0)
                 }
-                setCommitDrafts((prev) =>
-                  writeCommitDraftForWorktree(prev, activeWorktreeId, value)
-                )
-              }}
-              onGenerate={() => {
-                void handleGenerate()
-              }}
-              onCancelGenerate={handleCancelGenerate}
-              onPrimaryAction={handlePrimaryClick}
-              onDropdownAction={handleActionInvoke}
-            />
-          )}
+                isGenerating={isGenerating}
+                generateError={generateError}
+                stagedCount={grouped.staged.length}
+                hasUnresolvedConflicts={unresolvedConflicts.length > 0}
+                isRemoteOperationActive={isRemoteOperationActive}
+                inFlightRemoteOpKind={inFlightRemoteOpKind}
+                primaryAction={primaryAction}
+                dropdownItems={dropdownItems}
+                onCommitMessageChange={(value) => {
+                  if (!activeWorktreeId) {
+                    return
+                  }
+                  setCommitDrafts((prev) =>
+                    writeCommitDraftForWorktree(prev, activeWorktreeId, value)
+                  )
+                }}
+                onGenerate={() => {
+                  void handleGenerate()
+                }}
+                onCancelGenerate={handleCancelGenerate}
+                onPrimaryAction={handlePrimaryClick}
+                onDropdownAction={handleActionInvoke}
+              />
+            ))}
 
           {(scope === 'all' || scope === 'uncommitted') && hasFilteredUncommittedEntries && (
             <>
@@ -3463,12 +3584,266 @@ function SourceControlInner(): React.JSX.Element {
 const SourceControl = React.memo(SourceControlInner)
 export default SourceControl
 
+type PullRequestComposerProps = {
+  branch: string
+  base: string
+  setBase: (value: string) => void
+  title: string
+  setTitle: (value: string) => void
+  body: string
+  setBody: (value: string) => void
+  draft: boolean
+  setDraft: (value: boolean) => void
+  baseQuery: string
+  setBaseQuery: (value: string) => void
+  baseResults: string[]
+  setBaseResults: (value: string[]) => void
+  baseSearchError: string | null
+  aiGenerationEnabled: boolean
+  generating: boolean
+  generateDisabled: boolean
+  generateDisabledReason?: string
+  generateError: string | null
+  createError: string | null
+  isCreating: boolean
+  primaryAction: PrimaryAction
+  dropdownItems: DropdownEntry[]
+  onGenerate: () => void
+  onCancelGenerate: () => void
+  onPrimaryAction: () => void
+  onDropdownAction: (kind: DropdownActionKind) => void
+}
+
+function PullRequestComposer({
+  branch,
+  base,
+  setBase,
+  title,
+  setTitle,
+  body,
+  setBody,
+  draft,
+  setDraft,
+  baseQuery,
+  setBaseQuery,
+  baseResults,
+  setBaseResults,
+  baseSearchError,
+  aiGenerationEnabled,
+  generating,
+  generateDisabled,
+  generateDisabledReason,
+  generateError,
+  createError,
+  isCreating,
+  primaryAction,
+  dropdownItems,
+  onGenerate,
+  onCancelGenerate,
+  onPrimaryAction,
+  onDropdownAction
+}: PullRequestComposerProps): React.JSX.Element {
+  const normalizedBase = stripBaseRef(base)
+  const createDisabled =
+    primaryAction.disabled ||
+    generating ||
+    title.trim().length === 0 ||
+    normalizedBase.trim().length === 0 ||
+    normalizedBase.toLowerCase() === stripBaseRef(branch).toLowerCase()
+
+  return (
+    <div className="px-3 pb-2">
+      <div className="space-y-2">
+        <div className="flex min-w-0 items-center justify-between gap-2">
+          <div className="min-w-0 truncate text-[11px] text-muted-foreground">
+            <span className="font-medium text-foreground">Create Pull Request</span>
+            <span className="mx-1">·</span>
+            <span>
+              {branch} → {normalizedBase || 'base'}
+            </span>
+          </div>
+          {aiGenerationEnabled ? (
+            generating ? (
+              <button
+                type="button"
+                onClick={() => onCancelGenerate()}
+                className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-border bg-background px-2 text-[11px] text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                title="Stop generating"
+                aria-label="Stop generating pull request details"
+              >
+                <RefreshCw className="size-3.5 animate-spin" />
+                Generating
+                <Square className="size-3 fill-current" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled={generateDisabled}
+                onClick={() => onGenerate()}
+                className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-border bg-background px-2 text-[11px] text-foreground transition-colors hover:bg-accent disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-background"
+                title={generateDisabledReason ?? 'Generate pull request details with AI'}
+                aria-label="Generate pull request details with AI"
+              >
+                <Sparkles className="size-3.5" />
+                Generate
+              </button>
+            )
+          ) : null}
+        </div>
+
+        <div className="grid grid-cols-[minmax(0,1fr)_96px] gap-1.5">
+          <input
+            aria-label="Pull request title"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Title"
+            className="h-8 min-w-0 rounded-md border border-border bg-background px-2 text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-1 focus-visible:ring-ring"
+          />
+          <div className="relative">
+            <input
+              aria-label="Pull request base branch"
+              value={baseQuery || base}
+              onChange={(event) => {
+                setBaseQuery(event.target.value)
+                setBase(event.target.value)
+              }}
+              placeholder="main"
+              className="h-8 w-full min-w-0 rounded-md border border-border bg-background px-2 pr-6 text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-1 focus-visible:ring-ring"
+            />
+            <ChevronDown className="pointer-events-none absolute right-1.5 top-2 size-3.5 text-muted-foreground" />
+          </div>
+        </div>
+
+        {baseResults.length > 0 ? (
+          <div className="max-h-28 overflow-auto rounded-md border border-border p-1 scrollbar-sleek">
+            {baseResults.map((ref) => (
+              <button
+                key={ref}
+                type="button"
+                className={cn(
+                  'flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent',
+                  stripBaseRef(base) === ref && 'bg-accent text-accent-foreground'
+                )}
+                onClick={() => {
+                  setBase(ref)
+                  setBaseQuery('')
+                  setBaseResults([])
+                }}
+              >
+                <span className="truncate">{ref}</span>
+                {stripBaseRef(base) === ref ? <Check className="size-3" /> : null}
+              </button>
+            ))}
+          </div>
+        ) : null}
+
+        <textarea
+          aria-label="Pull request description"
+          rows={6}
+          value={body}
+          onChange={(event) => setBody(event.target.value)}
+          placeholder="Description"
+          className="w-full resize-none rounded-md border border-border bg-background px-2 py-1.5 text-xs text-foreground outline-none placeholder:text-muted-foreground/70 focus-visible:ring-1 focus-visible:ring-ring"
+        />
+
+        <div className="flex items-center justify-between gap-2">
+          <label className="inline-flex items-center gap-1.5 text-xs text-foreground">
+            <input
+              type="checkbox"
+              checked={draft}
+              onChange={(event) => setDraft(event.target.checked)}
+              className="size-3.5 rounded border-border accent-primary"
+            />
+            Draft
+          </label>
+          <span className="truncate text-[11px] text-muted-foreground">
+            {normalizedBase || 'base'}
+          </span>
+        </div>
+
+        <div className="flex items-stretch">
+          <Button
+            type="button"
+            size="xs"
+            disabled={createDisabled}
+            onClick={() => onPrimaryAction()}
+            className="flex-1 rounded-r-none px-3 text-[11px]"
+            title={primaryAction.title}
+          >
+            {isCreating ? (
+              <RefreshCw className="size-3.5 animate-spin" />
+            ) : (
+              <GitPullRequestArrow className="size-3.5" />
+            )}
+            Create PR
+          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                size="xs"
+                className={cn(
+                  'rounded-l-none border-l border-primary-foreground/20 px-1.5 shrink-0',
+                  createDisabled && 'opacity-50'
+                )}
+                aria-label="More pull request and remote actions"
+                title="More actions"
+              >
+                <ChevronDown className="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="min-w-[14rem]">
+              {dropdownItems.map((entry, index) =>
+                entry.kind === 'separator' ? (
+                  <DropdownMenuSeparator key={`sep-${index}`} />
+                ) : (
+                  <DropdownMenuItem
+                    key={entry.kind}
+                    disabled={entry.disabled}
+                    title={entry.title}
+                    onSelect={(event) => {
+                      if (entry.disabled) {
+                        event.preventDefault()
+                        return
+                      }
+                      onDropdownAction(entry.kind)
+                    }}
+                  >
+                    <span className="flex min-w-0 flex-col">
+                      <span>{entry.label}</span>
+                      {entry.hint ? (
+                        <span className="truncate text-[10px] text-muted-foreground">
+                          {entry.hint}
+                        </span>
+                      ) : null}
+                    </span>
+                  </DropdownMenuItem>
+                )
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {normalizedBase.toLowerCase() === stripBaseRef(branch).toLowerCase() ? (
+          <p className="text-[11px] text-destructive">
+            Choose a different base branch before creating a pull request.
+          </p>
+        ) : null}
+        {baseSearchError ? <p className="text-[11px] text-destructive">{baseSearchError}</p> : null}
+        {generateError ? <p className="text-[11px] text-destructive">{generateError}</p> : null}
+        {createError ? <p className="text-[11px] text-destructive">{createError}</p> : null}
+      </div>
+    </div>
+  )
+}
+
 type CommitAreaProps = {
   worktreeId: string | null
   commitMessage: string
   commitError: string | null
   remoteActionError: string | null
   isCommitting: boolean
+  isCreatingPr?: boolean
   aiEnabled: boolean
   aiAgentConfigured: boolean
   isGenerating: boolean
@@ -3492,6 +3867,7 @@ export function CommitArea({
   commitError,
   remoteActionError,
   isCommitting,
+  isCreatingPr = false,
   aiEnabled,
   aiAgentConfigured,
   isGenerating,
@@ -3522,9 +3898,11 @@ export function CommitArea({
   // signal there. Commit still spins on isCommitting because that path
   // doesn't go through inFlightRemoteOpKind.
   const showSpinner =
-    primaryAction.kind === 'commit'
-      ? isCommitting
-      : isRemoteOperationActive && primaryAction.kind === inFlightRemoteOpKind
+    primaryAction.kind === 'create_pr'
+      ? isCreatingPr
+      : primaryAction.kind === 'commit'
+        ? isCommitting
+        : isRemoteOperationActive && primaryAction.kind === inFlightRemoteOpKind
   // Why: when the primary doesn't host the in-flight op (e.g. Fetch, or any
   // dropdown action that mismatches the primary's natural label) the click
   // would otherwise be silent — the toast only fires on failure and a
@@ -3532,7 +3910,8 @@ export function CommitArea({
   // the user immediate feedback that the action they picked is running,
   // while still leaving the menu reachable to read the disabled-row
   // tooltips.
-  const showChevronSpinner = (isCommitting || isRemoteOperationActive) && !showSpinner
+  const showChevronSpinner =
+    (isCommitting || isCreatingPr || isRemoteOperationActive) && !showSpinner
   const commitFailureSummary = useMemo(
     () => (commitError ? summarizeCommitFailure(commitError) : null),
     [commitError]

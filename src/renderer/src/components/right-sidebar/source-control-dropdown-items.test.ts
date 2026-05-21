@@ -259,7 +259,7 @@ describe('resolveDropdownItems', () => {
     expect(byKind.sync.label).toBe('Sync (↓3 ↑2)')
   })
 
-  it('enables Push & Create PR when review creation is only blocked by unpushed commits', () => {
+  it('enables the push-before-PR recovery action when review creation is only blocked by unpushed commits', () => {
     const items = resolveDropdownItems(
       inputs({
         upstreamStatus: { hasUpstream: true, ahead: 2, behind: 0 },
@@ -277,6 +277,7 @@ describe('resolveDropdownItems', () => {
     )
     expect(byKind.create_pr.disabled).toBe(true)
     expect(byKind.create_pr.hint).toBe('Push first')
+    expect(byKind.push_create_pr.label).toBe('Push before PR')
     expect(byKind.push_create_pr.disabled).toBe(false)
   })
 })
