@@ -205,7 +205,7 @@ const SOURCE_CONTROL_TREE_INDENT_PX = 12
 const SOURCE_CONTROL_TREE_DIRECTORY_PADDING_PX = 8
 const SOURCE_CONTROL_TREE_FILE_PADDING_PX = 20
 const EMPTY_GIT_HISTORY_STATE: GitHistoryPanelState = { status: 'idle' }
-const DEFAULT_COLLAPSED_SECTIONS = [] as const
+const DEFAULT_COLLAPSED_SECTIONS = ['history'] as const
 
 function createDefaultCollapsedSections(): Set<string> {
   return new Set(DEFAULT_COLLAPSED_SECTIONS)
@@ -1034,6 +1034,7 @@ function SourceControlInner(): React.JSX.Element {
   const gitHistoryState = activeWorktreeId
     ? (gitHistoryByWorktree[activeWorktreeId] ?? EMPTY_GIT_HISTORY_STATE)
     : EMPTY_GIT_HISTORY_STATE
+  const isGitHistoryExpanded = !collapsedSections.has('history')
 
   const isFolder = activeRepo ? isFolderRepo(activeRepo) : false
   const worktreePath = activeWorktree?.path ?? null
@@ -2914,7 +2915,13 @@ function SourceControlInner(): React.JSX.Element {
   refreshBranchCompareRef.current = refreshBranchCompare
 
   const refreshGitHistory = useCallback(async (): Promise<void> => {
-    if (!activeWorktreeId || !worktreePath || isFolder || !isBranchVisible) {
+    if (
+      !activeWorktreeId ||
+      !worktreePath ||
+      isFolder ||
+      !isBranchVisible ||
+      !isGitHistoryExpanded
+    ) {
       return
     }
 
@@ -2962,7 +2969,14 @@ function SourceControlInner(): React.JSX.Element {
         }
       })
     }
-  }, [activeWorktreeId, effectiveBaseRef, isBranchVisible, isFolder, worktreePath])
+  }, [
+    activeWorktreeId,
+    effectiveBaseRef,
+    isBranchVisible,
+    isFolder,
+    isGitHistoryExpanded,
+    worktreePath
+  ])
 
   const refreshGitHistoryRef = useRef(refreshGitHistory)
   refreshGitHistoryRef.current = refreshGitHistory
@@ -2982,14 +2996,20 @@ function SourceControlInner(): React.JSX.Element {
   }, [activeWorktreeId, effectiveBaseRef, isBranchVisible, isFolder, worktreePath])
 
   useEffect(() => {
-    // Why: history shells out to git, but unlike branch compare it only needs
-    // visible-load and mutation refreshes. Avoid polling so long sessions don't
-    // spawn git processes for a decorative graph.
-    if (!isBranchVisible) {
+    // Why: history shells out to git. Defer the first load until the user
+    // expands Graph so source control stays cheap for large/remote repos.
+    if (!isBranchVisible || !isGitHistoryExpanded) {
       return
     }
     void refreshGitHistoryRef.current()
-  }, [activeWorktreeId, effectiveBaseRef, isBranchVisible, isFolder, worktreePath])
+  }, [
+    activeWorktreeId,
+    effectiveBaseRef,
+    isBranchVisible,
+    isFolder,
+    isGitHistoryExpanded,
+    worktreePath
+  ])
 
   useEffect(() => {
     // Why: gate on isBranchVisible so we don't spawn git processes while the
@@ -3650,7 +3670,7 @@ function SourceControlInner(): React.JSX.Element {
         </div>
 
         <div
-          className="relative flex flex-1 flex-col overflow-auto scrollbar-sleek py-1"
+          className="relative flex flex-1 flex-col overflow-auto scrollbar-sleek pt-1"
           style={{ paddingBottom: selectedKeys.size > 0 ? 50 : undefined }}
         >
           {unresolvedConflictReviewEntries.length > 0 && (
@@ -4069,20 +4089,24 @@ function SourceControlInner(): React.JSX.Element {
             </div>
           )}
 
-          {scope === 'all' && !normalizedFilter && (
-            // Why: the graph is reference context for the whole panel, so when
-            // file sections are short it should occupy the bottom, and when the
-            // pane scrolls it should remain docked as branch context.
-            <div className="sticky bottom-0 z-10 mt-auto shrink-0 border-t border-border bg-sidebar/95 backdrop-blur-sm">
-              <GitHistoryPanel
-                state={gitHistoryState}
-                collapsed={collapsedSections.has('history')}
-                onToggle={() => toggleSection('history')}
-                onRefresh={() => void refreshGitHistory()}
-                onOpenCommit={(item) => void openHistoryCommitDiff(item)}
-              />
-            </div>
-          )}
+          {scope === 'all' &&
+            !normalizedFilter &&
+            activeWorktreeId &&
+            worktreePath &&
+            !isFolder && (
+              // Why: the graph is reference context for the whole panel, so when
+              // file sections are short it should occupy the bottom, and when the
+              // pane scrolls it should remain docked as branch context.
+              <div className="sticky bottom-0 z-10 mt-auto shrink-0 border-t border-border bg-sidebar/95 backdrop-blur-sm">
+                <GitHistoryPanel
+                  state={gitHistoryState}
+                  collapsed={collapsedSections.has('history')}
+                  onToggle={() => toggleSection('history')}
+                  onRefresh={() => void refreshGitHistory()}
+                  onOpenCommit={(item) => void openHistoryCommitDiff(item)}
+                />
+              </div>
+            )}
         </div>
 
         {selectedKeys.size > 0 && (
