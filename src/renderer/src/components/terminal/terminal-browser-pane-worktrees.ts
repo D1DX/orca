@@ -8,6 +8,29 @@ export type TerminalBrowserPaneWorktreeInput = {
   activeBrowserTabCount: number
 }
 
+export type TerminalBrowserPaneFallbackInput = Omit<
+  TerminalBrowserPaneWorktreeInput,
+  'mountedWorktreeIds'
+> & {
+  activeWorktreeMounted: boolean
+}
+
+export function shouldRenderPreReadyBrowserPaneFallback({
+  worktreeIds,
+  activeWorktreeId,
+  activeTabType,
+  activeBrowserTabCount,
+  activeWorktreeMounted
+}: TerminalBrowserPaneFallbackInput): boolean {
+  return (
+    activeWorktreeId !== null &&
+    activeTabType === 'browser' &&
+    activeBrowserTabCount > 0 &&
+    !activeWorktreeMounted &&
+    worktreeIds.includes(activeWorktreeId)
+  )
+}
+
 export function getTerminalBrowserPaneWorktreeIds({
   mountedWorktreeIds,
   worktreeIds,

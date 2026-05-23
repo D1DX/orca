@@ -110,4 +110,17 @@ describe('getTerminalMountedWorktreeSnapshot', () => {
     expect(second).not.toBe(first)
     expect(second.mountedWorktrees.map((item) => item.id)).toEqual(['wt-active', 'wt-mounted'])
   })
+
+  it('dedupes duplicate worktree ids before mounting pane trees', () => {
+    const snapshot = getTerminalMountedWorktreeSnapshot(
+      {
+        'repo-1': [worktree({ id: 'wt-active', path: '/repo/active-a' })],
+        'repo-2': [worktree({ id: 'wt-active', path: '/repo/active-b', repoId: 'repo-2' })]
+      },
+      new Set(['wt-active'])
+    )
+
+    expect(snapshot.worktreeIds).toEqual(['wt-active'])
+    expect(snapshot.mountedWorktrees).toEqual([{ id: 'wt-active', path: '/repo/active-a' }])
+  })
 })

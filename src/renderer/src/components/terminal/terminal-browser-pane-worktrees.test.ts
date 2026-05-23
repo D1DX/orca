@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { getTerminalBrowserPaneWorktreeIds } from './terminal-browser-pane-worktrees'
+import {
+  getTerminalBrowserPaneWorktreeIds,
+  shouldRenderPreReadyBrowserPaneFallback
+} from './terminal-browser-pane-worktrees'
 
 describe('getTerminalBrowserPaneWorktreeIds', () => {
   it('returns mounted worktrees unchanged for normal mounted browser panes', () => {
@@ -48,5 +51,36 @@ describe('getTerminalBrowserPaneWorktreeIds', () => {
         activeBrowserTabCount: 1
       })
     ).toEqual([])
+  })
+
+  it('flags only active unmounted browser worktrees for pre-ready fallback rendering', () => {
+    expect(
+      shouldRenderPreReadyBrowserPaneFallback({
+        worktreeIds: ['wt-active'],
+        activeWorktreeId: 'wt-active',
+        activeTabType: 'browser',
+        activeBrowserTabCount: 1,
+        activeWorktreeMounted: false
+      })
+    ).toBe(true)
+
+    expect(
+      shouldRenderPreReadyBrowserPaneFallback({
+        worktreeIds: ['wt-active'],
+        activeWorktreeId: 'wt-active',
+        activeTabType: 'browser',
+        activeBrowserTabCount: 1,
+        activeWorktreeMounted: true
+      })
+    ).toBe(false)
+    expect(
+      shouldRenderPreReadyBrowserPaneFallback({
+        worktreeIds: ['wt-active'],
+        activeWorktreeId: 'wt-active',
+        activeTabType: 'terminal',
+        activeBrowserTabCount: 1,
+        activeWorktreeMounted: false
+      })
+    ).toBe(false)
   })
 })

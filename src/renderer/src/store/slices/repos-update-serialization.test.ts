@@ -127,4 +127,21 @@ describe('repo update serialization', () => {
       errorSpy.mockRestore()
     }
   })
+
+  it('does not apply repo icons that fail shared sanitization', async () => {
+    reposUpdate.mockResolvedValueOnce(undefined)
+    const store = createTestStore()
+    store.setState({ repos: [localRepo] })
+
+    await store.getState().updateRepo(localRepo.id, {
+      repoIcon: {
+        type: 'image',
+        source: 'github',
+        src: 'https://example.com/icon.png'
+      } as never
+    })
+
+    expect(reposUpdate).toHaveBeenCalledWith({ repoId: localRepo.id, updates: {} })
+    expect(store.getState().repos[0]?.repoIcon).toBeUndefined()
+  })
 })

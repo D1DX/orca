@@ -38,16 +38,18 @@ export function getTerminalMountedWorktreeSnapshot(
     return cachedSnapshot
   }
 
-  const mountedWorktrees: Pick<Worktree, 'id' | 'path'>[] = []
-  const worktreeIds: string[] = []
+  const worktreeById = new Map<string, Pick<Worktree, 'id' | 'path'>>()
   for (const repoWorktrees of Object.values(worktreesByRepo)) {
     for (const worktree of repoWorktrees) {
-      worktreeIds.push(worktree.id)
-      if (mountedWorktreeIds.has(worktree.id)) {
-        mountedWorktrees.push({ id: worktree.id, path: worktree.path })
+      if (!worktreeById.has(worktree.id)) {
+        worktreeById.set(worktree.id, { id: worktree.id, path: worktree.path })
       }
     }
   }
+  const worktreeIds = [...worktreeById.keys()]
+  const mountedWorktrees = [...worktreeById.values()].filter((worktree) =>
+    mountedWorktreeIds.has(worktree.id)
+  )
 
   cachedWorktreesByRepo = worktreesByRepo
   cachedMountedIdsKey = nextMountedIdsKey

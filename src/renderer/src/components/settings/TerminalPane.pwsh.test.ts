@@ -85,6 +85,18 @@ vi.mock('./SettingsFormControls', () => ({
   },
   FontAutocomplete: function FontAutocomplete() {
     return null
+  },
+  SettingsRow: function SettingsRow() {
+    return null
+  },
+  SettingsSegmentedControl: function SettingsSegmentedControl() {
+    return null
+  },
+  SettingsSubsectionHeader: function SettingsSubsectionHeader() {
+    return null
+  },
+  SettingsSwitchRow: function SettingsSwitchRow() {
+    return null
   }
 }))
 
@@ -140,6 +152,26 @@ type ReactElementLike = {
   props: Record<string, unknown>
 }
 
+function getPropNodes(props: Record<string, unknown> | undefined): unknown[] {
+  if (!props) {
+    return []
+  }
+  const optionLabels = Array.isArray(props.options)
+    ? props.options.map((option) =>
+        option && typeof option === 'object' ? (option as { label?: unknown }).label : undefined
+      )
+    : []
+  return [
+    props.children,
+    props.title,
+    props.label,
+    props.description,
+    props.control,
+    props.action,
+    ...optionLabels
+  ]
+}
+
 function collectText(node: unknown): string {
   if (node == null) {
     return ''
@@ -154,7 +186,7 @@ function collectText(node: unknown): string {
     return node.map(collectText).join('')
   }
   const el = node as ReactElementLike
-  return collectText(el.props?.children)
+  return getPropNodes(el.props).map(collectText).join('')
 }
 
 function findAnchorByText(node: unknown, text: string): ReactElementLike | null {
@@ -178,7 +210,13 @@ function findAnchorByText(node: unknown, text: string): ReactElementLike | null 
   if (typeName === 'a' && collectText(el.props.children).includes(text)) {
     return el
   }
-  return findAnchorByText(el.props?.children, text)
+  for (const child of getPropNodes(el.props)) {
+    const found = findAnchorByText(child, text)
+    if (found) {
+      return found
+    }
+  }
+  return null
 }
 
 describe('TerminalPane PowerShell version setting', () => {

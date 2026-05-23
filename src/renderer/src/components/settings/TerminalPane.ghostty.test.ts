@@ -85,6 +85,18 @@ vi.mock('./SettingsFormControls', () => ({
   },
   FontAutocomplete: function FontAutocomplete() {
     return null
+  },
+  SettingsRow: function SettingsRow() {
+    return null
+  },
+  SettingsSegmentedControl: function SettingsSegmentedControl() {
+    return null
+  },
+  SettingsSubsectionHeader: function SettingsSubsectionHeader() {
+    return null
+  },
+  SettingsSwitchRow: function SettingsSwitchRow() {
+    return null
   }
 }))
 
