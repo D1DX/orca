@@ -11,7 +11,7 @@ const TOUR_LEARNING_POINTS: readonly string[] = [
   'Run agents in isolated workspaces.',
   'Orchestrate agents to finish larger tasks.',
   'Start tasks from GitHub or Linear.',
-  'In-app browser.'
+  'Send webpage elements to agents from the Orca browser.'
 ]
 
 type OnboardingTourStepProps = {

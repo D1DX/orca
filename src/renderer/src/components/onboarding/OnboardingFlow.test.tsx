@@ -35,7 +35,7 @@ describe('OnboardingFlow', () => {
     expect(html).toContain('Run agents in isolated workspaces.')
     expect(html).toContain('Orchestrate agents to finish larger tasks.')
     expect(html).toContain('Start tasks from GitHub or Linear.')
-    expect(html).toContain('In-app browser.')
+    expect(html).toContain('Send webpage elements to agents from the Orca browser.')
     expect(html).not.toContain('Write and preview Markdown.')
     expect(html).toContain('items-start')
     expect(html).toContain('text-left')
