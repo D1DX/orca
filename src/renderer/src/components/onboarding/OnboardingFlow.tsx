@@ -157,6 +157,9 @@ export default function OnboardingFlow({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
+      if (isEditableTarget(event.target)) {
+        return
+      }
       if (event.key !== 'Escape' || skipConfirmOpen) {
         return
       }
