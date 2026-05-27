@@ -359,4 +359,20 @@ describe('ConflictSummaryCard', () => {
     expect(mergeMarkup).toContain('Abort merge')
     expect(rebaseMarkup).not.toContain('Abort merge')
   })
+
+  it('renders the Sparkles icon on the idle Resolve with AI button', () => {
+    const markup = renderToStaticMarkup(
+      <ConflictSummaryCard
+        conflictOperation="merge"
+        unresolvedCount={2}
+        isResolvingWithAI={false}
+        onResolveWithAI={vi.fn()}
+        onReview={vi.fn()}
+      />
+    )
+
+    expect(markup).toContain('Resolve with AI')
+    expect(markup).toContain('lucide-sparkles')
+    expect(markup).not.toMatch(/\blucide-sparkle(?!s)\b/)
+  })
 })
