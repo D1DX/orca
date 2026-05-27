@@ -262,8 +262,10 @@ export function sourceControlAiSettingsFromLegacy(
     customAgentCommand: legacy.customAgentCommand,
     instructionsByOperation: {
       commitMessage: legacy.customPrompt ?? '',
+      // Why: the legacy prompt covered commit generation and branch auto-rename;
+      // the first split must preserve that guidance for both released paths.
       pullRequest: '',
-      branchName: ''
+      branchName: legacy.customPrompt ?? ''
     }
   }
 }

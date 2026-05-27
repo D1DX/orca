@@ -292,7 +292,7 @@ describe('source-control AI resolution', () => {
     ).toMatchObject({ draft: true, openAfterCreate: false })
   })
 
-  it('maps legacy custom prompt only to commit-message instructions', () => {
+  it('maps legacy custom prompt to released split instructions', () => {
     const migrated = sourceControlAiSettingsFromLegacy({
       enabled: true,
       agentId: 'codex',
@@ -303,7 +303,7 @@ describe('source-control AI resolution', () => {
     })
     expect(migrated.instructionsByOperation.commitMessage).toBe('Legacy commit prompt')
     expect(migrated.instructionsByOperation.pullRequest).toBe('')
-    expect(migrated.instructionsByOperation.branchName).toBe('')
+    expect(migrated.instructionsByOperation.branchName).toBe('Legacy commit prompt')
   })
 
   it('merges legacy commit-message updates without wiping PR-only settings', () => {

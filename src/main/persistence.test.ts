@@ -796,7 +796,7 @@ describe('Store', () => {
       instructionsByOperation: {
         commitMessage: 'Use Conventional Commits.',
         pullRequest: '',
-        branchName: ''
+        branchName: 'Use Conventional Commits.'
       }
     })
     expect(sourceControlAi?.selectedModelByAgentByHost?.['ssh:conn-1']?.cursor).toBe('remote-model')
