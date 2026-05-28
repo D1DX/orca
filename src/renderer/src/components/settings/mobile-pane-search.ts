@@ -29,6 +29,12 @@ export const MOBILE_PANE_SEARCH_ENTRIES: SettingsSearchEntry[] = [
     ]
   },
   {
+    title: 'Self-hosted relay',
+    description:
+      'Connect mobile and remote clients through a relay when direct pairing cannot reach this computer.',
+    keywords: ['mobile', 'relay', 'remote', 'pair', 'websocket', 'server', 'client', 'self-hosted']
+  },
+  {
     title: 'When you leave the mobile app',
     description:
       'Choose what happens to terminals you were viewing on mobile after you close the app or switch away.',

@@ -81,6 +81,7 @@ docs/**
 !docs/reference/
 !docs/reference/**
 !docs/STYLEGUIDE.md
+!docs/runtime-relay-design.md
 
 # Stably CLI (only docs/ are tracked)
 .stably/*

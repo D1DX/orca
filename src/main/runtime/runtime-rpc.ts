@@ -20,6 +20,14 @@ import type { WebSocket } from 'ws'
 import { DeviceRegistry, type DeviceScope } from './device-registry'
 import { loadOrCreateE2EEKeypair, type E2EEKeypair } from './e2ee-keypair'
 import { E2EEChannel } from './rpc/e2ee-channel'
+import { loadRuntimeRelayConfig, saveRuntimeRelayConfig } from './relay-config'
+import {
+  RuntimeRelayClient,
+  type RuntimeRelayConfig,
+  type RuntimeRelayStatus
+} from './relay-client'
+import { loadOrCreateRuntimeRelayIdentity } from './relay-identity'
+import type { RuntimeWebSocketTransportKind } from '../../shared/runtime-relay-transport'
 import { encodePairingOffer, PAIRING_OFFER_VERSION } from '../../shared/pairing'
 import {
   decodeTerminalStreamFrame,
@@ -311,7 +319,8 @@ export class OrcaRuntimeRpcServer {
   private deviceRegistry: DeviceRegistry | null = null
   private e2eeKeypair: E2EEKeypair | null = null
   private tlsFingerprint: string | null = null
-  private wsTransport: WebSocketTransport | null = null
+  private relayClient: RuntimeRelayClient | null = null
+  private relayConfig: RuntimeRelayConfig | null = null
   private activeTransports: RpcTransport[] = []
   private transports: RuntimeTransportMetadata[] = []
   // Why: each WebSocket connection has its own E2EE channel that manages the
@@ -321,6 +330,7 @@ export class OrcaRuntimeRpcServer {
   // subscriptions, so the server can reap a closing socket's subscriptions
   // without affecting other live sockets that share the same deviceToken.
   private wsConnectionIds = new Map<WebSocket, string>()
+  private runtimeWsClientIds = new Map<WebSocket, string>()
   private readonly binaryStreamHandlers = new Map<
     string,
     Map<number, (frame: TerminalStreamFrame) => void>
@@ -378,7 +388,7 @@ export class OrcaRuntimeRpcServer {
     if (device?.scope !== 'mobile' || !this.deviceRegistry?.removeDevice(deviceId)) {
       return false
     }
-    this.wsTransport?.terminateClientConnections(device.token)
+    this.terminateRuntimeWebSocketConnections(device.token)
     return true
   }
 
@@ -387,13 +397,96 @@ export class OrcaRuntimeRpcServer {
     if (device?.scope !== 'runtime' || !this.deviceRegistry?.removeDevice(deviceId)) {
       return false
     }
-    this.wsTransport?.terminateClientConnections(device.token)
+    this.terminateRuntimeWebSocketConnections(device.token)
     return true
+  }
+
+  attachExternalWebSocket(
+    ws: WebSocket,
+    transportKind: RuntimeWebSocketTransportKind = 'relay',
+    onAuthenticated?: (deviceToken: string) => void
+  ): void {
+    this.attachRuntimeWebSocket(ws, transportKind, onAuthenticated)
+    ws.on('message', (data, isBinary) => {
+      const msg =
+        typeof data === 'string'
+          ? data
+          : isBinary
+            ? new Uint8Array(data as Buffer)
+            : data.toString()
+      this.e2eeChannels.get(ws)?.handleRawMessage(msg)
+    })
+    ws.on('close', () => this.cleanupRuntimeWebSocket(ws))
+    ws.on('error', () => {
+      this.cleanupRuntimeWebSocket(ws)
+      ws.close()
+    })
   }
 
   getWebSocketEndpoint(): string | null {
     const ws = this.transports.find((t) => t.kind === 'websocket')
     return ws?.endpoint ?? null
+  }
+
+  getRelayConfig(): RuntimeRelayConfig {
+    return this.relayConfig ?? loadRuntimeRelayConfig(this.userDataPath)
+  }
+
+  updateRelayConfig(config: RuntimeRelayConfig): RuntimeRelayConfig {
+    const saved = saveRuntimeRelayConfig(this.userDataPath, config)
+    this.relayConfig = saved
+    this.relayClient?.updateConfig(saved)
+    return saved
+  }
+
+  getRelayStatus(): RuntimeRelayStatus {
+    return (
+      this.relayClient?.getStatus() ?? {
+        state: 'disabled',
+        activeDataSockets: 0,
+        error: null
+      }
+    )
+  }
+
+  createRelayPairingOffer(args: { name?: string; rotate?: boolean; scope?: DeviceScope }):
+    | { available: false; reason: string }
+    | {
+        available: true
+        pairingUrl: string
+        endpoint: string
+        deviceId: string
+        webClientUrl: string | null
+      } {
+    const endpoint = this.relayClient?.createClientEndpoint()
+    const publicKeyB64 = this.getE2EEPublicKey()
+    if (!endpoint || !this.deviceRegistry || !publicKeyB64) {
+      return { available: false, reason: 'relay_unavailable' }
+    }
+    const rawScope: unknown = args.scope
+    if (rawScope !== undefined && rawScope !== 'mobile' && rawScope !== 'runtime') {
+      return { available: false, reason: 'invalid_scope' }
+    }
+    const scope: DeviceScope = rawScope ?? 'runtime'
+    const deviceName = args.name ?? `Relay ${new Date().toLocaleDateString()}`
+    const device = args.rotate
+      ? this.deviceRegistry.rotatePendingDevice(deviceName, scope)
+      : this.deviceRegistry.getOrCreatePendingDevice(deviceName, scope)
+    const pairingUrl = encodePairingOffer({
+      v: PAIRING_OFFER_VERSION,
+      endpoint,
+      deviceToken: device.token,
+      publicKeyB64
+    })
+    return {
+      available: true,
+      pairingUrl,
+      endpoint,
+      deviceId: device.deviceId,
+      // Why: relay origins are user-configured and may be untrusted; pairing
+      // URLs carry credentials, so only direct trusted web roots may embed them.
+      webClientUrl: null
+    }
   }
 
   createPairingOffer(args: {
@@ -418,7 +511,11 @@ export class OrcaRuntimeRpcServer {
 
     const endpoint = resolvePairingEndpoint(rawEndpoint, args.address)
     const deviceName = args.name ?? `CLI ${new Date().toLocaleDateString()}`
-    const scope = args.scope ?? 'runtime'
+    const rawScope: unknown = args.scope
+    if (rawScope !== undefined && rawScope !== 'mobile' && rawScope !== 'runtime') {
+      return { available: false }
+    }
+    const scope: DeviceScope = rawScope ?? 'runtime'
     const device = args.rotate
       ? this.deviceRegistry.rotatePendingDevice(deviceName, scope)
       : this.deviceRegistry.getOrCreatePendingDevice(deviceName, scope)
@@ -474,6 +571,90 @@ export class OrcaRuntimeRpcServer {
       return
     }
     this.binaryStreamHandlers.get(connectionId)?.get(frame.streamId)?.(frame)
+  }
+
+  private attachRuntimeWebSocket(
+    ws: WebSocket,
+    transportKind: RuntimeWebSocketTransportKind,
+    onAuthenticated?: (deviceToken: string) => void
+  ): E2EEChannel {
+    let channel = this.e2eeChannels.get(ws)
+    if (channel) {
+      return channel
+    }
+    if (!this.e2eeKeypair || !this.deviceRegistry) {
+      ws.close(1011, 'Runtime WebSocket auth unavailable')
+      throw new Error('Runtime WebSocket auth unavailable')
+    }
+    // Why: stable per-ws id used as the cleanup-index key for streaming
+    // subscriptions, so direct and relay sockets reap identical runtime state.
+    this.wsConnectionIds.set(ws, randomBytes(8).toString('hex'))
+    channel = new E2EEChannel(ws, {
+      serverSecretKey: this.e2eeKeypair.secretKey,
+      transportKind,
+      validateToken: (token) => this.deviceRegistry?.validateToken(token) != null,
+      onReady: (ch) => {
+        if (!ch.deviceToken) {
+          return
+        }
+        this.runtimeWsClientIds.set(ws, ch.deviceToken)
+        onAuthenticated?.(ch.deviceToken)
+        const device = this.deviceRegistry?.validateToken(ch.deviceToken)
+        if (device) {
+          this.deviceRegistry?.updateLastSeen(device.deviceId)
+        }
+      },
+      onError: (code, reason) => {
+        this.e2eeChannels.get(ws)?.destroy()
+        this.e2eeChannels.delete(ws)
+        ws.close(code, reason)
+      }
+    })
+    channel.onMessage((plaintext, encryptedReply, encryptedBinaryReply) => {
+      const authenticatedDeviceToken = this.e2eeChannels.get(ws)?.deviceToken ?? null
+      void this.handleWebSocketMessage(
+        plaintext,
+        encryptedReply,
+        encryptedBinaryReply,
+        undefined,
+        ws,
+        authenticatedDeviceToken
+      )
+    })
+    channel.onBinaryMessage((bytes) => this.handleWebSocketBinaryMessage(bytes, ws))
+    this.e2eeChannels.set(ws, channel)
+    return channel
+  }
+
+  private cleanupRuntimeWebSocket(ws: WebSocket, fallbackClientId: string | null = null): void {
+    this.abortWebSocketDispatches(ws)
+    const connectionId = this.wsConnectionIds.get(ws)
+    if (connectionId) {
+      this.runtime.cleanupSubscriptionsForConnection(connectionId)
+      this.runtime.cancelMobileDictationForConnection(connectionId)
+      this.binaryStreamHandlers.delete(connectionId)
+      this.wsConnectionIds.delete(ws)
+    }
+    const channel = this.e2eeChannels.get(ws)
+    if (channel) {
+      channel.destroy()
+      this.e2eeChannels.delete(ws)
+    }
+    const clientId = this.runtimeWsClientIds.get(ws) ?? fallbackClientId
+    this.runtimeWsClientIds.delete(ws)
+    if (clientId && !Array.from(this.runtimeWsClientIds.values()).includes(clientId)) {
+      this.runtime.onClientDisconnected(clientId)
+    }
+  }
+
+  private terminateRuntimeWebSocketConnections(clientId: string): number {
+    const sockets = Array.from(this.runtimeWsClientIds.entries())
+      .filter(([, candidateClientId]) => candidateClientId === clientId)
+      .map(([ws]) => ws)
+    for (const ws of sockets) {
+      ws.terminate()
+    }
+    return sockets.length
   }
 
   private registerWebSocketDispatchAbort(ws: WebSocket): {
@@ -611,54 +792,10 @@ export class OrcaRuntimeRpcServer {
           port: this.wsPort,
           staticRoot: this.webClientRoot
         })
-        this.wsTransport = wsTransport
-
-        // Why: each WebSocket connection gets an E2EE channel that handles the
-        // handshake before any RPC messages are processed. The channel decrypts
-        // inbound messages and encrypts outbound replies transparently.
         wsTransport.onMessage((msg, _reply, ws) => {
-          let channel = this.e2eeChannels.get(ws)
-          if (!channel) {
-            // Why: stable per-ws id used as the cleanup-index key for
-            // streaming subscriptions, so the server can reap them exactly
-            // when this socket closes (without affecting other live sockets
-            // that share the same deviceToken).
-            this.wsConnectionIds.set(ws, randomBytes(8).toString('hex'))
-            channel = new E2EEChannel(ws, {
-              serverSecretKey: this.e2eeKeypair!.secretKey,
-              validateToken: (token) => this.deviceRegistry?.validateToken(token) != null,
-              onReady: (ch) => {
-                if (ch.deviceToken) {
-                  wsTransport.setClientId(ws, ch.deviceToken)
-                  // Why: mark the device as actually connected so it appears
-                  // in the "Paired Devices" list. Devices that were only
-                  // generated as QR codes but never scanned stay hidden.
-                  const device = this.deviceRegistry?.validateToken(ch.deviceToken)
-                  if (device) {
-                    this.deviceRegistry?.updateLastSeen(device.deviceId)
-                  }
-                }
-              },
-              onError: (code, reason) => {
-                this.e2eeChannels.get(ws)?.destroy()
-                this.e2eeChannels.delete(ws)
-                ws.close(code, reason)
-              }
-            })
-            channel.onMessage((plaintext, encryptedReply, encryptedBinaryReply) => {
-              const authenticatedDeviceToken = this.e2eeChannels.get(ws)?.deviceToken ?? null
-              void this.handleWebSocketMessage(
-                plaintext,
-                encryptedReply,
-                encryptedBinaryReply,
-                wsTransport,
-                ws,
-                authenticatedDeviceToken
-              )
-            })
-            channel.onBinaryMessage((bytes) => this.handleWebSocketBinaryMessage(bytes, ws))
-            this.e2eeChannels.set(ws, channel)
-          }
+          const channel = this.attachRuntimeWebSocket(ws, 'direct', (token) =>
+            wsTransport.setClientId(ws, token)
+          )
           channel.handleRawMessage(msg)
         })
 
@@ -668,27 +805,8 @@ export class OrcaRuntimeRpcServer {
         // multiple concurrent sockets (host screen + accounts screen, etc.),
         // so destroy the channel for THIS exact ws and skip the per-client
         // teardown when other sockets for the same token are still alive.
-        wsTransport.onConnectionClose((clientId, ws, hasOtherConnections) => {
-          this.abortWebSocketDispatches(ws)
-          // Why: sweep streaming subscriptions for THIS ws regardless of
-          // hasOtherConnections, so per-ws listeners (notifications,
-          // accounts, terminal) don't leak across reconnects. This is
-          // independent of the deviceToken-scoped onClientDisconnected.
-          const connectionId = this.wsConnectionIds.get(ws)
-          if (connectionId) {
-            this.runtime.cleanupSubscriptionsForConnection(connectionId)
-            this.runtime.cancelMobileDictationForConnection(connectionId)
-            this.binaryStreamHandlers.delete(connectionId)
-            this.wsConnectionIds.delete(ws)
-          }
-          const channel = this.e2eeChannels.get(ws)
-          if (channel) {
-            channel.destroy()
-            this.e2eeChannels.delete(ws)
-          }
-          if (clientId && !hasOtherConnections) {
-            this.runtime.onClientDisconnected(clientId)
-          }
+        wsTransport.onConnectionClose((clientId, ws, _hasOtherConnections) => {
+          this.cleanupRuntimeWebSocket(ws, clientId)
         })
 
         await wsTransport.start()
@@ -697,12 +815,21 @@ export class OrcaRuntimeRpcServer {
           kind: 'websocket',
           endpoint: `ws://0.0.0.0:${wsTransport.resolvedPort}`
         })
+        this.relayConfig = loadRuntimeRelayConfig(this.userDataPath)
+        const relayIdentity = loadOrCreateRuntimeRelayIdentity(this.userDataPath)
+        this.relayClient = new RuntimeRelayClient({
+          config: this.relayConfig,
+          identity: relayIdentity,
+          attachDataSocket: (ws, onAuthenticated) => {
+            this.attachExternalWebSocket(ws, 'relay', () => onAuthenticated())
+          }
+        })
+        this.relayClient.start()
       } catch (error) {
         // Why: WebSocket transport is supplementary — the runtime must still
         // function if it fails to start (e.g., port in use). Log and continue
         // with Unix socket only.
         console.error('[runtime] Failed to start WebSocket transport:', error)
-        this.wsTransport = null
       }
     }
 
@@ -718,6 +845,8 @@ export class OrcaRuntimeRpcServer {
       // Why: a runtime that cannot publish bootstrap metadata is invisible to
       // the `orca` CLI. Close all transports immediately instead of leaving
       // behind a live but undiscoverable control plane.
+      this.relayClient?.stop()
+      this.relayClient = null
       this.activeTransports = []
       this.transports = []
       await Promise.all(activeTransports.map((t) => t.stop().catch(() => {}))).catch(() => {})
@@ -729,7 +858,8 @@ export class OrcaRuntimeRpcServer {
     const transports = this.activeTransports
     this.activeTransports = []
     this.transports = []
-    this.wsTransport = null
+    this.relayClient?.stop()
+    this.relayClient = null
     if (transports.length === 0) {
       return
     }

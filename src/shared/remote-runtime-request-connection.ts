@@ -1,7 +1,15 @@
+/* eslint-disable max-lines -- Why: the remote runtime client owns WebSocket lifecycle, E2EE handshake, relay sequencing, and request fan-out as one state machine. */
 import { randomUUID } from 'crypto'
 import WebSocket from 'ws'
 import type { PairingOffer } from './pairing'
 import { decrypt, encrypt } from './e2ee-crypto'
+import {
+  RelayFrameSequencer,
+  createRelayTextFrame,
+  getRuntimeWebSocketTransportKind,
+  parseRelayTextFrame,
+  type RuntimeWebSocketTransportKind
+} from './runtime-relay-transport'
 import type { RuntimeRpcResponse } from './runtime-rpc-envelope'
 import { RemoteRuntimeClientError } from './remote-runtime-client'
 import {
@@ -34,12 +42,15 @@ export class RemoteRuntimeRequestConnection {
   private state: ConnectionState = 'closed'
   private ws: WebSocket | null = null
   private sharedKey: Uint8Array | null = null
+  private readonly transportKind: RuntimeWebSocketTransportKind
+  private relaySequencer = new RelayFrameSequencer()
   private readonly pendingRequests = new Map<string, PendingRequest<unknown>>()
   private readonly readyWaiters: ReadyWaiter[] = []
   private idleCloseTimer: ReturnType<typeof setTimeout> | null = null
 
   constructor(pairing: PairingOffer) {
     this.pairing = pairing
+    this.transportKind = getRuntimeWebSocketTransportKind(pairing.endpoint)
   }
 
   request<TResult>(
@@ -77,6 +88,7 @@ export class RemoteRuntimeRequestConnection {
     const ws = this.ws
     this.ws = null
     this.sharedKey = null
+    this.relaySequencer = new RelayFrameSequencer()
     this.state = 'closed'
     this.clearIdleCloseTimer()
 
@@ -136,6 +148,7 @@ export class RemoteRuntimeRequestConnection {
     }
     this.ws = opened.socket.ws
     this.sharedKey = opened.socket.sharedKey
+    this.relaySequencer = new RelayFrameSequencer()
     this.state = 'awaiting_ready'
   }
 
@@ -149,8 +162,8 @@ export class RemoteRuntimeRequestConnection {
     if (!sharedKey) {
       return
     }
-    const plaintext = decrypt(frame, sharedKey)
-    if (plaintext === null) {
+    const decrypted = decrypt(frame, sharedKey)
+    if (decrypted === null) {
       this.close(
         invalidRemoteRuntimeResponseError('Remote Orca runtime returned an undecryptable frame.')
       )
@@ -158,17 +171,21 @@ export class RemoteRuntimeRequestConnection {
     }
 
     if (this.state === 'awaiting_authenticated') {
-      this.handleAuthenticatedFrame(plaintext)
+      this.handleAuthenticatedFrame(decrypted)
       return
     }
 
+    const plaintext = this.unwrapRelayTextFrame(decrypted)
+    if (plaintext === null) {
+      return
+    }
     this.handleRpcFrame(plaintext)
   }
 
   private handleReadyFrame(frame: string): void {
-    const error = parseReadyFrame(frame)
-    if (error) {
-      this.close(error)
+    const ready = parseReadyFrame(frame)
+    if (ready instanceof RemoteRuntimeClientError) {
+      this.close(ready)
       return
     }
     this.state = 'awaiting_authenticated'
@@ -178,7 +195,11 @@ export class RemoteRuntimeRequestConnection {
     }
     this.ws?.send(
       encrypt(
-        JSON.stringify({ type: 'e2ee_auth', deviceToken: this.pairing.deviceToken }),
+        JSON.stringify({
+          type: 'e2ee_auth',
+          deviceToken: this.pairing.deviceToken,
+          challenge: ready.challenge
+        }),
         sharedKey
       )
     )
@@ -229,15 +250,41 @@ export class RemoteRuntimeRequestConnection {
     }
     ws.send(
       encrypt(
-        JSON.stringify({
-          id: requestId,
-          deviceToken: this.pairing.deviceToken,
-          method,
-          params
-        }),
+        this.wrapRelayTextFrame(
+          JSON.stringify({
+            id: requestId,
+            deviceToken: this.pairing.deviceToken,
+            method,
+            params
+          })
+        ),
         sharedKey
       )
     )
+  }
+
+  private wrapRelayTextFrame(payload: string): string {
+    if (this.transportKind !== 'relay' || this.state !== 'ready') {
+      return payload
+    }
+    const seq = this.relaySequencer.nextOutboundSeq()
+    if (seq === null) {
+      this.close(remoteRuntimeUnavailableError('Relay frame sequence exhausted.'))
+      return payload
+    }
+    return createRelayTextFrame(seq, payload)
+  }
+
+  private unwrapRelayTextFrame(plaintext: string): string | null {
+    if (this.transportKind !== 'relay') {
+      return plaintext
+    }
+    const frame = parseRelayTextFrame(plaintext)
+    if (!frame || !this.relaySequencer.acceptInboundSeq(frame.seq)) {
+      this.close(invalidRemoteRuntimeResponseError('Remote Orca runtime replayed a relay frame.'))
+      return null
+    }
+    return frame.payload
   }
 
   private rejectPendingRequest(requestId: string, error: Error): void {

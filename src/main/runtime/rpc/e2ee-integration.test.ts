@@ -75,7 +75,7 @@ describe('E2EE integration (simulated mobile ↔ desktop)', () => {
     // Desktop should respond with plaintext ready, then encrypted auth ack.
     expect(onReady).toHaveBeenCalled()
     expect(wsSent).toHaveLength(2)
-    expect(JSON.parse(wsSent[0]!)).toEqual({ type: 'e2ee_ready' })
+    expect(JSON.parse(wsSent[0]!)).toMatchObject({ type: 'e2ee_ready' })
     expect(JSON.parse(decrypt(wsSent[1]!, mobileShared)!)).toEqual({
       type: 'e2ee_authenticated'
     })

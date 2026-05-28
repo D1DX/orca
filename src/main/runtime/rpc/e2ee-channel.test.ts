@@ -1,7 +1,21 @@
+/* eslint-disable max-lines -- Why: these protocol tests cover direct and relay E2EE compatibility as one matrix so handshake/frame regressions are easier to audit. */
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import type { WebSocket } from 'ws'
 import { E2EEChannel, type E2EEChannelOptions } from './e2ee-channel'
-import { generateKeyPair, deriveSharedKey, encrypt, decrypt, encryptBytes } from './e2ee-crypto'
+import {
+  generateKeyPair,
+  deriveSharedKey,
+  encrypt,
+  decrypt,
+  encryptBytes,
+  decryptBytes
+} from './e2ee-crypto'
+import {
+  createRelayTextFrame,
+  decodeRelayBinaryFrame,
+  encodeRelayBinaryFrame,
+  parseRelayTextFrame
+} from '../../../shared/runtime-relay-transport'
 
 function publicKeyToBase64(key: Uint8Array): string {
   return Buffer.from(key).toString('base64')
@@ -49,6 +63,27 @@ function doHandshake(ctx: ReturnType<typeof setup>) {
   return sharedKey
 }
 
+function doRelayHandshake(ctx: ReturnType<typeof setup>) {
+  const hello = JSON.stringify({
+    type: 'e2ee_hello',
+    publicKeyB64: publicKeyToBase64(ctx.clientKeys.publicKey)
+  })
+  ctx.channel.handleRawMessage(hello)
+  const ready = JSON.parse(ctx.ws.sent[0]!) as { challenge: string }
+  const sharedKey = deriveSharedKey(ctx.clientKeys.secretKey, ctx.serverKeys.publicKey)
+  ctx.channel.handleRawMessage(
+    encrypt(
+      JSON.stringify({
+        type: 'e2ee_auth',
+        deviceToken: 'valid-token',
+        challenge: ready.challenge
+      }),
+      sharedKey
+    )
+  )
+  return sharedKey
+}
+
 describe('E2EEChannel', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -68,7 +103,8 @@ describe('E2EEChannel', () => {
       expect(ctx.channel.deviceToken).toBe('valid-token')
 
       const readyMsg = JSON.parse(ctx.ws.sent[0]!)
-      expect(readyMsg).toEqual({ type: 'e2ee_ready' })
+      expect(readyMsg).toMatchObject({ type: 'e2ee_ready' })
+      expect(typeof readyMsg.challenge).toBe('string')
       const authMsg = decrypt(
         ctx.ws.sent[1]!,
         deriveSharedKey(ctx.clientKeys.secretKey, ctx.serverKeys.publicKey)
@@ -86,7 +122,7 @@ describe('E2EEChannel', () => {
       )
 
       expect(ctx.onReady).not.toHaveBeenCalled()
-      expect(JSON.parse(ctx.ws.sent[0]!)).toEqual({ type: 'e2ee_ready' })
+      expect(JSON.parse(ctx.ws.sent[0]!)).toMatchObject({ type: 'e2ee_ready' })
     })
 
     it('rejects invalid encrypted token', () => {
@@ -245,6 +281,81 @@ describe('E2EEChannel', () => {
         ctx.channel.handleRawMessage(encrypt('bad', badKey))
       }
       expect(ctx.onError).not.toHaveBeenCalled()
+    })
+
+    it('requires relay auth challenge on relay sockets', () => {
+      const ctx = setup({ transportKind: 'relay' })
+      const sharedKey = doHandshake(ctx)
+
+      expect(sharedKey).toBeTruthy()
+      expect(ctx.onReady).not.toHaveBeenCalled()
+      expect(ctx.onError).toHaveBeenCalledWith(4001, 'Missing relay auth challenge')
+    })
+
+    it('rejects duplicate relay text frame sequence before dispatch', () => {
+      const ctx = setup({ transportKind: 'relay' })
+      const sharedKey = doRelayHandshake(ctx)
+      const received: string[] = []
+      ctx.channel.onMessage((plaintext) => {
+        received.push(plaintext)
+      })
+
+      const request = '{"id":"rpc-1","method":"status.get"}'
+      const frame = encrypt(createRelayTextFrame(1, request), sharedKey)
+      ctx.channel.handleRawMessage(frame)
+      ctx.channel.handleRawMessage(frame)
+
+      expect(received).toEqual([request])
+      expect(ctx.onError).toHaveBeenCalledWith(4007, 'Invalid relay frame sequence')
+    })
+
+    it('wraps relay replies with outbound sequence numbers', () => {
+      const ctx = setup({ transportKind: 'relay' })
+      const sharedKey = doRelayHandshake(ctx)
+
+      ctx.channel.onMessage((_plaintext, encryptedReply) => {
+        encryptedReply('{"id":"rpc-1","ok":true}')
+      })
+      ctx.channel.handleRawMessage(
+        encrypt(createRelayTextFrame(1, '{"id":"rpc-1","method":"status.get"}'), sharedKey)
+      )
+
+      const replyPlain = decrypt(ctx.ws.sent[2]!, sharedKey)
+      const frame = parseRelayTextFrame(replyPlain!)
+      expect(frame).toMatchObject({ seq: 1, payload: '{"id":"rpc-1","ok":true}' })
+    })
+
+    it('rejects duplicate relay binary frame sequence before dispatch', () => {
+      const ctx = setup({ transportKind: 'relay' })
+      const sharedKey = doRelayHandshake(ctx)
+      const received: Uint8Array<ArrayBufferLike>[] = []
+      ctx.channel.onBinaryMessage((plaintext) => {
+        received.push(plaintext)
+      })
+
+      const frame = encryptBytes(encodeRelayBinaryFrame(1, new Uint8Array([4, 5])), sharedKey)
+      ctx.channel.handleRawMessage(frame)
+      ctx.channel.handleRawMessage(frame)
+
+      expect([...received[0]!]).toEqual([4, 5])
+      expect(ctx.onError).toHaveBeenCalledWith(4007, 'Invalid relay frame sequence')
+    })
+
+    it('wraps relay binary replies with outbound sequence numbers', () => {
+      const ctx = setup({ transportKind: 'relay' })
+      const sharedKey = doRelayHandshake(ctx)
+
+      ctx.channel.onMessage((_plaintext, _encryptedReply, encryptedBinaryReply) => {
+        encryptedBinaryReply(new Uint8Array([9, 8, 7]))
+      })
+      ctx.channel.handleRawMessage(
+        encrypt(createRelayTextFrame(1, '{"id":"rpc-1","method":"browser.screencast"}'), sharedKey)
+      )
+
+      const replyPlain = decryptBytes(ctx.ws.sent[2]! as unknown as Uint8Array, sharedKey)
+      const frame = decodeRelayBinaryFrame(replyPlain!)
+      expect(frame?.seq).toBe(1)
+      expect([...(frame?.payload ?? [])]).toEqual([9, 8, 7])
     })
   })
 

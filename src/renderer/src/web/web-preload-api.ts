@@ -448,6 +448,20 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       listNetworkInterfaces: () => Promise.resolve({ interfaces: [] }),
       getPairingQR: () => Promise.resolve({ available: false }),
       getRuntimePairingUrl: () => Promise.resolve({ available: false }),
+      getRelayPairingQR: () => Promise.resolve({ available: false, reason: 'web_client' }),
+      getRelayRuntimePairingUrl: () => Promise.resolve({ available: false, reason: 'web_client' }),
+      getRelayConfig: () =>
+        Promise.resolve({
+          config: { enabled: false, endpoint: '' },
+          status: { state: 'disabled', activeDataSockets: 0, error: null }
+        }),
+      updateRelayConfig: () =>
+        Promise.resolve({
+          config: { enabled: false, endpoint: '' },
+          status: { state: 'disabled', activeDataSockets: 0, error: null }
+        }),
+      getRelayStatus: () =>
+        Promise.resolve({ status: { state: 'disabled', activeDataSockets: 0, error: null } }),
       listDevices: () => Promise.resolve({ devices: [] }),
       revokeDevice: () => Promise.resolve({ revoked: false }),
       listRuntimeAccessGrants: () => Promise.resolve({ grants: [] }),

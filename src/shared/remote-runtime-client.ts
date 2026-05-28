@@ -20,6 +20,15 @@ import {
   RuntimeRpcEnvelopeSchema,
   type RuntimeRpcResponse
 } from './runtime-rpc-envelope'
+import {
+  RelayFrameSequencer,
+  createRelayTextFrame,
+  decodeRelayBinaryFrame,
+  encodeRelayBinaryFrame,
+  getRuntimeWebSocketTransportKind,
+  parseRelayTextFrame,
+  type RuntimeWebSocketTransportKind
+} from './runtime-relay-transport'
 
 type HandshakeState = 'awaiting_ready' | 'awaiting_authenticated' | 'ready'
 
@@ -57,6 +66,8 @@ export async function sendRemoteRuntimeRequest<TResult>(
     const keyPair = generateKeyPair()
     const serverPublicKey = publicKeyFromBase64(pairing.publicKeyB64)
     const sharedKey = deriveSharedKey(keyPair.secretKey, serverPublicKey)
+    const transportKind = getRuntimeWebSocketTransportKind(pairing.endpoint)
+    const relaySequencer = new RelayFrameSequencer()
     let state: HandshakeState = 'awaiting_ready'
     let settled = false
     let ws: WebSocket | null = null
@@ -174,7 +185,18 @@ export async function sendRemoteRuntimeRequest<TResult>(
         return
       }
 
-      handleRpcFrame(plaintext)
+      const rpcPlaintext = unwrapRelayTextFrame(plaintext, transportKind, relaySequencer)
+      if (rpcPlaintext === null) {
+        finish({
+          ok: false,
+          error: new RemoteRuntimeClientError(
+            'invalid_runtime_response',
+            'Remote Orca runtime replayed a relay frame.'
+          )
+        })
+        return
+      }
+      handleRpcFrame(rpcPlaintext)
     })
 
     function handleReadyFrame(frame: string): void {
@@ -206,8 +228,16 @@ export async function sendRemoteRuntimeRequest<TResult>(
         return
       }
       state = 'awaiting_authenticated'
+      const challenge = (ready as { challenge?: unknown }).challenge
       ws?.send(
-        encrypt(JSON.stringify({ type: 'e2ee_auth', deviceToken: pairing.deviceToken }), sharedKey)
+        encrypt(
+          JSON.stringify({
+            type: 'e2ee_auth',
+            deviceToken: pairing.deviceToken,
+            challenge: typeof challenge === 'string' ? challenge : undefined
+          }),
+          sharedKey
+        )
       )
     }
 
@@ -245,12 +275,16 @@ export async function sendRemoteRuntimeRequest<TResult>(
       state = 'ready'
       ws?.send(
         encrypt(
-          JSON.stringify({
-            id: requestId,
-            deviceToken: pairing.deviceToken,
-            method,
-            params
-          }),
+          wrapRelayTextFrame(
+            JSON.stringify({
+              id: requestId,
+              deviceToken: pairing.deviceToken,
+              method,
+              params
+            }),
+            transportKind,
+            relaySequencer
+          ),
           sharedKey
         )
       )
@@ -313,6 +347,8 @@ export async function subscribeRemoteRuntimeRequest<TResult>(
     const keyPair = generateKeyPair()
     const serverPublicKey = publicKeyFromBase64(pairing.publicKeyB64)
     const sharedKey = deriveSharedKey(keyPair.secretKey, serverPublicKey)
+    const transportKind = getRuntimeWebSocketTransportKind(pairing.endpoint)
+    const relaySequencer = new RelayFrameSequencer()
     let state: HandshakeState = 'awaiting_ready'
     let settled = false
     let ws: WebSocket | null = null
@@ -338,7 +374,12 @@ export async function subscribeRemoteRuntimeRequest<TResult>(
       if (state !== 'ready' || !ws || ws.readyState !== WebSocket.OPEN) {
         return false
       }
-      ws.send(Buffer.from(encryptBytes(bytes, sharedKey)), { binary: true })
+      const payload = wrapRelayBinaryFrame(bytes, transportKind, relaySequencer)
+      if (payload === null) {
+        close()
+        return false
+      }
+      ws.send(Buffer.from(encryptBytes(payload, sharedKey)), { binary: true })
       return true
     }
 
@@ -360,6 +401,12 @@ export async function subscribeRemoteRuntimeRequest<TResult>(
         return
       }
       callbacks.onError(error)
+    }
+
+    const failClosed = (error: RemoteRuntimeClientError): void => {
+      // Relay sequence failures invalidate the session; force the next attempt through a fresh handshake.
+      close()
+      fail(error)
     }
 
     try {
@@ -430,7 +477,17 @@ export async function subscribeRemoteRuntimeRequest<TResult>(
         return
       }
 
-      handleRpcFrame(plaintext)
+      const rpcPlaintext = unwrapRelayTextFrame(plaintext, transportKind, relaySequencer)
+      if (rpcPlaintext === null) {
+        failClosed(
+          new RemoteRuntimeClientError(
+            'invalid_runtime_response',
+            'Remote Orca runtime replayed a relay frame.'
+          )
+        )
+        return
+      }
+      handleRpcFrame(rpcPlaintext)
     })
 
     function handleReadyFrame(frame: string): void {
@@ -460,8 +517,16 @@ export async function subscribeRemoteRuntimeRequest<TResult>(
         return
       }
       state = 'awaiting_authenticated'
+      const challenge = (ready as { challenge?: unknown }).challenge
       ws?.send(
-        encrypt(JSON.stringify({ type: 'e2ee_auth', deviceToken: pairing.deviceToken }), sharedKey)
+        encrypt(
+          JSON.stringify({
+            type: 'e2ee_auth',
+            deviceToken: pairing.deviceToken,
+            challenge: typeof challenge === 'string' ? challenge : undefined
+          }),
+          sharedKey
+        )
       )
     }
 
@@ -492,12 +557,16 @@ export async function subscribeRemoteRuntimeRequest<TResult>(
       state = 'ready'
       ws?.send(
         encrypt(
-          JSON.stringify({
-            id: requestId,
-            deviceToken: pairing.deviceToken,
-            method,
-            params
-          }),
+          wrapRelayTextFrame(
+            JSON.stringify({
+              id: requestId,
+              deviceToken: pairing.deviceToken,
+              method,
+              params
+            }),
+            transportKind,
+            relaySequencer
+          ),
           sharedKey
         )
       )
@@ -554,7 +623,74 @@ export async function subscribeRemoteRuntimeRequest<TResult>(
         )
         return
       }
-      callbacks.onBinary?.(plaintext)
+      const binaryPayload = unwrapRelayBinaryFrame(plaintext, transportKind, relaySequencer)
+      if (binaryPayload === null) {
+        failClosed(
+          new RemoteRuntimeClientError(
+            'invalid_runtime_response',
+            'Remote Orca runtime replayed a relay binary frame.'
+          )
+        )
+        return
+      }
+      callbacks.onBinary?.(binaryPayload)
     }
   })
+}
+
+function wrapRelayTextFrame(
+  payload: string,
+  transportKind: RuntimeWebSocketTransportKind,
+  relaySequencer: RelayFrameSequencer
+): string {
+  if (transportKind !== 'relay') {
+    return payload
+  }
+  const seq = relaySequencer.nextOutboundSeq()
+  if (seq === null) {
+    return payload
+  }
+  return createRelayTextFrame(seq, payload)
+}
+
+function unwrapRelayTextFrame(
+  plaintext: string,
+  transportKind: RuntimeWebSocketTransportKind,
+  relaySequencer: RelayFrameSequencer
+): string | null {
+  if (transportKind !== 'relay') {
+    return plaintext
+  }
+  const frame = parseRelayTextFrame(plaintext)
+  if (!frame || !relaySequencer.acceptInboundSeq(frame.seq)) {
+    return null
+  }
+  return frame.payload
+}
+
+function wrapRelayBinaryFrame(
+  payload: Uint8Array<ArrayBufferLike>,
+  transportKind: RuntimeWebSocketTransportKind,
+  relaySequencer: RelayFrameSequencer
+): Uint8Array<ArrayBufferLike> | null {
+  if (transportKind !== 'relay') {
+    return payload
+  }
+  const seq = relaySequencer.nextOutboundSeq()
+  return seq === null ? null : encodeRelayBinaryFrame(seq, payload)
+}
+
+function unwrapRelayBinaryFrame(
+  plaintext: Uint8Array<ArrayBufferLike>,
+  transportKind: RuntimeWebSocketTransportKind,
+  relaySequencer: RelayFrameSequencer
+): Uint8Array<ArrayBufferLike> | null {
+  if (transportKind !== 'relay') {
+    return plaintext
+  }
+  const frame = decodeRelayBinaryFrame(plaintext)
+  if (!frame || !relaySequencer.acceptInboundSeq(frame.seq)) {
+    return null
+  }
+  return frame.payload
 }

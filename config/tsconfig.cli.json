@@ -22,7 +22,8 @@
     "../src/main/grok/hook-service.ts",
     "../src/main/hermes/hook-service.ts",
     "../src/main/runtime/runtime-metadata.ts",
-    "../src/main/win32-utils.ts"
+    "../src/main/win32-utils.ts",
+    "../src/runtime-relay-server/**/*"
   ],
   "compilerOptions": {
     "composite": true,

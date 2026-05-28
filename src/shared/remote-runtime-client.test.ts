@@ -98,10 +98,11 @@ async function createSubscriptionServer(): Promise<{
         if (!sharedKey) {
           return
         }
-        const plaintext = decryptBytes(new Uint8Array(data as Buffer), sharedKey)
-        if (plaintext) {
-          resolveBinary(plaintext)
+        const decrypted = decryptBytes(new Uint8Array(data as Buffer), sharedKey)
+        if (!decrypted) {
+          return
         }
+        resolveBinary(decrypted)
         return
       }
 
@@ -112,7 +113,11 @@ async function createSubscriptionServer(): Promise<{
           serverKeyPair.secretKey,
           publicKeyFromBase64(hello.publicKeyB64)
         )
-        ws.send(JSON.stringify({ type: 'e2ee_ready' }))
+        ws.send(
+          JSON.stringify({
+            type: 'e2ee_ready'
+          })
+        )
         return
       }
 
@@ -121,6 +126,10 @@ async function createSubscriptionServer(): Promise<{
         return
       }
       if (!authenticated) {
+        expect(JSON.parse(plaintext)).toMatchObject({
+          type: 'e2ee_auth',
+          deviceToken: 'device-token'
+        })
         authenticated = true
         sendEncrypted(ws, sharedKey, { type: 'e2ee_authenticated' })
         return
@@ -154,7 +163,8 @@ async function createSubscriptionServer(): Promise<{
 }
 
 function sendEncrypted(ws: WebSocket, sharedKey: Uint8Array, message: unknown): void {
-  ws.send(encrypt(JSON.stringify(message), sharedKey))
+  const payload = JSON.stringify(message)
+  ws.send(encrypt(payload, sharedKey))
 }
 
 async function createOneShotServer(): Promise<{ pairing: PairingOffer }> {
@@ -177,7 +187,11 @@ async function createOneShotServer(): Promise<{ pairing: PairingOffer }> {
           serverKeyPair.secretKey,
           publicKeyFromBase64(hello.publicKeyB64)
         )
-        ws.send(JSON.stringify({ type: 'e2ee_ready' }))
+        ws.send(
+          JSON.stringify({
+            type: 'e2ee_ready'
+          })
+        )
         return
       }
 
@@ -186,6 +200,10 @@ async function createOneShotServer(): Promise<{ pairing: PairingOffer }> {
         return
       }
       if (!authenticated) {
+        expect(JSON.parse(plaintext)).toMatchObject({
+          type: 'e2ee_auth',
+          deviceToken: 'device-token'
+        })
         authenticated = true
         sendEncrypted(ws, sharedKey, { type: 'e2ee_authenticated' })
         return

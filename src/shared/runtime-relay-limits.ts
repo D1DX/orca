@@ -1,0 +1,1 @@
+export const RUNTIME_RELAY_MAX_FRAME_BYTES = 1024 * 1024

@@ -106,6 +106,8 @@ const HANDSHAKE_TIMEOUT_MS = 5_000
 // Why: RN's WebSocket implementation may not expose static readyState
 // constants, but the protocol value for CONNECTING is stable across runtimes.
 const WEBSOCKET_CONNECTING_STATE = 0
+const RELAY_BINARY_SEQUENCE_BYTES = 8
+const RELAY_MAX_SEQUENCE = Number.MAX_SAFE_INTEGER
 
 // Why: app-level liveness probe. The server runs its own ping/pong sweep
 // at 15s, but RN's WebSocket runtime auto-pongs at the native layer
@@ -119,6 +121,17 @@ const WEBSOCKET_CONNECTING_STATE = 0
 // reconnect, which is still inside the user's perceived "responsive"
 // window and well below iOS's typical background-disconnect window.
 const ACTIVITY_PROBE_INTERVAL_MS = 20_000
+
+function getRuntimeWebSocketTransportKind(endpoint: string): 'direct' | 'relay' {
+  try {
+    const url = new URL(endpoint)
+    return url.searchParams.get('role') === 'client' && url.searchParams.has('serverId')
+      ? 'relay'
+      : 'direct'
+  } catch {
+    return 'direct'
+  }
+}
 
 export type ConnectOptions = {
   onStateChange?: (state: ConnectionState) => void
@@ -141,6 +154,7 @@ export function connect(
       : (optionsOrLegacy ?? {})
   const onStateChange = options.onStateChange
   const onLog = options.onLog
+  const transportKind = getRuntimeWebSocketTransportKind(endpoint)
   let logCounter = 0
   function emitLog(level: ConnectionLogLevel, message: string, detail?: string) {
     if (!onLog) return
@@ -179,6 +193,9 @@ export function connect(
   // The shared key is derived from our ephemeral secret + server's static public key.
   let sharedKey: Uint8Array | null = null
   const serverPublicKey = publicKeyFromBase64(serverPublicKeyB64)
+  let inboundRelaySeq = 0
+  let outboundRelaySeq = 0
+  let inboundMessageQueue = Promise.resolve()
 
   const pending = new Map<string, PendingRequest>()
   const streamListeners = new Map<string, StreamRequest>()
@@ -268,6 +285,8 @@ export function connect(
     })
     setState('connecting')
     sharedKey = null
+    inboundRelaySeq = 0
+    outboundRelaySeq = 0
 
     currentWsOpenedAt = now
     emitLog(
@@ -336,7 +355,17 @@ export function connect(
     }
 
     ws.onmessage = (event) => {
-      void handleSocketMessage(event.data)
+      // Why: relay sequencing is shared across text and binary frames. RN may
+      // convert binary payloads asynchronously, so process wire events in order.
+      const messageWs = openingWs
+      inboundMessageQueue = inboundMessageQueue
+        .then(() => {
+          if (messageWs !== ws) {
+            return
+          }
+          return handleSocketMessage(event.data)
+        })
+        .catch(() => {})
     }
 
     async function handleSocketMessage(rawData: unknown) {
@@ -355,7 +384,11 @@ export function connect(
           const msg = JSON.parse(raw)
           if (msg.type === 'e2ee_ready') {
             emitLog('success', 'Received e2ee_ready', 'Sending device token')
-            sendEncrypted({ type: 'e2ee_auth', deviceToken })
+            sendEncrypted({
+              type: 'e2ee_auth',
+              deviceToken,
+              challenge: typeof msg.challenge === 'string' ? msg.challenge : undefined
+            })
             return
           }
         } catch {
@@ -438,11 +471,19 @@ export function connect(
         if (!plaintextBytes) {
           return
         }
-        handleBinaryFrame(plaintextBytes)
+        const binaryPayload = unwrapRelayBinaryFrame(plaintextBytes)
+        if (!binaryPayload) {
+          return
+        }
+        handleBinaryFrame(binaryPayload)
         return
       }
 
-      const plaintext = decrypt(raw, sharedKey)
+      const decrypted = decrypt(raw, sharedKey)
+      if (decrypted === null) {
+        return
+      }
+      const plaintext = unwrapRelayTextFrame(decrypted)
       if (plaintext === null) {
         return
       }
@@ -927,7 +968,7 @@ export function connect(
 
   function sendEncrypted(request: unknown): boolean {
     if (ws && ws.readyState === WebSocket.OPEN && sharedKey) {
-      ws.send(encrypt(JSON.stringify(request), sharedKey))
+      ws.send(encrypt(wrapRelayTextFrame(JSON.stringify(request)), sharedKey))
       return true
     }
     console.log('[net] sendEncrypted FAILED — channel not ready', {
@@ -948,6 +989,74 @@ export function connect(
       handleSocketClosed(ws, { timedOut: false })
     }
     return false
+  }
+
+  function nextOutboundRelaySeq(): number | null {
+    if (outboundRelaySeq >= RELAY_MAX_SEQUENCE) {
+      ws?.close()
+      return null
+    }
+    outboundRelaySeq += 1
+    return outboundRelaySeq
+  }
+
+  function acceptInboundRelaySeq(seq: number): boolean {
+    if (!Number.isSafeInteger(seq) || seq !== inboundRelaySeq + 1) {
+      ws?.close()
+      return false
+    }
+    inboundRelaySeq = seq
+    return true
+  }
+
+  function wrapRelayTextFrame(payload: string): string {
+    if (transportKind !== 'relay' || state !== 'connected') {
+      return payload
+    }
+    const seq = nextOutboundRelaySeq()
+    if (seq === null) {
+      return payload
+    }
+    return JSON.stringify({ type: 'e2ee_frame', seq, payload })
+  }
+
+  function unwrapRelayTextFrame(plaintext: string): string | null {
+    if (transportKind !== 'relay') {
+      return plaintext
+    }
+    let frame: { type?: unknown; seq?: unknown; payload?: unknown }
+    try {
+      frame = JSON.parse(plaintext) as { type?: unknown; seq?: unknown; payload?: unknown }
+    } catch {
+      ws?.close()
+      return null
+    }
+    if (
+      frame.type !== 'e2ee_frame' ||
+      typeof frame.seq !== 'number' ||
+      typeof frame.payload !== 'string' ||
+      !acceptInboundRelaySeq(frame.seq)
+    ) {
+      ws?.close()
+      return null
+    }
+    return frame.payload
+  }
+
+  function unwrapRelayBinaryFrame(plaintext: Uint8Array): Uint8Array | null {
+    if (transportKind !== 'relay') {
+      return plaintext
+    }
+    if (plaintext.length < RELAY_BINARY_SEQUENCE_BYTES) {
+      ws?.close()
+      return null
+    }
+    const view = new DataView(plaintext.buffer, plaintext.byteOffset, RELAY_BINARY_SEQUENCE_BYTES)
+    const seq = Number(view.getBigUint64(0, false))
+    if (!acceptInboundRelaySeq(seq)) {
+      return null
+    }
+    return plaintext.slice(RELAY_BINARY_SEQUENCE_BYTES)
   }
 
   function sendBrowserScreencastUnsubscribe(subscriptionId: string): void {

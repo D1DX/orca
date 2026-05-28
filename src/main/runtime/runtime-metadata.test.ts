@@ -11,6 +11,8 @@ import {
 } from '../../shared/runtime-environment-store'
 import { DeviceRegistry } from './device-registry'
 import { loadOrCreateE2EEKeypair } from './e2ee-keypair'
+import { loadRuntimeRelayConfig, saveRuntimeRelayConfig } from './relay-config'
+import { loadOrCreateRuntimeRelayIdentity } from './relay-identity'
 import {
   clearRuntimeMetadata,
   clearRuntimeMetadataIfOwned,
@@ -178,6 +180,11 @@ describe('runtime metadata', () => {
 
       new DeviceRegistry(userDataPath).addDevice('phone')
       loadOrCreateE2EEKeypair(userDataPath)
+      loadOrCreateRuntimeRelayIdentity(userDataPath)
+      saveRuntimeRelayConfig(userDataPath, {
+        enabled: true,
+        endpoint: 'ws://127.0.0.1:6768/ws?enrollmentToken=secret'
+      })
       addEnvironmentFromPairingCode(userDataPath, {
         name: 'desk',
         pairingCode: encodePairingOffer({
@@ -191,6 +198,8 @@ describe('runtime metadata', () => {
       for (const path of [
         join(userDataPath, 'orca-devices.json'),
         join(userDataPath, 'orca-e2ee-keypair.json'),
+        join(userDataPath, 'runtime-relay-identity.json'),
+        join(userDataPath, 'runtime-relay-config.json'),
         getEnvironmentStorePath(userDataPath)
       ]) {
         expect(statSync(path).mode & 0o777).toBe(0o600)
@@ -219,6 +228,8 @@ describe('runtime metadata', () => {
 
       const devicesPath = join(userDataPath, 'orca-devices.json')
       const keypairPath = join(userDataPath, 'orca-e2ee-keypair.json')
+      const relayIdentityPath = join(userDataPath, 'runtime-relay-identity.json')
+      const relayConfigPath = join(userDataPath, 'runtime-relay-config.json')
       const environmentsPath = getEnvironmentStorePath(userDataPath)
       writeFileSync(
         devicesPath,
@@ -236,7 +247,27 @@ describe('runtime metadata', () => {
         keypairPath,
         JSON.stringify({ v: 1, publicKeyB64: keyMaterial, secretKeyB64: keyMaterial })
       )
-      for (const path of [devicesPath, keypairPath, environmentsPath]) {
+      writeFileSync(
+        relayIdentityPath,
+        JSON.stringify({
+          serverId: 'relay-server-id-0001',
+          hostToken: 'relay-host-token-000000000000000000'
+        })
+      )
+      writeFileSync(
+        relayConfigPath,
+        JSON.stringify({
+          enabled: true,
+          endpoint: 'ws://127.0.0.1:6768/ws?enrollmentToken=secret'
+        })
+      )
+      for (const path of [
+        devicesPath,
+        keypairPath,
+        relayIdentityPath,
+        relayConfigPath,
+        environmentsPath
+      ]) {
         chmodSync(path, 0o644)
       }
       chmodSync(userDataPath, 0o755)
@@ -246,9 +277,23 @@ describe('runtime metadata', () => {
         scope: 'mobile'
       })
       expect(loadOrCreateE2EEKeypair(userDataPath).publicKeyB64).toBe(keyMaterial)
+      expect(loadOrCreateRuntimeRelayIdentity(userDataPath)).toMatchObject({
+        serverId: 'relay-server-id-0001',
+        hostToken: 'relay-host-token-000000000000000000'
+      })
+      expect(loadRuntimeRelayConfig(userDataPath)).toEqual({
+        enabled: true,
+        endpoint: 'ws://127.0.0.1:6768/ws?enrollmentToken=secret'
+      })
       expect(listEnvironments(userDataPath)[0]?.id).toBe(environment.id)
 
-      for (const path of [devicesPath, keypairPath, environmentsPath]) {
+      for (const path of [
+        devicesPath,
+        keypairPath,
+        relayIdentityPath,
+        relayConfigPath,
+        environmentsPath
+      ]) {
         expect(statSync(path).mode & 0o777).toBe(0o600)
       }
       expect(statSync(userDataPath).mode & 0o777).toBe(0o700)

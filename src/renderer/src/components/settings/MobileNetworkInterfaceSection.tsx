@@ -14,6 +14,7 @@ type MobileNetworkInterfaceSectionProps = {
   refreshingNetworkInterfaces: boolean
   onRefreshNetworkInterfaces: () => void
   loading: boolean
+  disabled?: boolean
   hasQrCode: boolean
   onGenerateQr: () => void
 }
@@ -29,6 +30,7 @@ export function MobileNetworkInterfaceSection({
   refreshingNetworkInterfaces,
   onRefreshNetworkInterfaces,
   loading,
+  disabled = false,
   hasQrCode,
   onGenerateQr
 }: MobileNetworkInterfaceSectionProps): React.JSX.Element {
@@ -36,12 +38,11 @@ export function MobileNetworkInterfaceSection({
     <div className="rounded-lg border border-border/60 p-4">
       <div className="mb-3 flex items-center gap-2">
         <Wifi className="size-4 text-muted-foreground" />
-        <span className="text-sm font-medium">Network Interface</span>
+        <span className="text-sm font-medium">Direct pairing</span>
       </div>
       <p className="text-muted-foreground mb-3 text-xs">
-        Choose which network address to advertise in the QR code. Use your LAN address for
-        same-network pairing, or an overlay network address (Tailscale, ZeroTier) for cross-network
-        access.
+        Your phone connects straight to this computer. Use your LAN address on the same Wi-Fi, or a
+        Tailscale or ZeroTier address to reach it from another network.
       </p>
       <div className="space-y-3">
         <div className="flex flex-wrap items-center gap-3">
@@ -80,7 +81,7 @@ export function MobileNetworkInterfaceSection({
         </div>
         <Button
           onClick={onGenerateQr}
-          disabled={loading || !selectedAddress}
+          disabled={disabled || loading || !selectedAddress}
           size="sm"
           className="gap-1.5"
         >
@@ -91,19 +92,19 @@ export function MobileNetworkInterfaceSection({
           ) : (
             <QrCode className="size-3.5" />
           )}
-          {hasQrCode ? 'Regenerate' : 'Generate QR Code'}
+          {loading ? 'Generating…' : hasQrCode ? 'Regenerate' : 'Generate QR Code'}
         </Button>
       </div>
       <Accordion type="single" collapsible className="mt-4 border-t border-border/60 pt-2">
         <AccordionItem value="remote-pairing-guide">
           <AccordionTrigger className="py-2 text-xs">
-            Connect outside your Wi-Fi with a tailnet
+            Pair across networks with a tailnet
           </AccordionTrigger>
           <AccordionContent className="space-y-3 text-xs text-muted-foreground">
             <p>
-              Orca Mobile connects directly to this computer. To use it away from the same local
-              network, put your computer and phone on the same private overlay network, then
-              generate the QR code with that network address selected.
+              Put your computer and phone on the same private overlay network, then generate the QR
+              code with that network address selected. If you can&apos;t install a tailnet on both
+              devices, use a self-hosted relay below instead.
             </p>
             <ol className="list-decimal space-y-1 pl-4">
               <li>

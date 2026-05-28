@@ -14,16 +14,24 @@ import {
   encryptBytes as encryptSharedBytes
 } from '../../../shared/e2ee-crypto'
 import type { RuntimeRpcResponse } from '../../../shared/runtime-rpc-envelope'
+import {
+  createRelayTextFrame,
+  encodeRelayBinaryFrame
+} from '../../../shared/runtime-relay-transport'
 
 class FakeWebSocket {
   static readonly CONNECTING = 0
   static readonly OPEN = 1
+  static instances: FakeWebSocket[] = []
   readyState = FakeWebSocket.CONNECTING
   binaryType = 'arraybuffer'
   close = vi.fn()
   send = vi.fn()
+  onmessage?: (event: { data: unknown }) => void
 
-  constructor(readonly _url: string) {}
+  constructor(readonly _url: string) {
+    FakeWebSocket.instances.push(this)
+  }
 }
 
 describe('WebRuntimeClient', () => {
@@ -35,6 +43,7 @@ describe('WebRuntimeClient', () => {
       btoa: (value: string) => Buffer.from(value, 'binary').toString('base64')
     })
     vi.stubGlobal('WebSocket', FakeWebSocket)
+    FakeWebSocket.instances = []
   })
 
   afterEach(() => {
@@ -375,6 +384,102 @@ describe('WebRuntimeClient', () => {
     await internals.handleSocketMessage(encryptBytes(frame, sharedKey))
 
     expect(onBinary).toHaveBeenCalledWith(frame)
+    client.close()
+  })
+
+  it('ignores handshake messages from sockets that are no longer current', () => {
+    const serverKeys = generateKeyPair()
+    const client = new WebRuntimeClient({
+      v: 2,
+      endpoint: 'wss://relay.orca.test/runtime?role=client&serverId=server-1',
+      deviceToken: 'token',
+      publicKeyB64: publicKeyToBase64(serverKeys.publicKey)
+    })
+    const staleSocket = FakeWebSocket.instances[0]
+    const currentSocket = new FakeWebSocket('wss://relay.orca.test/runtime')
+    currentSocket.readyState = FakeWebSocket.OPEN
+    const internals = client as unknown as {
+      ws: WebSocket
+      state: 'handshaking'
+      sharedKey: Uint8Array
+    }
+    internals.ws = currentSocket as unknown as WebSocket
+    internals.state = 'handshaking'
+    internals.sharedKey = new Uint8Array(32).fill(7)
+
+    staleSocket?.onmessage?.({
+      data: JSON.stringify({ type: 'e2ee_ready', challenge: 'old-challenge' })
+    })
+
+    expect(currentSocket.send).not.toHaveBeenCalled()
+    client.close()
+  })
+
+  it('serializes delayed relay Blob frames before later text frames', async () => {
+    let releaseBlob!: () => void
+    const blobReleased = new Promise<void>((resolve) => {
+      releaseBlob = resolve
+    })
+    class DelayedBlob extends Blob {
+      override async arrayBuffer(): Promise<ArrayBuffer> {
+        await blobReleased
+        return super.arrayBuffer()
+      }
+    }
+    const client = new WebRuntimeClient({
+      v: 2,
+      endpoint: 'wss://relay.orca.test/runtime?role=client&serverId=server-1',
+      deviceToken: 'token',
+      publicKeyB64: Buffer.alloc(32).toString('base64')
+    })
+    const socket = FakeWebSocket.instances[0]
+    const sharedKey = new Uint8Array(32).fill(7)
+    const calls: string[] = []
+    const onResponse = vi.fn(() => calls.push('text'))
+    const onBinary = vi.fn(() => calls.push('binary'))
+    const internals = client as unknown as {
+      state: 'connected'
+      sharedKey: Uint8Array
+      subscriptions: Map<
+        string,
+        { callbacks: { onResponse: typeof onResponse; onBinary: typeof onBinary } }
+      >
+    }
+    internals.state = 'connected'
+    internals.sharedKey = sharedKey
+    internals.subscriptions.set('stream-1', { callbacks: { onResponse, onBinary } })
+
+    const binaryFrame = encryptSharedBytes(
+      encodeRelayBinaryFrame(1, new Uint8Array([9, 8, 7])),
+      sharedKey
+    )
+    const textFrame = encrypt(
+      createRelayTextFrame(
+        2,
+        JSON.stringify({
+          id: 'stream-1',
+          ok: true,
+          streaming: true,
+          result: { type: 'ready' },
+          _meta: { runtimeId: 'runtime-web-test' }
+        })
+      ),
+      sharedKey
+    )
+
+    socket?.onmessage?.({ data: new DelayedBlob([Uint8Array.from(binaryFrame)]) })
+    socket?.onmessage?.({ data: textFrame })
+
+    await Promise.resolve()
+    expect(onResponse).not.toHaveBeenCalled()
+    expect(socket?.close).not.toHaveBeenCalled()
+
+    releaseBlob()
+
+    await vi.waitFor(() => expect(onResponse).toHaveBeenCalledTimes(1))
+    expect(onBinary).toHaveBeenCalledWith(new Uint8Array([9, 8, 7]))
+    expect(calls).toEqual(['binary', 'text'])
+    expect(socket?.close).not.toHaveBeenCalled()
     client.close()
   })
 

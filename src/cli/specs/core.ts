@@ -29,6 +29,25 @@ export const CORE_COMMAND_SPECS: CommandSpec[] = [
     ]
   },
   {
+    path: ['relay', 'serve'],
+    summary: 'Start a self-hosted Orca runtime relay server',
+    usage:
+      'orca relay serve [--host <host>] [--port <port>] [--public-url <url>] [--state-path <path>] [--enrollment-token <token>] [--json]',
+    allowedFlags: [...GLOBAL_FLAGS, 'host', 'port', 'public-url', 'state-path', 'enrollment-token'],
+    notes: [
+      'Runs in the foreground and forwards encrypted runtime WebSocket frames between hosts and clients.',
+      'Use --public-url wss://relay.example.com/ws when binding to 0.0.0.0, ::, or a private interface.',
+      'Host token bindings persist under the Orca user-data directory by default; pass --state-path for an explicit server state file.',
+      'First-time host enrollment requires the startup enrollment token. Add it to the saved Orca relay URL as ?enrollmentToken=<token>.',
+      'Use a TLS reverse proxy and configure Orca with the public wss:// endpoint for internet use.',
+      'When --json is passed, stdout contains exactly one startup object; later logs go to stderr.'
+    ],
+    examples: [
+      'orca relay serve --host 0.0.0.0 --port 8787 --public-url wss://relay.example.com/ws',
+      'orca relay serve --json'
+    ]
+  },
+  {
     path: ['status'],
     summary: 'Show app/runtime/graph readiness',
     usage: 'orca status [--json]',

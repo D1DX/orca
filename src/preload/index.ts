@@ -3253,6 +3253,51 @@ const api = {
         }
     > => ipcRenderer.invoke('mobile:getRuntimePairingUrl', args),
 
+    getRelayPairingQR: (args?: {
+      rotate?: boolean
+      scope?: 'mobile' | 'runtime'
+    }): Promise<
+      | { available: false; reason: string }
+      | {
+          available: true
+          qrDataUrl: string
+          pairingUrl: string
+          webClientUrl: string | null
+          endpoint: string
+          deviceId: string
+        }
+    > => ipcRenderer.invoke('mobile:getRelayPairingQR', args),
+
+    getRelayRuntimePairingUrl: (args?: {
+      rotate?: boolean
+    }): Promise<
+      | { available: false; reason: string }
+      | {
+          available: true
+          pairingUrl: string
+          webClientUrl: string | null
+          endpoint: string
+          deviceId: string
+        }
+    > => ipcRenderer.invoke('mobile:getRelayRuntimePairingUrl', args),
+
+    getRelayConfig: (): Promise<{
+      config: { enabled: boolean; endpoint: string }
+      status: { state: string; activeDataSockets: number; error: string | null }
+    }> => ipcRenderer.invoke('mobile:getRelayConfig'),
+
+    updateRelayConfig: (args: {
+      enabled?: boolean
+      endpoint?: string
+    }): Promise<{
+      config: { enabled: boolean; endpoint: string }
+      status: { state: string; activeDataSockets: number; error: string | null }
+    }> => ipcRenderer.invoke('mobile:updateRelayConfig', args),
+
+    getRelayStatus: (): Promise<{
+      status: { state: string; activeDataSockets: number; error: string | null }
+    }> => ipcRenderer.invoke('mobile:getRelayStatus'),
+
     listDevices: (): Promise<{
       devices: { deviceId: string; name: string; pairedAt: number; lastSeenAt: number }[]
     }> => ipcRenderer.invoke('mobile:listDevices'),

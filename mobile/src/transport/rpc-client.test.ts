@@ -120,6 +120,11 @@ function encodeTerminalOutput(streamId: number, chunk: string): Uint8Array {
   })
 }
 
+async function flushInboundQueue(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+}
+
 describe('mobile rpc-client connection timeout', () => {
   beforeEach(() => {
     vi.useFakeTimers()
@@ -165,6 +170,35 @@ describe('mobile rpc-client connection timeout', () => {
 
     expect(socket.close).not.toHaveBeenCalled()
     expect(client.getState()).toBe('connected')
+
+    client.close()
+  })
+
+  it('ignores queued handshake messages from sockets replaced during reconnect', async () => {
+    const client = connect(
+      'ws://desktop.invalid?role=client&serverId=relay-1',
+      'token',
+      'server-key'
+    )
+    const firstSocket = mockSockets[0]!
+
+    firstSocket.open()
+    firstSocket.receive(JSON.stringify({ type: 'e2ee_ready', challenge: 'first-challenge' }))
+    firstSocket.receive('encrypted:{"type":"e2ee_authenticated"}')
+    await flushInboundQueue()
+
+    expect(client.getState()).toBe('connected')
+
+    firstSocket.close()
+    vi.advanceTimersByTime(500)
+    const secondSocket = mockSockets[1]!
+    secondSocket.open()
+    firstSocket.receive(JSON.stringify({ type: 'e2ee_ready', challenge: 'stale-challenge' }))
+    await flushInboundQueue()
+
+    expect(secondSocket.sent).not.toContain(
+      'encrypted:{"type":"e2ee_auth","deviceToken":"token","challenge":"stale-challenge"}'
+    )
 
     client.close()
   })

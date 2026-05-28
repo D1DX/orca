@@ -44,6 +44,20 @@ function toRuntimeAccessGrant(device: DeviceEntry): RuntimeAccessGrant {
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object'
+}
+
+function parseRelayPairingScope(value: unknown): 'mobile' | 'runtime' {
+  if (value === undefined) {
+    return 'mobile'
+  }
+  if (value === 'mobile' || value === 'runtime') {
+    return value
+  }
+  throw new Error('Invalid relay pairing scope')
+}
+
 // Why: the mobile IPC handlers provide the renderer with QR code pairing data,
 // device management, and WebSocket readiness status. They depend on the
 // OrcaRuntimeRpcServer because it owns the device registry and TLS state.
@@ -126,6 +140,79 @@ export function registerMobileHandlers(rpcServer: OrcaRuntimeRpcServer): void {
       }
     }
   )
+
+  ipcMain.handle(
+    'mobile:getRelayPairingQR',
+    async (_event, args?: { rotate?: boolean; scope?: 'mobile' | 'runtime' }) => {
+      const relayScope = parseRelayPairingScope(isRecord(args) ? args.scope : undefined)
+      const offer = rpcServer.createRelayPairingOffer({
+        rotate: isRecord(args) ? args.rotate === true : false,
+        name: `${relayScope === 'runtime' ? 'Runtime' : 'Mobile'} ${new Date().toLocaleDateString()}`,
+        scope: relayScope
+      })
+      if (!offer.available) {
+        return { available: false as const, reason: offer.reason }
+      }
+      const qrDataUrl = await QRCode.toDataURL(offer.pairingUrl, {
+        errorCorrectionLevel: 'M',
+        margin: 2,
+        width: 256
+      })
+      return {
+        available: true as const,
+        qrDataUrl,
+        pairingUrl: offer.pairingUrl,
+        endpoint: offer.endpoint,
+        deviceId: offer.deviceId,
+        webClientUrl: offer.webClientUrl
+      }
+    }
+  )
+
+  ipcMain.handle(
+    'mobile:getRelayRuntimePairingUrl',
+    async (_event, args?: { rotate?: boolean }) => {
+      const offer = rpcServer.createRelayPairingOffer({
+        rotate: isRecord(args) ? args.rotate === true : false,
+        name: `Runtime ${new Date().toLocaleDateString()}`,
+        scope: 'runtime'
+      })
+      if (!offer.available) {
+        return { available: false as const, reason: offer.reason }
+      }
+      return {
+        available: true as const,
+        pairingUrl: offer.pairingUrl,
+        webClientUrl: offer.webClientUrl,
+        endpoint: offer.endpoint,
+        deviceId: offer.deviceId
+      }
+    }
+  )
+
+  ipcMain.handle('mobile:getRelayConfig', () => ({
+    config: rpcServer.getRelayConfig(),
+    status: rpcServer.getRelayStatus()
+  }))
+
+  ipcMain.handle(
+    'mobile:updateRelayConfig',
+    (_event, args: { enabled?: boolean; endpoint?: string }) => {
+      if (!isRecord(args)) {
+        throw new Error('Invalid relay config update')
+      }
+      const current = rpcServer.getRelayConfig()
+      return {
+        config: rpcServer.updateRelayConfig({
+          enabled: typeof args.enabled === 'boolean' ? args.enabled : current.enabled,
+          endpoint: typeof args.endpoint === 'string' ? args.endpoint : current.endpoint
+        }),
+        status: rpcServer.getRelayStatus()
+      }
+    }
+  )
+
+  ipcMain.handle('mobile:getRelayStatus', () => ({ status: rpcServer.getRelayStatus() }))
 
   ipcMain.handle('mobile:listDevices', () => {
     const registry = rpcServer.getDeviceRegistry()

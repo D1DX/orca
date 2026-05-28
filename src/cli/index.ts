@@ -18,7 +18,10 @@ export { buildCurrentWorktreeSelector, normalizeWorktreeSelector } from './selec
 
 function shouldIgnoreRemoteSelection(commandPath: string[]): boolean {
   return (
-    commandPath[0] === 'environment' || commandPath[0] === 'serve' || commandPath[0] === 'agent'
+    commandPath[0] === 'environment' ||
+    commandPath[0] === 'serve' ||
+    commandPath[0] === 'agent' ||
+    (commandPath[0] === 'relay' && commandPath[1] === 'serve')
   )
 }
 
@@ -26,18 +29,19 @@ export async function main(argv = process.argv.slice(2), cwd = process.cwd()): P
   const parsed = normalizeCommandPositionals(COMMAND_SPECS, parseArgs(argv))
   const helpPath = resolveHelpPath(parsed)
   if (helpPath !== null) {
-    printHelp(COMMAND_SPECS, helpPath)
+    printCliHelp(helpPath)
     if (
       helpPath.length > 0 &&
       !findCommandSpec(COMMAND_SPECS, helpPath) &&
-      !isCommandGroup(helpPath)
+      !isCommandGroup(helpPath) &&
+      !isSpecBackedCommandGroup(helpPath)
     ) {
       process.exitCode = 1
     }
     return
   }
   if (parsed.commandPath.length === 0) {
-    printHelp(COMMAND_SPECS, [])
+    printCliHelp([])
     return
   }
   const json = parsed.flags.has('json')
@@ -53,7 +57,7 @@ export async function main(argv = process.argv.slice(2), cwd = process.cwd()): P
     // Why: pass `null` (not `undefined`) when remote selection is suppressed
     // so the RuntimeClient default parameter does not re-activate the
     // ORCA_PAIRING_CODE / ORCA_ENVIRONMENT env-var fallback for commands
-    // that must run locally (environment / serve).
+    // that must run locally.
     const client = new RuntimeClient(
       undefined,
       undefined,
@@ -78,4 +82,37 @@ export async function main(argv = process.argv.slice(2), cwd = process.cwd()): P
 
 if (require.main === module) {
   void main()
+}
+
+function printCliHelp(commandPath: string[]): void {
+  if (isSpecBackedCommandGroup(commandPath)) {
+    console.log(formatSpecBackedGroupHelp(commandPath[0]))
+    return
+  }
+  printHelp(COMMAND_SPECS, commandPath)
+  if (commandPath.length === 0) {
+    console.log(
+      [
+        '',
+        'Relay:',
+        '  relay serve               Start a self-hosted Orca runtime relay server'
+      ].join('\n')
+    )
+  }
+}
+
+function isSpecBackedCommandGroup(commandPath: string[]): boolean {
+  return (
+    commandPath.length === 1 &&
+    COMMAND_SPECS.some((spec) => spec.path.length > 1 && spec.path[0] === commandPath[0])
+  )
+}
+
+function formatSpecBackedGroupHelp(group: string): string {
+  const lines = [`orca ${group}`, '', `Usage: orca ${group} <command> [options]`, '', 'Commands:']
+  for (const spec of COMMAND_SPECS.filter((entry) => entry.path[0] === group)) {
+    lines.push(`  ${spec.path.slice(1).join(' ').padEnd(18)} ${spec.summary}`)
+  }
+  lines.push('', `Run \`orca ${group} <command> --help\` for command-specific usage.`)
+  return lines.join('\n')
 }

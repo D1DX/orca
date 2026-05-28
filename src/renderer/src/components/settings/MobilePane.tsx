@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useState } from 'react'
+/* eslint-disable max-lines -- Why: direct and relay mobile pairing share QR/device state; keeping the pane together prevents credential-rotation drift. */
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import { Check, Copy, Maximize2, Smartphone, Trash2 } from 'lucide-react'
 import { Button } from '../ui/button'
@@ -11,6 +12,7 @@ import {
   type MobileNetworkInterface
 } from './mobile-network-interface-selection'
 import { MobileNetworkInterfaceSection } from './MobileNetworkInterfaceSection'
+import { RuntimeRelaySettingsSection } from './RuntimeRelaySettingsSection'
 export { MOBILE_PANE_SEARCH_ENTRIES } from './mobile-pane-search'
 
 // Why: the section heading "When you leave the mobile app" carries the
@@ -44,6 +46,7 @@ export function MobilePane(): React.JSX.Element {
   const updateSettings = useAppStore((s) => s.updateSettings)
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [pairingUrl, setPairingUrl] = useState<string | null>(null)
+  const [pairingSource, setPairingSource] = useState<'direct' | 'relay' | null>(null)
   const [endpoint, setEndpoint] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [devices, setDevices] = useState<PairedDevice[]>([])
@@ -52,6 +55,37 @@ export function MobilePane(): React.JSX.Element {
   const [selectedAddress, setSelectedAddress] = useState<string | undefined>(undefined)
   const [refreshingNetworkInterfaces, setRefreshingNetworkInterfaces] = useState(false)
   const [codeCopied, setCodeCopied] = useState(false)
+  const [mobilePairingGenerationSource, setMobilePairingGenerationSource] = useState<
+    'direct' | 'relay' | null
+  >(null)
+  const mobilePairingGenerationIdRef = useRef(0)
+  const activeMobilePairingGenerationIdRef = useRef<number | null>(null)
+
+  const tryBeginMobilePairingGeneration = useCallback(
+    (source: 'direct' | 'relay'): number | null => {
+      if (activeMobilePairingGenerationIdRef.current !== null) {
+        return null
+      }
+      const requestId = mobilePairingGenerationIdRef.current + 1
+      mobilePairingGenerationIdRef.current = requestId
+      activeMobilePairingGenerationIdRef.current = requestId
+      setMobilePairingGenerationSource(source)
+      return requestId
+    },
+    []
+  )
+
+  const isCurrentMobilePairingGeneration = useCallback((requestId: number): boolean => {
+    return activeMobilePairingGenerationIdRef.current === requestId
+  }, [])
+
+  const finishMobilePairingGeneration = useCallback((requestId: number): void => {
+    if (activeMobilePairingGenerationIdRef.current !== requestId) {
+      return
+    }
+    activeMobilePairingGenerationIdRef.current = null
+    setMobilePairingGenerationSource(null)
+  }, [])
 
   const loadDevices = useCallback(async () => {
     try {
@@ -81,6 +115,10 @@ export function MobilePane(): React.JSX.Element {
 
   const generateQR = useCallback(
     async (opts: { rotate?: boolean } = {}) => {
+      const requestId = tryBeginMobilePairingGeneration('direct')
+      if (requestId === null) {
+        return
+      }
       setLoading(true)
       try {
         // Why: pass rotate=true on explicit Regenerate clicks so the runtime
@@ -90,9 +128,13 @@ export function MobilePane(): React.JSX.Element {
           ...(selectedAddress ? { address: selectedAddress } : {}),
           ...(opts.rotate ? { rotate: true } : {})
         })
+        if (!isCurrentMobilePairingGeneration(requestId)) {
+          return
+        }
         if (result.available) {
           setQrDataUrl(result.qrDataUrl)
           setPairingUrl(result.pairingUrl)
+          setPairingSource('direct')
           setEndpoint(result.endpoint)
           setCodeCopied(false)
           void loadDevices()
@@ -100,12 +142,21 @@ export function MobilePane(): React.JSX.Element {
           toast.error('WebSocket transport is not running')
         }
       } catch {
-        toast.error('Failed to generate QR code')
+        if (isCurrentMobilePairingGeneration(requestId)) {
+          toast.error('Failed to generate QR code')
+        }
       } finally {
         setLoading(false)
+        finishMobilePairingGeneration(requestId)
       }
     },
-    [loadDevices, selectedAddress]
+    [
+      finishMobilePairingGeneration,
+      isCurrentMobilePairingGeneration,
+      loadDevices,
+      selectedAddress,
+      tryBeginMobilePairingGeneration
+    ]
   )
 
   useEffect(() => {
@@ -156,6 +207,51 @@ export function MobilePane(): React.JSX.Element {
     }
   }
 
+  const clearPairingCode = useCallback(() => {
+    setQrDataUrl(null)
+    setPairingUrl(null)
+    setPairingSource(null)
+    setEndpoint(null)
+    setCodeCopied(false)
+  }, [])
+
+  const pairingCodeDisplay = qrDataUrl ? (
+    <div className="flex flex-col items-center gap-3 rounded-lg border border-border/60 py-6">
+      <button
+        type="button"
+        onClick={() => setQrEnlarged(true)}
+        className="group relative cursor-pointer rounded-lg border border-border/60 bg-white p-3"
+      >
+        <img src={qrDataUrl} alt="QR Code for mobile pairing" className="size-48" />
+        <Maximize2 className="absolute top-1.5 right-1.5 size-3 text-black/30 opacity-0 transition-opacity group-hover:opacity-100" />
+      </button>
+      {endpoint && <span className="text-muted-foreground font-mono text-xs">{endpoint}</span>}
+      <p className="text-muted-foreground max-w-xs text-center text-xs">
+        Scan this code with the Orca mobile app. Each code creates a unique device token.
+      </p>
+      {pairingUrl && (
+        <div className="flex w-full max-w-lg flex-col gap-1.5 px-4">
+          <div className="text-muted-foreground text-center text-xs">
+            Or paste this code in the mobile app:
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void copyPairingCode()}
+            className="font-mono text-[11px] leading-tight whitespace-normal break-all h-auto py-2 px-3"
+          >
+            <span className="flex-1 text-left">{pairingUrl}</span>
+            {codeCopied ? (
+              <Check className="ml-2 size-3.5 shrink-0 text-emerald-500" />
+            ) : (
+              <Copy className="ml-2 size-3.5 shrink-0" />
+            )}
+          </Button>
+        </div>
+      )}
+    </div>
+  ) : null
+
   return (
     <div className="space-y-6">
       <MobileNetworkInterfaceSection
@@ -165,47 +261,34 @@ export function MobilePane(): React.JSX.Element {
         refreshingNetworkInterfaces={refreshingNetworkInterfaces}
         onRefreshNetworkInterfaces={() => void loadNetworkInterfaces({ notifyOnError: true })}
         loading={loading}
-        hasQrCode={qrDataUrl != null}
-        onGenerateQr={() => void generateQR({ rotate: qrDataUrl != null })}
+        disabled={mobilePairingGenerationSource !== null}
+        hasQrCode={pairingSource === 'direct' && qrDataUrl != null}
+        onGenerateQr={() =>
+          void generateQR({ rotate: pairingSource === 'direct' && qrDataUrl != null })
+        }
       />
+      {pairingSource === 'direct' ? pairingCodeDisplay : null}
 
-      {/* QR code display */}
-      {qrDataUrl && (
-        <div className="flex flex-col items-center gap-3 rounded-lg border border-border/60 py-6">
-          <button
-            type="button"
-            onClick={() => setQrEnlarged(true)}
-            className="group relative cursor-pointer rounded-lg border border-border/60 bg-white p-3"
-          >
-            <img src={qrDataUrl} alt="QR Code for mobile pairing" className="size-48" />
-            <Maximize2 className="absolute top-1.5 right-1.5 size-3 text-black/30 opacity-0 transition-opacity group-hover:opacity-100" />
-          </button>
-          {endpoint && <span className="text-muted-foreground font-mono text-xs">{endpoint}</span>}
-          <p className="text-muted-foreground max-w-xs text-center text-xs">
-            Scan this code with the Orca mobile app. Each code creates a unique device token.
-          </p>
-          {pairingUrl && (
-            <div className="flex w-full max-w-lg flex-col gap-1.5 px-4">
-              <div className="text-muted-foreground text-center text-xs">
-                Or paste this code in the mobile app:
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void copyPairingCode()}
-                className="font-mono text-[11px] leading-tight whitespace-normal break-all h-auto py-2 px-3"
-              >
-                <span className="flex-1 text-left">{pairingUrl}</span>
-                {codeCopied ? (
-                  <Check className="ml-2 size-3.5 shrink-0 text-emerald-500" />
-                ) : (
-                  <Copy className="ml-2 size-3.5 shrink-0" />
-                )}
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
+      <RuntimeRelaySettingsSection
+        onMobilePairingGenerated={(result) => {
+          setQrDataUrl(result.qrDataUrl)
+          setPairingUrl(result.pairingUrl)
+          setPairingSource('relay')
+          setEndpoint(result.endpoint)
+          setCodeCopied(false)
+          void loadDevices()
+        }}
+        onRelayConfigChanged={() => {
+          if (pairingSource === 'relay') {
+            clearPairingCode()
+          }
+        }}
+        mobilePairingBusy={mobilePairingGenerationSource !== null}
+        tryBeginMobilePairingGeneration={() => tryBeginMobilePairingGeneration('relay')}
+        isCurrentMobilePairingGeneration={isCurrentMobilePairingGeneration}
+        finishMobilePairingGeneration={finishMobilePairingGeneration}
+      />
+      {pairingSource === 'relay' ? pairingCodeDisplay : null}
 
       {/* Paired devices */}
       <div>

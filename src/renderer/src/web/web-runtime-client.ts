@@ -3,6 +3,15 @@
    binary frame forwarding as one transport boundary. */
 import type { RuntimeRpcResponse, RuntimeRpcSuccess } from '../../../shared/runtime-rpc-envelope'
 import { isKeepaliveFrame } from '../../../shared/runtime-rpc-envelope'
+import {
+  RelayFrameSequencer,
+  createRelayTextFrame,
+  decodeRelayBinaryFrame,
+  encodeRelayBinaryFrame,
+  getRuntimeWebSocketTransportKind,
+  parseRelayTextFrame,
+  type RuntimeWebSocketTransportKind
+} from '../../../shared/runtime-relay-transport'
 import type { WebPairingOffer } from './web-pairing'
 import {
   decrypt,
@@ -69,9 +78,12 @@ export class WebRuntimeClient {
   private readonly childClients = new Set<WebRuntimeClient>()
   private readonly waiters: { resolve: () => void; reject: (error: Error) => void }[] = []
   private readonly serverPublicKey: Uint8Array
+  private readonly transportKind: RuntimeWebSocketTransportKind
+  private relaySequencer = new RelayFrameSequencer()
 
   constructor(private readonly pairing: WebPairingOffer) {
     this.serverPublicKey = publicKeyFromBase64(pairing.publicKeyB64)
+    this.transportKind = getRuntimeWebSocketTransportKind(pairing.endpoint)
     this.openConnection()
   }
 
@@ -313,6 +325,7 @@ export class WebRuntimeClient {
     ws.binaryType = 'arraybuffer'
     this.ws = ws
     this.sharedKey = null
+    this.relaySequencer = new RelayFrameSequencer()
     this.setState('connecting')
 
     this.connectTimer = window.setTimeout(() => {
@@ -343,7 +356,27 @@ export class WebRuntimeClient {
       }, HANDSHAKE_TIMEOUT_MS)
     }
 
+    let relayInboundQueue = Promise.resolve()
     ws.onmessage = (event) => {
+      if (this.ws !== ws) {
+        return
+      }
+      if (this.transportKind === 'relay') {
+        const rawData = event.data
+        // Why: browser Blob decoding is async, so relay frames must be
+        // processed in socket arrival order before sequence validation.
+        relayInboundQueue = relayInboundQueue
+          .catch(() => undefined)
+          .then(() => {
+            if (this.ws !== ws) {
+              return
+            }
+            return this.handleSocketMessage(rawData)
+          })
+          .catch(() => undefined)
+        void relayInboundQueue
+        return
+      }
       void this.handleSocketMessage(event.data)
     }
 
@@ -364,7 +397,14 @@ export class WebRuntimeClient {
       try {
         const control = JSON.parse(raw) as { type?: unknown }
         if (control.type === 'e2ee_ready') {
-          this.sendEncrypted({ type: 'e2ee_auth', deviceToken: this.pairing.deviceToken })
+          this.sendEncrypted({
+            type: 'e2ee_auth',
+            deviceToken: this.pairing.deviceToken,
+            challenge:
+              typeof (control as { challenge?: unknown }).challenge === 'string'
+                ? (control as { challenge: string }).challenge
+                : undefined
+          })
           return
         }
       } catch {
@@ -410,13 +450,21 @@ export class WebRuntimeClient {
       if (!plaintext) {
         return
       }
+      const payload = this.unwrapRelayBinaryFrame(plaintext)
+      if (!payload) {
+        return
+      }
       for (const subscription of this.subscriptions.values()) {
-        subscription.callbacks.onBinary?.(plaintext)
+        subscription.callbacks.onBinary?.(payload)
       }
       return
     }
 
-    const plaintext = decrypt(raw, this.sharedKey)
+    const decrypted = decrypt(raw, this.sharedKey)
+    if (decrypted === null) {
+      return
+    }
+    const plaintext = this.unwrapRelayTextFrame(decrypted)
     if (plaintext === null) {
       return
     }
@@ -466,7 +514,8 @@ export class WebRuntimeClient {
     if (!ws || ws.readyState !== WebSocket.OPEN || !this.sharedKey) {
       return false
     }
-    ws.send(encrypt(JSON.stringify(message), this.sharedKey))
+    const plaintext = JSON.stringify(message)
+    ws.send(encrypt(this.wrapRelayTextFrame(plaintext), this.sharedKey))
     return true
   }
 
@@ -475,8 +524,56 @@ export class WebRuntimeClient {
     if (!ws || ws.readyState !== WebSocket.OPEN || !this.sharedKey) {
       return false
     }
-    ws.send(encryptBytes(bytes, this.sharedKey))
+    ws.send(encryptBytes(this.wrapRelayBinaryFrame(bytes), this.sharedKey))
     return true
+  }
+
+  private wrapRelayTextFrame(payload: string): string {
+    if (this.transportKind !== 'relay' || this.state !== 'connected') {
+      return payload
+    }
+    const seq = this.relaySequencer.nextOutboundSeq()
+    if (seq === null) {
+      this.ws?.close()
+      return payload
+    }
+    return createRelayTextFrame(seq, payload)
+  }
+
+  private wrapRelayBinaryFrame(payload: Uint8Array<ArrayBufferLike>): Uint8Array {
+    if (this.transportKind !== 'relay' || this.state !== 'connected') {
+      return payload
+    }
+    const seq = this.relaySequencer.nextOutboundSeq()
+    if (seq === null) {
+      this.ws?.close()
+      return payload
+    }
+    return encodeRelayBinaryFrame(seq, payload)
+  }
+
+  private unwrapRelayTextFrame(plaintext: string): string | null {
+    if (this.transportKind !== 'relay') {
+      return plaintext
+    }
+    const frame = parseRelayTextFrame(plaintext)
+    if (!frame || !this.relaySequencer.acceptInboundSeq(frame.seq)) {
+      this.ws?.close()
+      return null
+    }
+    return frame.payload
+  }
+
+  private unwrapRelayBinaryFrame(plaintext: Uint8Array<ArrayBufferLike>): Uint8Array | null {
+    if (this.transportKind !== 'relay') {
+      return plaintext
+    }
+    const frame = decodeRelayBinaryFrame(plaintext)
+    if (!frame || !this.relaySequencer.acceptInboundSeq(frame.seq)) {
+      this.ws?.close()
+      return null
+    }
+    return frame.payload
   }
 
   private waitForConnected(timeoutMs = REQUEST_TIMEOUT_MS): Promise<void> {

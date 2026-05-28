@@ -27,7 +27,7 @@ export function invalidRemoteRuntimeResponseError(message: string): RemoteRuntim
   return new RemoteRuntimeClientError('invalid_runtime_response', message)
 }
 
-export function parseReadyFrame(frame: string): RemoteRuntimeClientError | null {
+export function parseReadyFrame(frame: string): { challenge?: string } | RemoteRuntimeClientError {
   let ready: unknown
   try {
     ready = JSON.parse(frame)
@@ -45,7 +45,8 @@ export function parseReadyFrame(frame: string): RemoteRuntimeClientError | null 
       'Remote Orca runtime returned an unexpected E2EE handshake frame.'
     )
   }
-  return null
+  const challenge = (ready as { challenge?: unknown }).challenge
+  return typeof challenge === 'string' ? { challenge } : {}
 }
 
 export function parseAuthenticatedFrame(plaintext: string): RemoteRuntimeClientError | null {

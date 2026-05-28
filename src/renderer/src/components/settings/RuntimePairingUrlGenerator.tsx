@@ -1,4 +1,5 @@
-import { Check, Copy, Loader2, RefreshCw } from 'lucide-react'
+/* eslint-disable max-lines -- Why: this settings component keeps direct, relay, and grant-management state together so generated access links and revocation stay in sync. */
+import { Check, Copy, Loader2, RadioTower, RefreshCw } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
 import type { RuntimeAccessGrant } from '../../../../shared/runtime-access-grants'
@@ -95,6 +96,7 @@ export function RuntimePairingUrlGenerator({
   )
   const [selectedAddress, setSelectedAddress] = useState(runtimePairingUrlCache.selectedAddress)
   const [customAddress, setCustomAddress] = useState(runtimePairingUrlCache.customAddress)
+  const [relayConnected, setRelayConnected] = useState(false)
   const [runtimePairingUrl, setRuntimePairingUrl] = useState<string | null>(
     runtimePairingUrlCache.runtimePairingUrl
   )
@@ -109,9 +111,13 @@ export function RuntimePairingUrlGenerator({
   const [refreshingNetworkInterfaces, setRefreshingNetworkInterfaces] = useState(false)
   const [revokingGrantId, setRevokingGrantId] = useState<string | null>(null)
   const [copiedTarget, setCopiedTarget] = useState<'web' | 'pairing' | null>(null)
-  const [isGeneratingPairing, setIsGeneratingPairing] = useState(false)
+  const [runtimePairingGenerationSource, setRuntimePairingGenerationSource] = useState<
+    'direct' | 'relay' | null
+  >(null)
   const networkInterfaceLoadIdRef = useRef(0)
   const accessGrantLoadIdRef = useRef(0)
+  const runtimePairingGenerationIdRef = useRef(0)
+  const activeRuntimePairingGenerationIdRef = useRef<number | null>(null)
 
   const loadRuntimeAccessGrants = useCallback(
     async (options: { showToastOnError?: boolean } = {}): Promise<void> => {
@@ -175,6 +181,37 @@ export function RuntimePairingUrlGenerator({
     }
   }, [loadRuntimeAccessGrants])
 
+  const loadRelayConnectionStatus = useCallback(async (): Promise<void> => {
+    try {
+      const result = await window.api.mobile.getRelayStatus()
+      setRelayConnected(result.status.state === 'connected')
+    } catch {
+      setRelayConnected(false)
+    }
+  }, [])
+
+  // Why: the relay can be enabled from the Mobile pane while this generator is
+  // already mounted, so keep the relay action's disabled state current.
+  useEffect(() => {
+    if (!showGeneratorForm) {
+      return
+    }
+    let cancelled = false
+    const refresh = async (): Promise<void> => {
+      if (!cancelled) {
+        await loadRelayConnectionStatus()
+      }
+    }
+    void refresh()
+    const interval = window.setInterval(() => {
+      void refresh()
+    }, 2_000)
+    return () => {
+      cancelled = true
+      window.clearInterval(interval)
+    }
+  }, [loadRelayConnectionStatus, showGeneratorForm])
+
   const clearGeneratedUrls = (): void => {
     runtimePairingUrlCache.runtimePairingUrl = null
     runtimePairingUrlCache.webClientUrl = null
@@ -184,14 +221,43 @@ export function RuntimePairingUrlGenerator({
     setRuntimePairingDeviceId(null)
   }
 
+  const tryBeginRuntimePairingGeneration = (source: 'direct' | 'relay'): number | null => {
+    if (activeRuntimePairingGenerationIdRef.current !== null) {
+      return null
+    }
+    const requestId = runtimePairingGenerationIdRef.current + 1
+    runtimePairingGenerationIdRef.current = requestId
+    activeRuntimePairingGenerationIdRef.current = requestId
+    setRuntimePairingGenerationSource(source)
+    return requestId
+  }
+
+  const isCurrentRuntimePairingGeneration = (requestId: number): boolean => {
+    return activeRuntimePairingGenerationIdRef.current === requestId
+  }
+
+  const finishRuntimePairingGeneration = (requestId: number): void => {
+    if (activeRuntimePairingGenerationIdRef.current !== requestId) {
+      return
+    }
+    activeRuntimePairingGenerationIdRef.current = null
+    setRuntimePairingGenerationSource(null)
+  }
+
   const generateRuntimePairingUrl = async (): Promise<void> => {
-    setIsGeneratingPairing(true)
+    const requestId = tryBeginRuntimePairingGeneration('direct')
+    if (requestId === null) {
+      return
+    }
     try {
       const advertiseAddress = customAddress.trim() || selectedAddress
       const result = await window.api.mobile.getRuntimePairingUrl({
         address: advertiseAddress,
         rotate: true
       })
+      if (!isCurrentRuntimePairingGeneration(requestId)) {
+        return
+      }
       if (!result.available) {
         clearGeneratedUrls()
         toast.error('Runtime pairing is unavailable.')
@@ -206,9 +272,47 @@ export function RuntimePairingUrlGenerator({
       await loadRuntimeAccessGrants()
       toast.success(result.webClientUrl ? 'Generated web client URL.' : 'Generated pairing URL.')
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : 'Failed to generate pairing URL.')
+      if (isCurrentRuntimePairingGeneration(requestId)) {
+        toast.error(error instanceof Error ? error.message : 'Failed to generate pairing URL.')
+      }
     } finally {
-      setIsGeneratingPairing(false)
+      finishRuntimePairingGeneration(requestId)
+    }
+  }
+
+  const generateRelayRuntimePairingUrl = async (): Promise<void> => {
+    const requestId = tryBeginRuntimePairingGeneration('relay')
+    if (requestId === null) {
+      return
+    }
+    try {
+      const result = await window.api.mobile.getRelayRuntimePairingUrl({ rotate: true })
+      if (!isCurrentRuntimePairingGeneration(requestId)) {
+        return
+      }
+      if (!result.available) {
+        clearGeneratedUrls()
+        toast.error('Relay access link is unavailable.')
+        return
+      }
+      runtimePairingUrlCache.runtimePairingUrl = result.pairingUrl
+      runtimePairingUrlCache.webClientUrl = result.webClientUrl
+      runtimePairingUrlCache.runtimePairingDeviceId = result.deviceId
+      setRuntimePairingUrl(result.pairingUrl)
+      setWebClientUrl(result.webClientUrl)
+      setRuntimePairingDeviceId(result.deviceId)
+      await loadRuntimeAccessGrants()
+      toast.success(
+        result.webClientUrl ? 'Generated relay web client URL.' : 'Generated relay pairing URL.'
+      )
+    } catch (error) {
+      if (isCurrentRuntimePairingGeneration(requestId)) {
+        toast.error(
+          error instanceof Error ? error.message : 'Failed to generate relay pairing URL.'
+        )
+      }
+    } finally {
+      finishRuntimePairingGeneration(requestId)
     }
   }
 
@@ -252,6 +356,9 @@ export function RuntimePairingUrlGenerator({
     ? 'space-y-3 rounded-lg border border-border/50 bg-muted/25 p-3'
     : 'space-y-4'
   const sharedAccessClassName = showGeneratorForm ? 'border-t border-border/40 pt-3' : ''
+  const isGeneratingPairing = runtimePairingGenerationSource === 'direct'
+  const isGeneratingRelayPairing = runtimePairingGenerationSource === 'relay'
+  const isGeneratingAnyPairing = runtimePairingGenerationSource !== null
 
   const updateSelectedAddress = (address: string): void => {
     runtimePairingUrlCache.selectedAddress = address
@@ -342,18 +449,46 @@ export function RuntimePairingUrlGenerator({
               127.0.0.1 only works on this computer. Use a LAN, Tailscale, or custom address for
               another device.
             </p>
-            <div className="flex justify-end">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 type="button"
-                variant="outline"
                 size="sm"
                 className="gap-1.5"
                 onClick={() => void generateRuntimePairingUrl()}
-                disabled={isGeneratingPairing}
+                disabled={isGeneratingAnyPairing}
               >
                 {isGeneratingPairing ? <Loader2 className="animate-spin" /> : <RefreshCw />}
-                Generate Access Link
+                {isGeneratingPairing ? 'Generating…' : 'Generate direct link'}
               </Button>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  {/* Why: wrap in span so the tooltip still surfaces while the
+                      relay button is disabled — Radix can't fire on a disabled
+                      button itself. */}
+                  <span tabIndex={relayConnected ? -1 : 0}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => void generateRelayRuntimePairingUrl()}
+                      disabled={isGeneratingAnyPairing || !relayConnected}
+                    >
+                      {isGeneratingRelayPairing ? (
+                        <Loader2 className="animate-spin" />
+                      ) : (
+                        <RadioTower />
+                      )}
+                      {isGeneratingRelayPairing ? 'Generating…' : 'Generate relay link'}
+                    </Button>
+                  </span>
+                </TooltipTrigger>
+                {!relayConnected ? (
+                  <TooltipContent side="bottom" sideOffset={6}>
+                    Connect a relay in Mobile settings to share this server through it.
+                  </TooltipContent>
+                ) : null}
+              </Tooltip>
             </div>
           </div>
 

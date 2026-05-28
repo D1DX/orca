@@ -159,7 +159,7 @@ async function authenticateMobileWs(pairingUrl: string): Promise<WebSocket> {
       publicKeyB64: Buffer.from(mobileKeys.publicKey).toString('base64')
     })
   )
-  expect(JSON.parse(await nextWsMessage(ws))).toEqual({ type: 'e2ee_ready' })
+  expect(JSON.parse(await nextWsMessage(ws))).toMatchObject({ type: 'e2ee_ready' })
 
   ws.send(
     encrypt(JSON.stringify({ type: 'e2ee_auth', deviceToken: parsed!.deviceToken }), sharedKey)
@@ -305,6 +305,37 @@ describe('OrcaRuntimeRpcServer', () => {
     }
   })
 
+  it('omits web client URLs from relay pairing offers even with a web bundle configured', async () => {
+    const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-rpc-'))
+    const runtime = new OrcaRuntimeService()
+    const server = new OrcaRuntimeRpcServer({
+      runtime,
+      userDataPath,
+      enableWebSocket: true,
+      wsPort: 0,
+      webClientRoot: userDataPath
+    })
+
+    await server.start()
+
+    try {
+      server['relayClient'] = {
+        createClientEndpoint: () => 'wss://relay.example.test/runtime?role=client',
+        stop: vi.fn()
+      } as never
+
+      const offer = server.createRelayPairingOffer({ name: 'Relay web test' })
+      expect(offer.available).toBe(true)
+      if (offer.available) {
+        expect(offer.endpoint).toBe('wss://relay.example.test/runtime?role=client')
+        expect(parsePairingCode(offer.pairingUrl)?.endpoint).toBe(offer.endpoint)
+        expect(offer.webClientUrl).toBeNull()
+      }
+    } finally {
+      await server.stop()
+    }
+  })
+
   it('preserves proxy path prefixes in web client URLs', async () => {
     const userDataPath = mkdtempSync(join(tmpdir(), 'orca-runtime-rpc-'))
     const runtime = new OrcaRuntimeService()
@@ -440,7 +471,7 @@ describe('OrcaRuntimeRpcServer', () => {
           publicKeyB64: Buffer.from(mobileKeys.publicKey).toString('base64')
         })
       )
-      expect(JSON.parse(await nextWsMessage(ws))).toEqual({ type: 'e2ee_ready' })
+      expect(JSON.parse(await nextWsMessage(ws))).toMatchObject({ type: 'e2ee_ready' })
       expect(server['e2eeChannels'].size).toBe(1)
       expect(server['wsConnectionIds'].size).toBe(1)
 
@@ -1894,6 +1925,7 @@ describe('OrcaRuntimeRpcServer', () => {
     expect(existsSync(endpoint)).toBe(false)
     expect(server['transports']).toEqual([])
     expect(server['activeTransports']).toEqual([])
+    expect(server['relayClient']).toBeNull()
 
     writeMetadataSpy.mockRestore()
   })

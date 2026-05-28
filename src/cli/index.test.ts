@@ -5,12 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const {
   callMock,
   serveOrcaAppMock,
+  startRuntimeRelayServerMock,
   getDefaultUserDataPathMock,
   addEnvironmentFromPairingCodeMock,
   listEnvironmentsMock
 } = vi.hoisted(() => ({
   callMock: vi.fn(),
   serveOrcaAppMock: vi.fn(),
+  startRuntimeRelayServerMock: vi.fn(),
   getDefaultUserDataPathMock: vi.fn(() => '/tmp/orca-user-data'),
   addEnvironmentFromPairingCodeMock: vi.fn(),
   listEnvironmentsMock: vi.fn()
@@ -79,6 +81,10 @@ vi.mock('./runtime/environments', () => ({
   resolveEnvironment: vi.fn()
 }))
 
+vi.mock('../runtime-relay-server/server', () => ({
+  startRuntimeRelayServer: startRuntimeRelayServerMock
+}))
+
 import {
   buildCurrentWorktreeSelector,
   COMMAND_SPECS,
@@ -110,6 +116,7 @@ describe('orca cli worktree awareness', () => {
     delete process.env.ORCA_TERMINAL_HANDLE
     delete process.env.ORCA_USER_DATA_PATH
     serveOrcaAppMock.mockReset()
+    startRuntimeRelayServerMock.mockReset()
     getDefaultUserDataPathMock.mockClear()
     addEnvironmentFromPairingCodeMock.mockReset()
     listEnvironmentsMock.mockReset()
@@ -177,6 +184,31 @@ describe('orca cli worktree awareness', () => {
     expect(normalizeWorktreeSelector('branch:feature/foo', '/tmp/repo/feature')).toBe(
       'branch:feature/foo'
     )
+  })
+
+  it('lists the relay group from root help', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await main(['--help'], '/tmp/repo')
+
+    const output = logSpy.mock.calls.flat().join('\n')
+    expect(output).toContain('Relay:')
+    expect(output).toContain('relay serve')
+    expect(output).toContain('Start a self-hosted Orca runtime relay server')
+    expect(callMock).not.toHaveBeenCalled()
+  })
+
+  it('prints relay group help', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+
+    await main(['relay', '--help'], '/tmp/repo')
+
+    const output = logSpy.mock.calls.flat().join('\n')
+    expect(output).toContain('orca relay')
+    expect(output).toContain('Usage: orca relay <command> [options]')
+    expect(output).toContain('serve')
+    expect(output).toContain('Run `orca relay <command> --help`')
+    expect(callMock).not.toHaveBeenCalled()
   })
 
   it('shows the enclosing worktree for `worktree current`', async () => {
@@ -710,6 +742,142 @@ describe('orca cli worktree awareness', () => {
     })
   })
 
+  it('does not present wildcard relay bind hosts as client endpoints', async () => {
+    const stopMock = vi.fn().mockResolvedValue(undefined)
+    startRuntimeRelayServerMock.mockResolvedValue({
+      httpUrl: 'http://0.0.0.0:8787',
+      webSocketUrl: 'ws://0.0.0.0:8787/ws',
+      enrollmentToken: 'enroll-token',
+      protocolVersion: 1,
+      stop: stopMock
+    })
+    let resolveStartupWritten: () => void = () => {}
+    const startupWritten = new Promise<void>((resolve) => {
+      resolveStartupWritten = resolve
+    })
+    const stdoutSpy = vi.spyOn(process.stdout, 'write')
+    stdoutSpy.mockImplementation(((chunk: unknown) => {
+      if (String(chunk).includes('Orca runtime relay listening')) {
+        resolveStartupWritten()
+      }
+      return true
+    }) as never)
+
+    const run = main(['relay', 'serve', '--host', '0.0.0.0'], '/tmp/repo')
+    await startupWritten
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    process.emit('SIGINT')
+    await run
+
+    const output = stdoutSpy.mock.calls.map((call) => String(call[0])).join('')
+    expect(output).toContain('Configure Orca/mobile with your public wss://.../ws endpoint')
+    expect(output).toContain('0.0.0.0 and :: are bind addresses only')
+    expect(output).toContain('Bind-only WebSocket endpoint: ws://0.0.0.0:8787/ws')
+    expect(output).not.toMatch(/^WebSocket endpoint: ws:\/\/0\.0\.0\.0:8787\/ws$/m)
+    expect(stopMock).toHaveBeenCalled()
+  })
+
+  it('emits the configured public relay URL in json startup output', async () => {
+    const stopMock = vi.fn().mockResolvedValue(undefined)
+    startRuntimeRelayServerMock.mockResolvedValue({
+      httpUrl: 'http://0.0.0.0:8787',
+      webSocketUrl: 'ws://0.0.0.0:8787/ws',
+      enrollmentToken: 'enroll-token',
+      protocolVersion: 1,
+      stop: stopMock
+    })
+    let resolveStartupWritten: () => void = () => {}
+    const startupWritten = new Promise<void>((resolve) => {
+      resolveStartupWritten = resolve
+    })
+    const stdoutSpy = vi.spyOn(process.stdout, 'write')
+    stdoutSpy.mockImplementation(((chunk: unknown) => {
+      if (String(chunk).includes('"kind":"runtime_relay_server"')) {
+        resolveStartupWritten()
+      }
+      return true
+    }) as never)
+
+    const run = main(
+      [
+        'relay',
+        'serve',
+        '--host',
+        '0.0.0.0',
+        '--public-url',
+        'wss://relay.example.com/ws',
+        '--json'
+      ],
+      '/tmp/repo'
+    )
+    await startupWritten
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    process.emit('SIGINT')
+    await run
+
+    const startup = JSON.parse(String(stdoutSpy.mock.calls[0]?.[0]))
+    expect(startup).toMatchObject({
+      ok: true,
+      kind: 'runtime_relay_server',
+      httpUrl: 'http://0.0.0.0:8787',
+      webSocketUrl: 'ws://0.0.0.0:8787/ws',
+      advertisedWebSocketUrl: 'wss://relay.example.com/ws',
+      publicUrlRequired: false,
+      enrollmentToken: 'enroll-token'
+    })
+    expect(stopMock).toHaveBeenCalled()
+  })
+
+  it('rejects invalid public relay URLs before starting the relay', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const priorExitCode = process.exitCode
+    const invalidUrls = [
+      'http://relay.example.com/ws',
+      'wss://user:pass@relay.example.com/ws',
+      'wss://relay.example.com/ws?enrollmentToken=secret',
+      'wss://relay.example.com/ws#secret',
+      'wss://relay.example.com/not-ws'
+    ]
+
+    for (const invalidUrl of invalidUrls) {
+      process.exitCode = undefined
+      await main(['relay', 'serve', '--public-url', invalidUrl, '--json'], '/tmp/repo')
+    }
+
+    expect(startRuntimeRelayServerMock).not.toHaveBeenCalled()
+    const output = [...logSpy.mock.calls, ...errSpy.mock.calls].flat().join('\n')
+    expect(output).toContain('Use a ws:// or wss:// URL for --public-url.')
+    expect(output).toContain(
+      'Pass --public-url without credentials, query parameters, or fragments.'
+    )
+    expect(output).toContain('Use a --public-url ending in /ws.')
+    expect(process.exitCode).toBe(1)
+
+    process.exitCode = priorExitCode
+  })
+
+  it('emits structured json when relay startup fails', async () => {
+    const stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
+    const priorExitCode = process.exitCode
+    startRuntimeRelayServerMock.mockRejectedValue(new Error('listen EADDRINUSE'))
+
+    await main(['relay', 'serve', '--json'], '/tmp/repo')
+
+    const output = JSON.parse(String(stdoutSpy.mock.calls[0]?.[0]))
+    expect(output).toMatchObject({
+      ok: false,
+      kind: 'runtime_relay_server',
+      error: {
+        code: 'runtime_error',
+        message: 'listen EADDRINUSE'
+      }
+    })
+    expect(process.exitCode).toBe(1)
+
+    process.exitCode = priorExitCode
+  })
+
   it('rejects contradictory serve pairing flags', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -736,6 +904,22 @@ describe('orca cli worktree awareness', () => {
     expect(serveOrcaAppMock).not.toHaveBeenCalled()
     expect([...logSpy.mock.calls, ...errSpy.mock.calls].flat().join('\n')).toContain(
       'Invalid --port value: not-a-port'
+    )
+    expect(process.exitCode).toBe(1)
+
+    process.exitCode = priorExitCode
+  })
+
+  it('rejects blank relay serve flag values before starting the relay', async () => {
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const priorExitCode = process.exitCode
+
+    await main(['relay', 'serve', '--port', '', '--json'], '/tmp/repo')
+
+    expect(startRuntimeRelayServerMock).not.toHaveBeenCalled()
+    expect([...logSpy.mock.calls, ...errSpy.mock.calls].flat().join('\n')).toContain(
+      'Missing required --port value.'
     )
     expect(process.exitCode).toBe(1)
 

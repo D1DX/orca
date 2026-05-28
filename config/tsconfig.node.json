@@ -5,6 +5,7 @@
     "../src/main/**/*",
     "../src/preload/**/*",
     "../src/shared/**/*",
+    "../src/runtime-relay-server/**/*",
     "../src/relay/**/*",
     "../src/types/**/*"
   ],
