@@ -786,6 +786,50 @@ describe('updater', () => {
     expect(autoUpdaterMock.downloadUpdate).toHaveBeenCalledTimes(1)
   })
 
+  it('preserves user initiation while a manual check auto-downloads', async () => {
+    autoUpdaterMock.checkForUpdates.mockImplementation(() => {
+      autoUpdaterMock.emit('checking-for-update')
+      queueMicrotask(() => {
+        autoUpdaterMock.emit('update-available', { version: '1.0.61' })
+      })
+      return Promise.resolve(undefined)
+    })
+
+    const sendMock = vi.fn()
+    const mainWindow = { webContents: { send: sendMock } }
+
+    const { setupAutoUpdater, checkForUpdatesFromMenu, getUpdateStatus } = await import('./updater')
+
+    setupAutoUpdater(mainWindow as never, { getLastUpdateCheckAt: () => Date.now() })
+
+    checkForUpdatesFromMenu()
+
+    await vi.waitFor(() => {
+      expect(autoUpdaterMock.downloadUpdate).toHaveBeenCalledTimes(1)
+      expect(sendMock).toHaveBeenCalledWith('updater:status', {
+        state: 'available',
+        version: '1.0.61',
+        userInitiated: true,
+        changelog: null
+      })
+    })
+
+    autoUpdaterMock.emit('download-progress', { percent: 42 })
+
+    expect(sendMock).toHaveBeenCalledWith('updater:status', {
+      state: 'downloading',
+      percent: 42,
+      version: '1.0.61',
+      userInitiated: true
+    })
+    expect(getUpdateStatus()).toEqual({
+      state: 'downloading',
+      percent: 42,
+      version: '1.0.61',
+      userInitiated: true
+    })
+  })
+
   it('surfaces automatic download failures against the cached update version', async () => {
     autoUpdaterMock.checkForUpdates.mockImplementation(() => {
       autoUpdaterMock.emit('checking-for-update')
@@ -901,6 +945,7 @@ describe('updater', () => {
       expect(sendMock).toHaveBeenCalledWith('updater:status', {
         state: 'available',
         version: '1.0.62',
+        userInitiated: true,
         changelog: null
       })
       expect(autoUpdaterMock.downloadUpdate).toHaveBeenCalledTimes(1)
@@ -958,6 +1003,7 @@ describe('updater', () => {
     expect(sendMock).toHaveBeenCalledWith('updater:status', {
       state: 'available',
       version: '1.0.62',
+      userInitiated: true,
       changelog: null
     })
     expect(sendMock).not.toHaveBeenCalledWith(
@@ -1399,6 +1445,7 @@ describe('updater', () => {
       expect(sendMock).toHaveBeenCalledWith('updater:status', {
         state: 'available',
         version: '1.4.26',
+        userInitiated: true,
         changelog: null
       })
     })
@@ -1680,6 +1727,90 @@ describe('updater', () => {
       dismissNudge()
     }
 
+    expect(setPendingUpdateNudgeId).toHaveBeenCalledWith('campaign-1')
+    expect(setPendingUpdateNudgeId).not.toHaveBeenCalledWith(null)
+    expect(setDismissedUpdateNudgeId).not.toHaveBeenCalled()
+    expect(pendingNudgeId).toBe('campaign-1')
+
+    await vi.advanceTimersByTimeAsync(60 * 60 * 1000)
+
+    await vi.waitFor(() => {
+      expect(autoUpdaterMock.checkForUpdates.mock.calls.length).toBeGreaterThanOrEqual(2)
+    })
+    autoUpdaterMock.emit('update-available', { version: '1.4.27' })
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(sendMock).toHaveBeenCalledWith('updater:status', {
+      state: 'available',
+      version: '1.4.27',
+      changelog: null,
+      activeNudgeId: 'campaign-1'
+    })
+  })
+
+  it('does not attach nudge dismissal to an already-staged last-good update', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('process', { ...process, platform: 'linux' })
+    vi.setSystemTime(new Date('2026-05-24T21:40:00Z'))
+    appMock.getVersion.mockReturnValue('1.4.25')
+    let resolveNudge: ((nudge: { id: string; minVersion: string }) => void) | null = null
+    fetchNudgeMock.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveNudge = resolve
+      })
+    )
+    fetchNudgeMock.mockResolvedValue(null)
+    shouldApplyNudgeMock.mockReturnValue(true)
+    fetchNewerReleaseTagsMock
+      .mockResolvedValueOnce({
+        tags: [],
+        state: 'not-ready',
+        lastGoodTag: 'v1.4.26'
+      })
+      .mockResolvedValueOnce(['v1.4.27'])
+    autoUpdaterMock.checkForUpdates.mockImplementation(() => {
+      autoUpdaterMock.emit('checking-for-update')
+      if (autoUpdaterMock.checkForUpdates.mock.calls.length === 1) {
+        queueMicrotask(() => {
+          autoUpdaterMock.emit('update-available', { version: '1.4.26' })
+        })
+      }
+      return Promise.resolve(undefined)
+    })
+    let pendingNudgeId: string | null = null
+    const setPendingUpdateNudgeId = vi.fn((id: string | null) => {
+      pendingNudgeId = id
+    })
+    const setDismissedUpdateNudgeId = vi.fn()
+    const sendMock = vi.fn()
+    const mainWindow = { webContents: { send: sendMock } }
+
+    const { setupAutoUpdater } = await import('./updater')
+
+    setupAutoUpdater(mainWindow as never, {
+      getLastUpdateCheckAt: () => Date.now(),
+      getPendingUpdateNudgeId: () => pendingNudgeId,
+      getDismissedUpdateNudgeId: () => null,
+      setPendingUpdateNudgeId,
+      setDismissedUpdateNudgeId
+    })
+    autoUpdaterMock.emit('update-downloaded', { version: '1.4.26' })
+    sendMock.mockClear()
+
+    resolveNudge?.({ id: 'campaign-1', minVersion: '1.0.0' })
+
+    await vi.waitFor(() => {
+      expect(autoUpdaterMock.checkForUpdates).toHaveBeenCalledTimes(1)
+    })
+    await vi.advanceTimersByTimeAsync(0)
+
+    const lastGoodStatuses = sendMock.mock.calls
+      .filter(([channel]) => channel === 'updater:status')
+      .map(([, status]) => status)
+      .filter((status) => status.state === 'downloaded' && status.version === '1.4.26')
+    expect(lastGoodStatuses).not.toContainEqual(
+      expect.objectContaining({ activeNudgeId: 'campaign-1' })
+    )
     expect(setPendingUpdateNudgeId).toHaveBeenCalledWith('campaign-1')
     expect(setPendingUpdateNudgeId).not.toHaveBeenCalledWith(null)
     expect(setDismissedUpdateNudgeId).not.toHaveBeenCalled()
@@ -2292,6 +2423,7 @@ describe('updater', () => {
       expect(statuses).toContainEqual({
         state: 'available',
         version: '1.3.51-rc.6',
+        userInitiated: true,
         changelog: null
       })
     })

@@ -321,12 +321,13 @@ function computeVisibility(input: VisibilityInput): VisibilityResult {
   if (status.state === 'idle') {
     return 'hidden'
   }
-  if (status.state === 'available' && !userInitiatedCycle && !isNudgeDriven) {
+  if (status.state === 'available' && !userInitiatedCycle && !isUserInitiated && !isNudgeDriven) {
     return 'hidden'
   }
   if (
     status.state === 'downloading' &&
     !userInitiatedCycle &&
+    !isUserInitiated &&
     !hasStartedDownload &&
     !isNudgeDriven
   ) {
@@ -346,7 +347,12 @@ function computeVisibility(input: VisibilityInput): VisibilityResult {
   }
 
   const effectiveVersion = 'version' in status ? status.version : cachedVersion
-  if (effectiveVersion && dismissedVersion === effectiveVersion) {
+  if (
+    effectiveVersion &&
+    dismissedVersion === effectiveVersion &&
+    !userInitiatedCycle &&
+    !isUserInitiated
+  ) {
     if (status.state !== 'downloading' && status.state !== 'error') {
       return 'hidden'
     }
@@ -473,6 +479,29 @@ describe('UpdateCard visibility gates', () => {
     ).toBe('hidden')
   })
 
+  it('shows user-initiated available when the same version was dismissed', () => {
+    expect(
+      computeVisibility({
+        status: { state: 'available', version: '1.2.0', changelog: null },
+        dismissedVersion: '1.2.0',
+        cachedVersion: '1.2.0',
+        hasStartedDownload: false,
+        userInitiatedCycle: true
+      })
+    ).toBe('visible')
+  })
+
+  it('shows hydrated user-initiated available when the same version was dismissed', () => {
+    expect(
+      computeVisibility({
+        status: { state: 'available', version: '1.2.0', changelog: null, userInitiated: true },
+        dismissedVersion: '1.2.0',
+        cachedVersion: '1.2.0',
+        hasStartedDownload: false
+      })
+    ).toBe('visible')
+  })
+
   it('shows downloading even when version is dismissed (user clicked Update after dismiss)', () => {
     expect(
       computeVisibility({
@@ -493,6 +522,17 @@ describe('UpdateCard visibility gates', () => {
         hasStartedDownload: false
       })
     ).toBe('hidden')
+  })
+
+  it('shows hydrated user-initiated download progress', () => {
+    expect(
+      computeVisibility({
+        status: { state: 'downloading', percent: 42, version: '1.2.0', userInitiated: true },
+        dismissedVersion: '1.2.0',
+        cachedVersion: '1.2.0',
+        hasStartedDownload: false
+      })
+    ).toBe('visible')
   })
 
   it('shows nudge-driven background download progress', () => {

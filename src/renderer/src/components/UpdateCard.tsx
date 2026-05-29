@@ -242,12 +242,18 @@ export function UpdateCard() {
   const isNudgeDriven = 'activeNudgeId' in status && Boolean(status.activeNudgeId)
   // Why: ordinary background checks now pre-download updates; keep that path
   // quiet until the user explicitly checks, while explicit/nudge cycles stay visible.
-  if (status.state === 'available' && !userInitiatedCycleRef.current && !isNudgeDriven) {
+  if (
+    status.state === 'available' &&
+    !userInitiatedCycleRef.current &&
+    !isUserInitiated &&
+    !isNudgeDriven
+  ) {
     return null
   }
   if (
     status.state === 'downloading' &&
     !userInitiatedCycleRef.current &&
+    !isUserInitiated &&
     !hasStartedDownload.current &&
     !isNudgeDriven
   ) {
@@ -286,7 +292,8 @@ export function UpdateCard() {
   if (
     versionRef.current &&
     dismissedVersion === versionRef.current &&
-    !userInitiatedCycleRef.current
+    !userInitiatedCycleRef.current &&
+    !isUserInitiated
   ) {
     if (status.state !== 'downloading' && status.state !== 'error') {
       return null

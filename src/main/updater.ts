@@ -165,6 +165,7 @@ function sendStatus(status: UpdateStatus): void {
     (status.state === 'idle' ||
       status.state === 'not-available' ||
       status.state === 'available' ||
+      status.state === 'downloaded' ||
       status.state === 'error')
   if (awaitingNudgeCheckOutcome) {
     if (status.state === 'available' || status.state === 'downloaded') {
@@ -263,6 +264,17 @@ function getPendingInstallVersion(): string {
     return currentStatus.version
   }
   return ''
+}
+
+function getCurrentActionableUpdateUserInitiated(): boolean | undefined {
+  if (
+    currentStatus.state === 'available' ||
+    currentStatus.state === 'downloading' ||
+    currentStatus.state === 'downloaded'
+  ) {
+    return currentStatus.userInitiated || undefined
+  }
+  return undefined
 }
 
 function getCheckFailureKey(message: string, userInitiated?: boolean): string {
@@ -998,7 +1010,7 @@ function startAvailableUpdateDownload(): void {
     .downloadUpdate()
     .catch((err) => {
       downloadInFlight = false
-      sendErrorStatus(String(err?.message ?? err))
+      sendErrorStatus(String(err?.message ?? err), getCurrentActionableUpdateUserInitiated())
     })
 }
 

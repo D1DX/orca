@@ -50,6 +50,17 @@ type UpdaterHandlerContext = {
   setUserInitiatedCheck: (value: boolean) => void
 }
 
+function getActionableUpdateUserInitiated(status: UpdateStatus): boolean | undefined {
+  if (
+    status.state === 'available' ||
+    status.state === 'downloading' ||
+    status.state === 'downloaded'
+  ) {
+    return status.userInitiated || undefined
+  }
+  return undefined
+}
+
 export function registerAutoUpdaterHandlers({
   autoUpdater,
   clearBackgroundCheckLaunchPending,
@@ -91,7 +102,8 @@ export function registerAutoUpdaterHandlers({
         sendStatus({
           state: 'downloaded',
           version: getPendingInstallVersion(),
-          releaseUrl: getKnownReleaseUrl()
+          releaseUrl: getKnownReleaseUrl(),
+          ...(getActionableUpdateUserInitiated(getCurrentStatus()) ? { userInitiated: true } : {})
         })
       })
     })
@@ -215,7 +227,12 @@ export function registerAutoUpdaterHandlers({
         }
       }
 
-      sendStatus({ state: 'available', version: info.version, changelog })
+      sendStatus({
+        state: 'available',
+        version: info.version,
+        ...(wasUserInitiated ? { userInitiated: true } : {}),
+        changelog
+      })
       startAvailableUpdateDownload()
     })()
   })
@@ -256,10 +273,12 @@ export function registerAutoUpdaterHandlers({
 
   autoUpdater.on('download-progress', (progress) => {
     clearBackgroundCheckLaunchPending()
+    const userInitiated = getActionableUpdateUserInitiated(getCurrentStatus())
     sendStatus({
       state: 'downloading',
       percent: Math.round(progress.percent),
-      version: getPendingInstallVersion()
+      version: getPendingInstallVersion(),
+      ...(userInitiated ? { userInitiated: true } : {})
     })
   })
 
@@ -281,10 +300,20 @@ export function registerAutoUpdaterHandlers({
     if (process.platform === 'darwin' && !isMacInstallerReady()) {
       // Squirrel is still processing. Keep the UI at 100% downloaded so the
       // user sees the handoff instead of a misleading "ready to install".
-      sendStatus({ state: 'downloading', percent: 100, version: info.version })
+      sendStatus({
+        state: 'downloading',
+        percent: 100,
+        version: info.version,
+        ...(getActionableUpdateUserInitiated(getCurrentStatus()) ? { userInitiated: true } : {})
+      })
       return
     }
-    sendStatus({ state: 'downloaded', version: info.version, releaseUrl: getKnownReleaseUrl() })
+    sendStatus({
+      state: 'downloaded',
+      version: info.version,
+      releaseUrl: getKnownReleaseUrl(),
+      ...(getActionableUpdateUserInitiated(getCurrentStatus()) ? { userInitiated: true } : {})
+    })
   })
 
   autoUpdater.on('error', (err) => {
@@ -298,7 +327,9 @@ export function registerAutoUpdaterHandlers({
     resetMacInstallState()
     suppressMissingManifestPrereleaseFallbackPromiseFailure(message)
     const missingManifestFallback = consumeMissingManifestPrereleaseFallbackResult()
-    const wasUserInitiated = missingManifestFallback?.userInitiated ?? getUserInitiatedCheck()
+    const wasUserInitiated =
+      (missingManifestFallback?.userInitiated ?? getUserInitiatedCheck()) ||
+      getActionableUpdateUserInitiated(getCurrentStatus())
     setUserInitiatedCheck(false)
     if (getCurrentStatus().state === 'checking') {
       void sendCheckFailureStatus(message, wasUserInitiated || undefined, 'event', err)
