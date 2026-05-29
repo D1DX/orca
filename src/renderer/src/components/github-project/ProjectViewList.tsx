@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react'
+import React, { useCallback, useMemo, useState } from 'react'
 import { ArrowDown, ArrowUp, ArrowUpDown, Columns3 } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn } from '@/lib/utils'
@@ -81,32 +81,47 @@ export default function ProjectViewList({
     () => getAvailableColumns(table.selectedView),
     [table.selectedView]
   )
-  const [hidden, setHidden] = useState<ReadonlySet<string>>(() => loadHiddenColumns(scopeKey))
-  useEffect(() => {
-    setHidden(loadHiddenColumns(scopeKey))
-  }, [scopeKey])
+  const [hiddenState, setHiddenState] = useState<{
+    scopeKey: string
+    hidden: ReadonlySet<string>
+  }>(() => ({
+    scopeKey,
+    hidden: loadHiddenColumns(scopeKey)
+  }))
+  let hidden = hiddenState.hidden
+  if (hiddenState.scopeKey !== scopeKey) {
+    hidden = loadHiddenColumns(scopeKey)
+    setHiddenState({ scopeKey, hidden })
+  }
   const fields = useMemo(
     () => availableFields.filter((f) => !hidden.has(f.id)),
     [availableFields, hidden]
   )
 
-  const [widths, setWidths] = useState<Readonly<Record<string, number>>>(() =>
-    loadColumnWidths(scopeKey)
-  )
-  useEffect(() => {
-    setWidths(loadColumnWidths(scopeKey))
-  }, [scopeKey])
+  const [widthsState, setWidthsState] = useState<{
+    scopeKey: string
+    widths: Readonly<Record<string, number>>
+  }>(() => ({
+    scopeKey,
+    widths: loadColumnWidths(scopeKey)
+  }))
+  let widths = widthsState.widths
+  if (widthsState.scopeKey !== scopeKey) {
+    widths = loadColumnWidths(scopeKey)
+    setWidthsState({ scopeKey, widths })
+  }
 
   const setColumnPair = useCallback(
     (fieldId: string, width: number, nextFieldId: string, nextWidth: number): void => {
-      setWidths((prev) => {
+      setWidthsState((prev) => {
+        const currentWidths = prev.scopeKey === scopeKey ? prev.widths : loadColumnWidths(scopeKey)
         const updated = {
-          ...prev,
+          ...currentWidths,
           [fieldId]: Math.max(MIN_COLUMN_WIDTH, Math.round(width)),
           [nextFieldId]: Math.max(MIN_COLUMN_WIDTH, Math.round(nextWidth))
         }
         saveColumnWidths(scopeKey, updated)
-        return updated
+        return { scopeKey, widths: updated }
       })
     },
     [scopeKey]
@@ -124,15 +139,16 @@ export default function ProjectViewList({
   }, [])
 
   const toggleColumn = (fieldId: string): void => {
-    setHidden((prev) => {
-      const next = new Set(prev)
+    setHiddenState((prev) => {
+      const currentHidden = prev.scopeKey === scopeKey ? prev.hidden : loadHiddenColumns(scopeKey)
+      const next = new Set(currentHidden)
       if (next.has(fieldId)) {
         next.delete(fieldId)
       } else {
         next.add(fieldId)
       }
       saveHiddenColumns(scopeKey, next)
-      return next
+      return { scopeKey, hidden: next }
     })
   }
 
