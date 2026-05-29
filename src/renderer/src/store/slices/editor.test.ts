@@ -428,6 +428,99 @@ describe('createEditorSlice floating editor activation', () => {
   })
 })
 
+describe('createEditorSlice split-group editor routing', () => {
+  function openSourceFile(
+    store: StoreApi<AppState>,
+    filePath: string,
+    options?: Parameters<AppState['openFile']>[1]
+  ): void {
+    store.getState().openFile(
+      {
+        filePath,
+        relativePath: filePath.replace('/repo/', ''),
+        worktreeId: 'wt-1',
+        language: 'typescript',
+        mode: 'edit'
+      },
+      options
+    )
+  }
+
+  function seedTerminalAndEditorGroups(store: StoreApi<AppState>): {
+    terminalTabId: string
+    terminalGroupId: string
+    editorGroupId: string
+  } {
+    const terminalTab = store.getState().createUnifiedTab('wt-1', 'terminal', {
+      id: 'terminal-tab',
+      entityId: 'terminal-tab',
+      label: 'Agent'
+    })
+    const terminalGroup = store.getState().groupsByWorktree['wt-1']?.[0]
+    if (!terminalGroup) {
+      throw new Error('Expected terminal group')
+    }
+    const terminalGroupId = terminalGroup.id
+    const editorGroupId = store.getState().createEmptySplitGroup('wt-1', terminalGroupId, 'right')
+    if (!editorGroupId) {
+      throw new Error('Expected split editor group')
+    }
+    openSourceFile(store, '/repo/seed.ts', { targetGroupId: editorGroupId })
+    store.setState({
+      activeGroupIdByWorktree: { 'wt-1': terminalGroupId },
+      activeTabType: 'terminal',
+      activeTabTypeByWorktree: { 'wt-1': 'terminal' }
+    } as Partial<AppState>)
+    return { terminalTabId: terminalTab.id, terminalGroupId, editorGroupId }
+  }
+
+  function findUnifiedTabByEntity(store: StoreApi<AppState>, entityId: string) {
+    return store.getState().unifiedTabsByWorktree['wt-1']?.find((tab) => tab.entityId === entityId)
+  }
+
+  it('routes implicit file opens to an existing visible editor group', () => {
+    const store = createEditorTabsStore()
+    const { terminalTabId, terminalGroupId, editorGroupId } = seedTerminalAndEditorGroups(store)
+
+    openSourceFile(store, '/repo/next.ts')
+
+    const openedTab = findUnifiedTabByEntity(store, '/repo/next.ts')
+    const terminalGroup = store
+      .getState()
+      .groupsByWorktree['wt-1'].find((group) => group.id === terminalGroupId)
+    const editorGroup = store
+      .getState()
+      .groupsByWorktree['wt-1'].find((group) => group.id === editorGroupId)
+    expect(openedTab?.groupId).toBe(editorGroupId)
+    expect(editorGroup?.activeTabId).toBe(openedTab?.id)
+    expect(terminalGroup?.activeTabId).toBe(terminalTabId)
+  })
+
+  it('uses editor-recent groups when no inactive group is currently showing an editor', () => {
+    const store = createEditorTabsStore()
+    const { editorGroupId } = seedTerminalAndEditorGroups(store)
+    store.getState().createUnifiedTab('wt-1', 'browser', {
+      id: 'browser-tab',
+      entityId: 'browser-tab',
+      label: 'Browser',
+      targetGroupId: editorGroupId
+    })
+
+    openSourceFile(store, '/repo/recent-target.ts')
+
+    expect(findUnifiedTabByEntity(store, '/repo/recent-target.ts')?.groupId).toBe(editorGroupId)
+  })
+
+  it('keeps explicit target groups ahead of default editor routing', () => {
+    const store = createEditorTabsStore()
+    const { terminalGroupId } = seedTerminalAndEditorGroups(store)
+
+    openSourceFile(store, '/repo/explicit.ts', { targetGroupId: terminalGroupId })
+
+    expect(findUnifiedTabByEntity(store, '/repo/explicit.ts')?.groupId).toBe(terminalGroupId)
+  })
+})
+
 describe('createEditorSlice untitled cleanup routing', () => {
   const runtimeEnvironmentCallMock = vi.fn()
   const runtimeEnvironmentTransportCallMock = vi.fn()
