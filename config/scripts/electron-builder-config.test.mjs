@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -89,10 +89,7 @@ describe('electron-builder config', () => {
 
       const sources = new Map([
         ['out\\main\\index.js', 'const z = require("zod")'],
-        [
-          'out\\main\\agent-hooks\\managed-agent-hook-controls.js',
-          'const YAML = require("yaml")'
-        ]
+        ['out\\main\\agent-hooks\\managed-agent-hook-controls.js', 'const YAML = require("yaml")']
       ])
       const asar = {
         listPackage: () => [...sources.keys()].map((entry) => `\\${entry}`),
@@ -136,9 +133,9 @@ describe('electron-builder config', () => {
       await expect(
         readdir(join(resourcesDir, 'node_modules', 'node-pty', 'third_party'))
       ).resolves.toEqual([])
-      await expect(readdir(join(resourcesDir, 'node_modules', 'node-pty', 'deps'))).resolves.toEqual(
-        []
-      )
+      await expect(
+        readdir(join(resourcesDir, 'node_modules', 'node-pty', 'deps'))
+      ).resolves.toEqual([])
     } finally {
       await rm(resourcesDir, { recursive: true, force: true })
     }
@@ -197,4 +194,27 @@ describe('electron-builder config', () => {
       await rm(resourcesDir, { recursive: true, force: true })
     }
   })
+
+  it.skipIf(process.platform === 'win32')(
+    'marks packaged Unix CLI launchers executable',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'orca-electron-builder-config-'))
+      try {
+        const resourcesDir = join(root, 'linux-unpacked', 'resources')
+        const launcherPath = join(resourcesDir, 'bin', 'orca-ide')
+        await mkdir(join(resourcesDir, 'bin'), { recursive: true })
+        await mkdir(join(resourcesDir, 'node_modules', 'zod', 'src'), { recursive: true })
+        await writeFile(launcherPath, '#!/usr/bin/env bash\n', { encoding: 'utf8', mode: 0o644 })
+
+        await electronBuilderConfig.afterPack({
+          appOutDir: join(root, 'linux-unpacked'),
+          electronPlatformName: 'linux'
+        })
+
+        expect((await stat(launcherPath)).mode & 0o111).not.toBe(0)
+      } finally {
+        await rm(root, { recursive: true, force: true })
+      }
+    }
+  )
 })

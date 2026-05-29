@@ -125,6 +125,7 @@ module.exports = {
     }
     prunePackagedRuntimeNodeModules(resourcesDir, context.electronPlatformName)
     verifyPackagedMainRuntimeDeps(resourcesDir)
+    chmodUnixCliLaunchers(resourcesDir, context.electronPlatformName)
     for (const filename of readdirSync(resourcesDir)) {
       if (!filename.startsWith('agent-browser-')) {
         continue
@@ -283,6 +284,21 @@ module.exports = {
     owner: 'stablyai',
     repo: 'orca',
     releaseType: 'release'
+  }
+}
+
+function chmodUnixCliLaunchers(resourcesDir, electronPlatformName) {
+  if (electronPlatformName === 'win32') {
+    return
+  }
+  for (const launcherName of ['orca', 'orca-ide']) {
+    const launcherPath = join(resourcesDir, 'bin', launcherName)
+    if (!existsSync(launcherPath)) {
+      continue
+    }
+    // Why: packaged Unix installs expose these extraResources as public shell
+    // commands, and source/packager mode drift must not ship a non-executable CLI.
+    chmodSync(launcherPath, 0o755)
   }
 }
 
