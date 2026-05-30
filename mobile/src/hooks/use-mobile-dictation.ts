@@ -1,7 +1,7 @@
 /* oxlint-disable max-lines -- Why: mobile dictation keeps permission, recording,
  * chunk upload, completion, and cancellation in one hook so native audio state
  * cannot drift from the runtime RPC lifecycle. */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Buffer } from 'buffer'
 import {
   addExpoTwoWayAudioEventListener,
@@ -57,12 +57,14 @@ export function useMobileDictation(options: UseMobileDictationOptions): UseMobil
   const generationRef = useRef(0)
   const finishingIdRef = useRef<string | null>(null)
 
-  // Native audio events and stable start/stop callbacks read these before
-  // passive Effects flush, so keep the live options current during render.
-  clientRef.current = client
-  enabledRef.current = enabled
-  onTranscriptRef.current = onTranscript
-  onErrorRef.current = onError
+  useLayoutEffect(() => {
+    // Native audio events can arrive before passive Effects flush, but refs
+    // should only expose options from a committed render.
+    clientRef.current = client
+    enabledRef.current = enabled
+    onTranscriptRef.current = onTranscript
+    onErrorRef.current = onError
+  }, [client, enabled, onTranscript, onError])
 
   const reportError = useCallback((err: unknown) => {
     const normalized = err instanceof Error ? err : new Error(String(err))
