@@ -268,7 +268,13 @@ export function captureScreenshot(
             clearTimeout(fallbackTimer)
             fallbackTimer = null
           }
-          const fallback = encodeNativeImageScreenshot(image, params)
+          let fallback: { data: string } | null = null
+          try {
+            fallback = encodeNativeImageScreenshot(image, params)
+          } catch {
+            settleError(SCREENSHOT_TIMEOUT_MESSAGE)
+            return
+          }
           if (fallback) {
             settleResult(fallback)
             return
