@@ -34,6 +34,33 @@ describe('parseSshHostInput', () => {
     })
   })
 
+  it('marks invalid pasted host ports instead of keeping them in the hostname', () => {
+    expect(parseSshHostInput('deploy@example.com:99999')).toEqual({
+      host: 'example.com',
+      username: 'deploy',
+      port: undefined,
+      invalidPort: true,
+      configHost: 'example.com'
+    })
+    expect(parseSshHostInput('[::1]:0')).toEqual({
+      host: '::1',
+      username: undefined,
+      port: undefined,
+      invalidPort: true,
+      configHost: '::1'
+    })
+  })
+
+  it('marks invalid ssh URL ports instead of keeping the raw URL as the hostname', () => {
+    expect(parseSshHostInput('ssh://deploy@example.com:99999/srv/app')).toEqual({
+      host: 'example.com',
+      username: 'deploy',
+      port: undefined,
+      invalidPort: true,
+      configHost: 'example.com'
+    })
+  })
+
   it('keeps plain OpenSSH config aliases valid without a username', () => {
     expect(parseSshHostInput('prod-box')).toEqual({
       host: 'prod-box',
@@ -70,6 +97,13 @@ describe('applyParsedSshHostInput', () => {
       port: '2022'
     })
   })
+
+  it('keeps invalid pasted ports visible for correction', () => {
+    expect(applyParsedSshHostInput({ ...EMPTY_FORM, host: 'deploy@example.com:99999' })).toEqual({
+      ...EMPTY_FORM,
+      host: 'deploy@example.com:99999'
+    })
+  })
 })
 
 describe('getSshTargetDraftConnectionFields', () => {
@@ -91,5 +125,19 @@ describe('getSshTargetDraftConnectionFields', () => {
       username: '',
       port: 22
     })
+  })
+
+  it('surfaces invalid pasted ports to the form validator', () => {
+    const fields = getSshTargetDraftConnectionFields({
+      ...EMPTY_FORM,
+      host: 'deploy@example.com:99999'
+    })
+
+    expect(fields).toMatchObject({
+      host: 'example.com',
+      configHost: 'example.com',
+      username: 'deploy'
+    })
+    expect(Number.isNaN(fields.port)).toBe(true)
   })
 })

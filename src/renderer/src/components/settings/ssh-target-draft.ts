@@ -34,6 +34,7 @@ export type ParsedSshHostInput = {
   host: string
   username?: string
   port?: number
+  invalidPort?: boolean
   configHost: string
 }
 
@@ -59,13 +60,16 @@ export function parseSshHostInput(rawInput: string): ParsedSshHostInput | null {
     host: parsed.host,
     username,
     port: parsed.port,
+    invalidPort: parsed.invalidPort,
     configHost: parsed.host
   }
 }
 
 export function applyParsedSshHostInput(draft: EditingTarget): EditingTarget {
   const parsed = parseSshHostInput(draft.host)
-  if (!parsed) {
+  // Why: keep bad host:port text visible so the user can correct it after
+  // the save validator reports the invalid port.
+  if (!parsed || parsed.invalidPort) {
     return draft
   }
 
@@ -91,7 +95,11 @@ export function getSshTargetDraftConnectionFields(draft: EditingTarget): {
   const username = draft.username.trim() || parsed?.username || ''
   const parsedPort = parseInt(draft.port, 10)
   const port =
-    parsed?.port !== undefined && isDefaultPortDraft(draft.port) ? parsed.port : parsedPort
+    parsed?.invalidPort === true
+      ? Number.NaN
+      : parsed?.port !== undefined && isDefaultPortDraft(draft.port)
+        ? parsed.port
+        : parsedPort
 
   return {
     host,
@@ -123,22 +131,59 @@ function parseSshUrl(input: string): ParsedSshHostInput | null {
     // Why: URL.hostname keeps IPv6 literals bracketed, but ssh2 and DNS
     // resolution expect the bare address. The non-URL parser already strips.
     const host = url.hostname.replace(/^\[|\]$/g, '')
-    const port = url.port ? parseInt(url.port, 10) : undefined
-    if (port !== undefined && !isValidPort(port)) {
-      return null
+    const port = url.port ? parsePort(url.port) : undefined
+    if (url.port && port === undefined) {
+      return {
+        host,
+        username: decodeSshUrlUsername(url.username),
+        configHost: host,
+        invalidPort: true
+      }
     }
     return {
       host,
-      username: url.username ? decodeURIComponent(url.username) : undefined,
+      username: decodeSshUrlUsername(url.username),
       port,
       configHost: host
     }
   } catch {
-    return null
+    return parseSshUrlWithInvalidPort(input)
   }
 }
 
-function parseHostAndOptionalPort(input: string): { host: string; port?: number } {
+function parseSshUrlWithInvalidPort(input: string): ParsedSshHostInput | null {
+  const match = input.match(/^ssh:\/\/(?:([^@/?#]*)@)?(\[[^\]]+\]|[^:/?#]+):([^/?#]*)(?:[/?#]|$)/i)
+  if (!match) {
+    return null
+  }
+
+  const rawHost = match[2]
+  const host = rawHost.startsWith('[') && rawHost.endsWith(']') ? rawHost.slice(1, -1) : rawHost
+  const port = parsePort(match[3])
+  if (port !== undefined) {
+    return null
+  }
+
+  return {
+    host,
+    username: decodeSshUrlUsername(match[1] ?? ''),
+    configHost: host,
+    invalidPort: true
+  }
+}
+
+function decodeSshUrlUsername(value: string): string | undefined {
+  if (!value) {
+    return undefined
+  }
+  return decodeURIComponent(value)
+}
+
+function parseHostAndOptionalPort(input: string): {
+  host: string
+  port?: number
+  invalidPort?: boolean
+} {
   if (input.startsWith('[')) {
     const closeIndex = input.indexOf(']')
     if (closeIndex > 1) {
@@ -146,23 +191,29 @@ function parseHostAndOptionalPort(input: string): { host: string; port?: number 
       const suffix = input.slice(closeIndex + 1)
       if (suffix.startsWith(':')) {
         const port = parsePort(suffix.slice(1))
-        return port === undefined ? { host } : { host, port }
+        return port === undefined ? { host, invalidPort: true } : { host, port }
       }
       return { host }
     }
   }
 
-  const portMatch = input.match(/^([^:]+):(\d{1,5})$/)
-  if (portMatch) {
-    const port = parsePort(portMatch[2])
-    return port === undefined ? { host: input } : { host: portMatch[1], port }
+  const firstColon = input.indexOf(':')
+  if (firstColon !== -1 && firstColon === input.lastIndexOf(':')) {
+    const host = input.slice(0, firstColon)
+    const port = parsePort(input.slice(firstColon + 1))
+    if (host) {
+      return port === undefined ? { host, invalidPort: true } : { host, port }
+    }
   }
 
   return { host: input }
 }
 
 function parsePort(value: string): number | undefined {
-  const port = parseInt(value, 10)
+  if (!/^\d+$/.test(value)) {
+    return undefined
+  }
+  const port = Number(value)
   return isValidPort(port) ? port : undefined
 }
 
