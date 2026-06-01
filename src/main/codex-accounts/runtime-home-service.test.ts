@@ -212,8 +212,17 @@ function expectResourceLinkedOrCopied(targetPath: string, sourcePath: string): v
 }
 
 function expectResourceLinked(targetPath: string, sourcePath: string): void {
-  expect(lstatSync(targetPath).isSymbolicLink()).toBe(true)
-  expect(normalizeLinkTarget(readlinkSync(targetPath))).toBe(normalizeLinkTarget(sourcePath))
+  const targetStat = lstatSync(targetPath)
+  if (targetStat.isSymbolicLink()) {
+    expect(normalizeLinkTarget(readlinkSync(targetPath))).toBe(normalizeLinkTarget(sourcePath))
+    return
+  }
+  const sourceStat = statSync(sourcePath)
+  expect(sourceStat.isFile()).toBe(true)
+  expect(targetStat.isFile()).toBe(true)
+  expect(targetStat.dev).toBe(sourceStat.dev)
+  expect(targetStat.ino).toBe(sourceStat.ino)
+  expect(targetStat.nlink).toBeGreaterThan(1)
 }
 
 function createStore(settings: GlobalSettings) {
@@ -814,8 +823,12 @@ describe('CodexRuntimeHomeService', () => {
       join(launchHome!, 'state_5.sqlite-shm'),
       join(getRuntimeCodexHomePath(), 'state_5.sqlite-shm')
     )
-    expect(existsSync(join(getRuntimeCodexHomePath(), 'state_5.sqlite-wal'))).toBe(false)
-    expect(existsSync(join(getRuntimeCodexHomePath(), 'state_5.sqlite-shm'))).toBe(false)
+    expect(existsSync(join(getRuntimeCodexHomePath(), 'state_5.sqlite-wal'))).toBe(
+      process.platform === 'win32'
+    )
+    expect(existsSync(join(getRuntimeCodexHomePath(), 'state_5.sqlite-shm'))).toBe(
+      process.platform === 'win32'
+    )
     expect(readFileSync(join(launchHome!, 'auth.json'), 'utf-8')).toBe(accountAuth)
   })
 
