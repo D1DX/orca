@@ -16,12 +16,11 @@ import {
   ChevronRight,
   Sparkles,
   RefreshCw,
-  Wrench,
-  AlertTriangle,
-  Maximize2
+  AlertTriangle
 } from 'lucide-react'
 import { ExternalLink } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import {
   Accordion,
   AccordionContent,
@@ -160,7 +159,9 @@ export function MergeConflictNotice({
 }
 
 export function PRTriageStrip({
+  review,
   pr,
+  reviewKind = 'PR',
   checks,
   isResolvingConflictsWithAI,
   onResolveConflictsWithAI,
@@ -171,7 +172,9 @@ export function PRTriageStrip({
   fixChecksDisabled,
   fixChecksDisabledReason
 }: {
-  pr: PRInfo
+  review?: ConflictReview
+  pr?: ConflictReview
+  reviewKind?: 'PR' | 'MR'
   checks: PRCheckDetail[]
   isResolvingConflictsWithAI: boolean
   onResolveConflictsWithAI: () => void
@@ -182,15 +185,16 @@ export function PRTriageStrip({
   fixChecksDisabled?: boolean
   fixChecksDisabledReason?: string
 }): React.JSX.Element {
+  const resolvedReview = review ?? pr
   const failingCount = checks.filter((check) => isFailedCheck(check)).length
   const pendingCount = checks.filter(
     (check) => check.conclusion === 'pending' || check.conclusion === null
   ).length
 
-  if (pr.mergeable === 'CONFLICTING') {
+  if (resolvedReview?.mergeable === 'CONFLICTING') {
     return (
       <ConflictTriageStrip
-        reviewKind="PR"
+        reviewKind={reviewKind}
         isResolvingConflictsWithAI={isResolvingConflictsWithAI}
         onResolveConflictsWithAI={onResolveConflictsWithAI}
         resolveConflictsDisabled={resolveConflictsDisabled}
@@ -214,7 +218,7 @@ export function PRTriageStrip({
           </div>
           <Button
             type="button"
-            variant="default"
+            variant="outline"
             size="xs"
             disabled={isFixingChecksWithAI || fixChecksDisabled}
             title={fixChecksDisabled ? fixChecksDisabledReason : undefined}
@@ -223,7 +227,7 @@ export function PRTriageStrip({
             {isFixingChecksWithAI ? (
               <RefreshCw className="size-3 animate-spin" />
             ) : (
-              <Wrench className="size-3" />
+              <Sparkles className="size-3" />
             )}
             Fix
           </Button>
@@ -484,7 +488,7 @@ function CheckRunDetails({
               <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                 Annotations
               </div>
-              <div className="flex max-h-40 flex-col gap-2 overflow-y-auto scrollbar-sleek">
+              <div className="flex flex-col gap-2">
                 {details!.annotations.map((annotation, index) => (
                   <div key={`${annotation.path ?? 'annotation'}-${index}`} className="min-w-0">
                     <div className="flex min-w-0 items-center gap-2">
@@ -507,7 +511,7 @@ function CheckRunDetails({
                       {annotation.message}
                     </div>
                     {annotation.rawDetails && (
-                      <pre className="mt-1 max-h-28 overflow-auto whitespace-pre-wrap rounded bg-muted/40 p-2 font-mono text-[11px] text-muted-foreground scrollbar-sleek">
+                      <pre className="mt-1 whitespace-pre-wrap rounded bg-muted/40 p-2 font-mono text-[11px] text-muted-foreground">
                         {annotation.rawDetails}
                       </pre>
                     )}
@@ -527,7 +531,7 @@ function CheckRunDetails({
               <div className="mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                 {failedJobs.length > 0 ? 'Failed jobs' : 'Jobs'}
               </div>
-              <div className="flex max-h-48 flex-col gap-2 overflow-y-auto scrollbar-sleek">
+              <div className="flex flex-col gap-2">
                 {jobs.map((job, index) => (
                   <div key={`${job.name}-${index}`} className="min-w-0">
                     <div className="flex min-w-0 items-center gap-2">
@@ -579,19 +583,18 @@ function CheckRunDetails({
             </div>
           )}
 
-          <div className="flex flex-wrap items-center gap-1">
+          <div className="flex justify-end pt-1">
             {!state?.loading && (
               <Dialog>
                 <DialogTrigger asChild>
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="outline"
                     size="xs"
                     className="h-7 gap-1 px-2 text-[11px]"
                     onClick={(event) => event.stopPropagation()}
                   >
                     View full details
-                    <Maximize2 className="size-3" />
                   </Button>
                 </DialogTrigger>
                 <CheckRunDetailsDialog
@@ -602,21 +605,6 @@ function CheckRunDetails({
                   openUrl={openUrl}
                 />
               </Dialog>
-            )}
-            {openUrl && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="xs"
-                className="h-7 gap-1 px-2 text-[11px]"
-                onClick={(event) => {
-                  event.stopPropagation()
-                  window.api.shell.openUrl(openUrl)
-                }}
-              >
-                Open details
-                <ExternalLink className="size-3" />
-              </Button>
             )}
           </div>
         </div>
@@ -827,8 +815,11 @@ export function ChecksList({
   )
   const detailsContextRef = useRef(checkDetailsContextKey)
   const autoExpandedContextRef = useRef<string | null>(null)
+  // Why: expanded check details already sit inside the sidebar scroller; keeping
+  // the list scroller too creates nested scrollbars around CI annotations.
+  const shouldConstrainCheckList = checksExpanded && expandedCheckKeys.size === 0
   const { detailsHeight, handleResizeStart } = useCheckDetailsResize(
-    checksExpanded && checks.length > 0
+    shouldConstrainCheckList && checks.length > 0
   )
   detailsContextRef.current = checkDetailsContextKey
   const sorted = React.useMemo(
@@ -1022,8 +1013,8 @@ export function ChecksList({
       ) : !checksExpanded ? null : (
         <>
           <div
-            className="overflow-y-auto py-1 scrollbar-sleek"
-            style={{ maxHeight: detailsHeight }}
+            className={cn('py-1', shouldConstrainCheckList && 'overflow-y-auto scrollbar-sleek')}
+            style={shouldConstrainCheckList ? { maxHeight: detailsHeight } : undefined}
           >
             {rows.map((row) => {
               const check = row.check
@@ -1031,11 +1022,12 @@ export function ChecksList({
               const Icon = CHECK_ICON[conclusion] ?? CircleDashed
               const color = CHECK_COLOR[conclusion] ?? 'text-muted-foreground'
               const expanded = expandedCheckKeys.has(row.key)
+              const openUrl = check.url
               return (
                 <div key={row.key} className="min-w-0">
                   <div
                     className={cn(
-                      'flex min-w-0 cursor-pointer items-center gap-2 px-3 py-1.5 transition-colors hover:bg-accent/40',
+                      'group/check-row flex min-w-0 cursor-pointer items-center gap-2 px-3 py-1.5 transition-colors hover:bg-accent/40',
                       expanded && 'bg-accent/25'
                     )}
                     onClick={() => toggleCheckExpanded(row)}
@@ -1056,8 +1048,32 @@ export function ChecksList({
                     <span className="flex-1 truncate text-[12px] text-foreground">
                       {check.name}
                     </span>
-                    <span className="shrink-0 text-[11px] text-muted-foreground">
-                      {getCheckStatusLabel(check)}
+                    <span className="flex shrink-0 items-center gap-1">
+                      <span className="text-[11px] text-muted-foreground">
+                        {getCheckStatusLabel(check)}
+                      </span>
+                      {openUrl && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-xs"
+                              className="size-6 text-muted-foreground hover:text-foreground focus-visible:text-foreground"
+                              aria-label="Open check details"
+                              onClick={(event) => {
+                                event.stopPropagation()
+                                window.api.shell.openUrl(openUrl)
+                              }}
+                            >
+                              <ExternalLink className="size-3" />
+                            </Button>
+                          </TooltipTrigger>
+                          <TooltipContent side="left" sideOffset={4}>
+                            Open check details
+                          </TooltipContent>
+                        </Tooltip>
+                      )}
                     </span>
                   </div>
                   {expanded && <CheckRunDetails check={check} state={detailsByCheckKey[row.key]} />}
@@ -1065,15 +1081,17 @@ export function ChecksList({
               )
             })}
           </div>
-          <div
-            role="separator"
-            aria-orientation="horizontal"
-            title="Drag to resize checks"
-            className="group flex h-2 cursor-row-resize items-center border-b border-border"
-            onMouseDown={handleResizeStart}
-          >
-            <div className="h-px w-full bg-transparent transition-colors group-hover:bg-ring/40" />
-          </div>
+          {shouldConstrainCheckList && (
+            <div
+              role="separator"
+              aria-orientation="horizontal"
+              title="Drag to resize checks"
+              className="group flex h-2 cursor-row-resize items-center border-b border-border"
+              onMouseDown={handleResizeStart}
+            >
+              <div className="h-px w-full bg-transparent transition-colors group-hover:bg-ring/40" />
+            </div>
+          )}
           {checks.length >= 100 && (
             <div className="border-b border-border px-3 py-1.5 text-[10px] text-muted-foreground">
               Showing first 100 checks

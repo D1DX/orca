@@ -1,9 +1,11 @@
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
+import { TooltipProvider } from '@/components/ui/tooltip'
 import type { PRCheckDetail, PRComment, PRInfo } from '../../../../shared/types'
 import {
   CheckJobLogTail,
+  ChecksList,
   ConflictTriageStrip,
   getFailedChecksForDetails,
   MergeConflictNotice,
@@ -98,6 +100,58 @@ describe('MergeConflictNotice', () => {
     expect(markup).toContain('Conflicts block this MR')
     expect(markup).toContain('Resolve')
     expect(markup).toContain('lucide-sparkles')
+  })
+
+  it('renders the CI fix action for failing non-conflict checks', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(PRTriageStrip, {
+        review: makePR({ mergeable: 'MERGEABLE' }),
+        checks: [{ name: 'verify', status: 'completed', conclusion: 'failure', url: null }],
+        isResolvingConflictsWithAI: false,
+        onResolveConflictsWithAI: () => {},
+        isFixingChecksWithAI: false,
+        onFixChecksWithAI: () => {}
+      })
+    )
+
+    expect(markup).toContain('1 failing check')
+    expect(markup).toContain('Fix')
+    expect(markup).toContain('data-variant="outline"')
+    expect(markup).toContain('lucide-sparkles')
+    expect(markup).not.toContain('Fix with AI')
+    expect(markup).not.toContain('Resolve')
+  })
+})
+
+describe('ChecksList', () => {
+  it('puts the hosted details link in the check row as an icon affordance', () => {
+    const markup = renderToStaticMarkup(
+      React.createElement(
+        TooltipProvider,
+        null,
+        React.createElement(ChecksList, {
+          checks: [
+            {
+              name: 'verify',
+              status: 'completed',
+              conclusion: 'failure',
+              url: 'https://github.com/acme/widgets/actions/runs/1'
+            }
+          ],
+          checksLoading: false,
+          checkDetailsContextKey: 'repo:42',
+          onLoadCheckDetails: async () => null
+        })
+      )
+    )
+
+    expect(markup).toContain('aria-label="Open check details"')
+    expect(markup).toContain('lucide-external-link')
+    expect(markup).toContain('Failed')
+    expect(markup.indexOf('Failed')).toBeLessThan(markup.indexOf('aria-label="Open check details"'))
+    expect(markup).toContain('text-muted-foreground')
+    expect(markup).not.toContain('opacity-0')
+    expect(markup).not.toContain('Open details')
   })
 })
 
