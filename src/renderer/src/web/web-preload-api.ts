@@ -1003,6 +1003,7 @@ function createWorktreesApi(): NonNullable<Partial<PreloadApi>['worktrees']> {
         pushTarget: args.pushTarget,
         setupDecision: args.setupDecision,
         createdWithAgent: args.createdWithAgent,
+        pendingFirstAgentMessageRename: args.pendingFirstAgentMessageRename,
         workspaceStatus: args.workspaceStatus,
         manualOrder: args.manualOrder
       })
