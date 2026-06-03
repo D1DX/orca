@@ -92,13 +92,6 @@ const HIDDEN_STARTUP_RENDERER_QUERY_WINDOW_MS = 10_000
 const STARTUP_COMMAND_EXTENSION_RE = /\.(?:exe|cmd|bat|ps1)$/i
 const TERMINAL_RENDERER_RISK_SCAN_TAIL_CHARS = 256
 const REATTACH_IDLE_AGENT_CURSOR_RESET_DELAY_MS = 250
-const FOREGROUND_THROUGHPUT_IMMEDIATE_CHARS = 2048
-const FOREGROUND_INTERACTIVE_REDRAW_CHARS = 16 * 1024
-const FOREGROUND_INTERACTIVE_REDRAW_WINDOW_MS = 150
-// Why: OpenTUI can emit many tiny redraws that each look interactive but
-// collectively starve timers unless foreground writes have a rolling budget.
-const FOREGROUND_IMMEDIATE_BUDGET_CHARS = 128 * 1024
-const FOREGROUND_BUDGET_WINDOW_MS = 500
 // Why: this is only shown if renderer backlog overflowed and main-owned
 // terminal state is unavailable, so the user has an explicit loss signal.
 const HIDDEN_OUTPUT_RESTORE_UNAVAILABLE_WARNING =
@@ -1205,10 +1198,6 @@ export function connectPanePty(
   const activeRuntimeEnvironmentId = state.settings?.activeRuntimeEnvironmentId?.trim() || null
   const runtimeEnvironmentId = remoteRuntimeOwnerForTransport ?? activeRuntimeEnvironmentId
   const shouldDeliverStartupViaTerminalPaste = paneStartup?.delivery === 'terminal-paste'
-  let lastTerminalInputAt = Number.NEGATIVE_INFINITY
-  const markTerminalInputSent = (): void => {
-    lastTerminalInputAt = performance.now()
-  }
   const transportOptions = {
     cwd: deps.cwd,
     env: paneEnv,
@@ -1295,7 +1284,6 @@ export function connectPanePty(
           return
         }
         if (transport.sendInput(data)) {
-          markTerminalInputSent()
           observeAcceptedTerminalInput(data)
           observeSentTerminalInputIntent(data)
           deps.clearTerminalTabUnread(deps.tabId)
@@ -1325,7 +1313,6 @@ export function connectPanePty(
     const acknowledgedIntent = intent ?? inferIntentFromExactTerminalInput(data)
     if (acknowledgedIntent && transport.sendInputAccepted) {
       clearPendingTerminalInputIntent()
-      markTerminalInputSent()
       const writePromise = transport
         .sendInputAccepted(data)
         .then((accepted) => {
@@ -1343,14 +1330,12 @@ export function connectPanePty(
     }
     if (intent) {
       if (transport.sendInput(data)) {
-        markTerminalInputSent()
         observeAcceptedTerminalInput(data, intent)
       }
       clearPendingTerminalInputIntent()
       return
     }
     if (transport.sendInput(data)) {
-      markTerminalInputSent()
       observeAcceptedTerminalInput(data)
       observeSentTerminalInputIntent(data)
     } else {
@@ -1674,8 +1659,6 @@ export function connectPanePty(
     // can reuse the pane object for a different session before visibility.
     let hiddenOutputRestorePtyId: string | null = null
     let hiddenOutputRestoreGeneration = 0
-    let foregroundImmediateBudgetChars = 0
-    let foregroundImmediateBudgetWindowStart = 0
     let hiddenMode2031ScanTail = ''
     const hiddenStartupRendererQueryUntil = shouldKeepHiddenStartupRendererQueriesLive(paneStartup)
       ? Date.now() + HIDDEN_STARTUP_RENDERER_QUERY_WINDOW_MS
@@ -1714,35 +1697,6 @@ export function connectPanePty(
         manager.markPaneHasComplexScriptOutput(pane.id)
       }
       recordTerminalOutput(pane.terminal)
-    }
-
-    function consumeForegroundImmediateBudget(dataLength: number): boolean {
-      const now = performance.now()
-      if (now - foregroundImmediateBudgetWindowStart > FOREGROUND_BUDGET_WINDOW_MS) {
-        foregroundImmediateBudgetChars = 0
-        foregroundImmediateBudgetWindowStart = now
-      }
-      if (foregroundImmediateBudgetChars + dataLength > FOREGROUND_IMMEDIATE_BUDGET_CHARS) {
-        return false
-      }
-      foregroundImmediateBudgetChars += dataLength
-      return true
-    }
-
-    function isLatencySensitiveForegroundOutput(data: string): boolean {
-      if (data.length <= FOREGROUND_THROUGHPUT_IMMEDIATE_CHARS) {
-        return consumeForegroundImmediateBudget(data.length)
-      }
-      const recentInput =
-        performance.now() - lastTerminalInputAt <= FOREGROUND_INTERACTIVE_REDRAW_WINDOW_MS
-      if (
-        recentInput &&
-        data.length <= FOREGROUND_INTERACTIVE_REDRAW_CHARS &&
-        data.includes('\x1b[')
-      ) {
-        return consumeForegroundImmediateBudget(data.length)
-      }
-      return false
     }
 
     function containsNonAsciiOutput(data: string): boolean {
@@ -1803,8 +1757,7 @@ export function connectPanePty(
         foreground: foreground || parseHiddenStartupOutput,
         beforeWrite: beforeTerminalOutputWrite,
         onBackgroundBacklogDropped: markHiddenOutputRestoreNeeded,
-        latencySensitive:
-          !foreground || parseHiddenStartupOutput ? true : isLatencySensitiveForegroundOutput(data),
+        latencySensitive: !foreground || parseHiddenStartupOutput,
         forceForegroundRefresh:
           (foreground || parseHiddenStartupOutput) && shouldForceForegroundRenderRefresh(data)
       })

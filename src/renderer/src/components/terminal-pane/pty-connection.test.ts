@@ -23,6 +23,11 @@ async function flushAsyncTicks(count = 6): Promise<void> {
   }
 }
 
+async function flushQueuedTerminalOutput(terminal: unknown): Promise<void> {
+  const { flushTerminalOutput } = await import('@/lib/pane-manager/pane-terminal-output-scheduler')
+  flushTerminalOutput(terminal as never)
+}
+
 const toastInfo = vi.fn()
 const LEAF_1 = '11111111-1111-4111-8111-111111111111' as const
 const LEAF_2 = '22222222-2222-4222-8222-222222222222' as const
@@ -583,7 +588,7 @@ describe('connectPanePty', () => {
     expect(pane.terminal.write).toHaveBeenCalledWith('x'.repeat(16 * 1024), expect.any(Function))
   })
 
-  it('keeps ANSI redraws after terminal input on the immediate xterm write path', async () => {
+  it('queues ANSI redraws after terminal input through the foreground scheduler', async () => {
     const { connectPanePty } = await import('./pty-connection')
     const pane = createPane(1)
     const transport = createMockTransport('pty-1')
@@ -606,6 +611,8 @@ describe('connectPanePty', () => {
     const redraw = `\x1b[2J\x1b[H${'codex composer redraw '.repeat(200)}`
     capturedDataCallback.current?.(redraw)
 
+    expect(pane.terminal.write).not.toHaveBeenCalled()
+    await flushQueuedTerminalOutput(pane.terminal)
     expect(pane.terminal.write).toHaveBeenCalledWith(redraw, expect.any(Function))
   })
 
@@ -2815,7 +2822,7 @@ describe('connectPanePty', () => {
     }
   })
 
-  it('writes visible split-pane PTY bytes immediately even when the tab is not active', async () => {
+  it('writes visible split-pane PTY bytes after scheduler flush when the tab is not active', async () => {
     const { connectPanePty } = await import('./pty-connection')
     const transport = createMockTransport()
     const capturedDataCallback: { current: ((data: string) => void) | null } = { current: null }
@@ -2837,6 +2844,7 @@ describe('connectPanePty', () => {
 
     expect(capturedDataCallback.current).not.toBeNull()
     capturedDataCallback.current?.('visible split output\r\n')
+    await flushQueuedTerminalOutput(pane.terminal)
 
     expect(pane.terminal.write).toHaveBeenCalledWith(
       'visible split output\r\n',
@@ -3156,6 +3164,7 @@ describe('connectPanePty', () => {
       rawLength: newPtyOutput.length
     })
     await flushAsyncTicks(10)
+    await flushQueuedTerminalOutput(pane.terminal)
 
     expect(getMainBufferSnapshot).not.toHaveBeenCalled()
     expect(pane.terminal.write).toHaveBeenCalledWith(newPtyOutput, expect.any(Function))
@@ -3403,6 +3412,7 @@ describe('connectPanePty', () => {
       rawLength: live.length
     })
     await flushAsyncTicks(20)
+    await flushQueuedTerminalOutput(pane.terminal)
 
     expect(pane.terminal.write).toHaveBeenCalledWith(
       'snapshot-before-live\r\n',
@@ -3486,6 +3496,7 @@ describe('connectPanePty', () => {
     await flushAsyncTicks(6)
 
     capturedDataCallback.current?.('Arabic: السلام عليكم\r\n')
+    await flushQueuedTerminalOutput(pane.terminal)
 
     expect(manager.markPaneHasComplexScriptOutput).toHaveBeenCalledWith(1)
     expect(pane.terminal.write).toHaveBeenCalledWith(
@@ -3515,6 +3526,7 @@ describe('connectPanePty', () => {
     expect(manager.markPaneHasComplexScriptOutput).not.toHaveBeenCalled()
 
     capturedDataCallback.current?.(';2;52;52;52m codex block \x1b[0m\r\n')
+    await flushQueuedTerminalOutput(pane.terminal)
 
     expect(manager.markPaneHasComplexScriptOutput).toHaveBeenCalledWith(1)
   })
@@ -3541,6 +3553,7 @@ describe('connectPanePty', () => {
     expect(manager.markPaneHasComplexScriptOutput).not.toHaveBeenCalled()
 
     capturedDataCallback.current?.(';52;52m codex block \x1b[0m\r\n')
+    await flushQueuedTerminalOutput(pane.terminal)
 
     expect(manager.markPaneHasComplexScriptOutput).toHaveBeenCalledWith(1)
   })
@@ -3570,6 +3583,7 @@ describe('connectPanePty', () => {
     await flushAsyncTicks(6)
 
     capturedDataCallback.current?.('\x1b[2J\x1b[H\x1b[48;2;52;52;52m codex block text \x1b[0m\r\n')
+    await flushQueuedTerminalOutput(pane.terminal)
 
     expect(manager.markPaneHasComplexScriptOutput).toHaveBeenCalledWith(1)
     expect(refresh).toHaveBeenCalledWith(0, 39, true)
@@ -3603,6 +3617,7 @@ describe('connectPanePty', () => {
     expect(refresh).not.toHaveBeenCalled()
 
     capturedDataCallback.current?.(';2;52;52;52m codex block text \x1b[0m\r\n')
+    await flushQueuedTerminalOutput(pane.terminal)
 
     expect(manager.markPaneHasComplexScriptOutput).toHaveBeenCalledWith(1)
     expect(refresh).toHaveBeenCalledWith(0, 39, true)
@@ -3632,10 +3647,12 @@ describe('connectPanePty', () => {
     await flushAsyncTicks(6)
 
     capturedDataCallback.current?.('\x1b[2J\x1b[H\x1b[48;2;52;52;52m codex block text \x1b[0m\r\n')
+    await flushQueuedTerminalOutput(pane.terminal)
     expect(refresh).toHaveBeenCalledWith(0, 39, true)
 
     refresh.mockClear()
     capturedDataCallback.current?.('plain follow-up output\r\n')
+    await flushQueuedTerminalOutput(pane.terminal)
 
     expect(refresh).not.toHaveBeenCalled()
   })
@@ -3658,6 +3675,7 @@ describe('connectPanePty', () => {
     await flushAsyncTicks(6)
 
     capturedDataCallback.current?.('⠋ Working ├─ file.ts █ progress \uE0B0 prompt\r\n')
+    await flushQueuedTerminalOutput(pane.terminal)
 
     expect(manager.markPaneHasComplexScriptOutput).not.toHaveBeenCalled()
     expect(pane.terminal.write).toHaveBeenCalledWith(
@@ -5184,6 +5202,7 @@ describe('connectPanePty', () => {
     }
 
     idleHandler('* Codex done')
+    await flushQueuedTerminalOutput(pane.terminal)
 
     expect(pane.terminal.write).toHaveBeenCalledWith(
       RESET_TERMINAL_CURSOR_STYLE,
