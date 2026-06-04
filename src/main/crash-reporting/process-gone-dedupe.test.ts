@@ -71,6 +71,38 @@ describe('ProcessGoneIncidentDedupe', () => {
     ).toBe(true)
   })
 
+  it('prefers webContentsId over largest process pid when renderer identity is available', () => {
+    const dedupe = new ProcessGoneIncidentDedupe({ windowMs: 5 * 60_000 })
+
+    expect(
+      dedupe.shouldRecord(
+        {
+          ...duplicateOomReport,
+          details: { processMetricsLargestPid: 55460, webContentsId: 4 }
+        },
+        1_000
+      )
+    ).toBe(true)
+    expect(
+      dedupe.shouldRecord(
+        {
+          ...duplicateOomReport,
+          details: { processMetricsLargestPid: 55460, webContentsId: 5 }
+        },
+        2_000
+      )
+    ).toBe(true)
+    expect(
+      dedupe.shouldRecord(
+        {
+          ...duplicateOomReport,
+          details: { processMetricsLargestPid: 55461, webContentsId: 4 }
+        },
+        3_000
+      )
+    ).toBe(false)
+  })
+
   it('does not incident-dedupe recoverable child process churn or reports without a pid', () => {
     expect(
       getProcessGoneIncidentDedupeKey({

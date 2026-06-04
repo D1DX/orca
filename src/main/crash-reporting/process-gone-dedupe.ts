@@ -87,11 +87,15 @@ export function getProcessGoneIncidentDedupeKey({
   if (source !== 'renderer' || !INCIDENT_DEDUPE_RENDERER_REASONS.has(reason)) {
     return null
   }
+  const webContentsId = finiteNumber(details.webContentsId)
+  if (webContentsId !== null && webContentsId > 0) {
+    return [source, processType, reason, exitCode ?? 'null', `wc:${webContentsId}`].join(':')
+  }
   const largestPid = finiteNumber(details.processMetricsLargestPid)
   if (largestPid === null || largestPid <= 0) {
     return null
   }
-  return [source, processType, reason, exitCode ?? 'null', largestPid].join(':')
+  return [source, processType, reason, exitCode ?? 'null', `largest:${largestPid}`].join(':')
 }
 
 export class ProcessGoneIncidentDedupe {

@@ -29,6 +29,7 @@ import {
   POST_REPLAY_LIVE_SNAPSHOT_RESET,
   POST_REPLAY_MODE_RESET,
   POST_REPLAY_REATTACH_RESET,
+  RESET_TERMINAL_INTERACTIVE_MODES,
   RESET_TERMINAL_CURSOR_STYLE
 } from './layout-serialization'
 import { getSystemPrefersDark } from '@/lib/terminal-theme'
@@ -578,6 +579,28 @@ export function connectPanePty(
       return false
     }
   }
+  let postInterruptModeResetTimer: ReturnType<typeof setTimeout> | null = null
+  const clearPostInterruptModeResetTimer = (): void => {
+    if (postInterruptModeResetTimer !== null) {
+      clearTimeout(postInterruptModeResetTimer)
+      postInterruptModeResetTimer = null
+    }
+  }
+  const schedulePostInterruptModeResetIfProcessExited = (): void => {
+    clearPostInterruptModeResetTimer()
+    postInterruptModeResetTimer = setTimeout(() => {
+      void (async () => {
+        postInterruptModeResetTimer = null
+        if (disposed || !(await titleOnlyWorkingAgentHasExited())) {
+          return
+        }
+        // Why: broad TUI mode resets are safe only after the foreground app is
+        // gone; applying them while a surviving TUI still owns the screen would
+        // desynchronize xterm from the process.
+        pane.terminal.write(RESET_TERMINAL_INTERACTIVE_MODES)
+      })()
+    }, AGENT_INTERRUPT_SETTLE_MS)
+  }
   const observeTitleOnlyInterrupt = (): void => {
     const state = useAppStore.getState()
     if (state.agentStatusByPaneKey[cacheKey]) {
@@ -756,6 +779,7 @@ export function connectPanePty(
   ): void => {
     if (intent === 'ctrl-c' || data === '\x03') {
       markTerminalBracketedPasteInterrupted(pane.terminal)
+      schedulePostInterruptModeResetIfProcessExited()
     }
   }
   let pendingTerminalInputWrite: Promise<void> | null = null
@@ -2908,6 +2932,7 @@ export function connectPanePty(
       pendingTerminalInputWrite = null
       interruptInference.dispose()
       clearTitleOnlyInterruptTimer()
+      clearPostInterruptModeResetTimer()
       clearCommandCodeOutputDoneTimer()
       // Why: actively resolve any in-flight passphrase-gate waits so their
       // zustand subscribers + async IIFEs don't hang for the rest of the

@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   POST_REPLAY_MODE_RESET,
   POST_REPLAY_REATTACH_RESET,
+  RESET_TERMINAL_INTERACTIVE_MODES,
   RESET_TERMINAL_CURSOR_STYLE
 } from './layout-serialization'
 import type * as UseNotificationDispatchModule from './use-notification-dispatch'
@@ -1251,6 +1252,7 @@ describe('connectPanePty', () => {
     expect(window.api.pty.hasChildProcesses).toHaveBeenCalledWith('tab-pty')
     expect(deps.setRuntimePaneTitle).toHaveBeenCalledWith('tab-1', 1, 'Terminal')
     expect(deps.updateTabTitle).toHaveBeenCalledWith('tab-1', 'Terminal')
+    expect(pane.terminal.write).toHaveBeenCalledWith(RESET_TERMINAL_INTERACTIVE_MODES)
   })
 
   it('keeps changed title-only working indicators for the same agent while the process is alive', async () => {
@@ -1297,6 +1299,7 @@ describe('connectPanePty', () => {
     expect(window.api.pty.hasChildProcesses).toHaveBeenCalledWith('tab-pty')
     expect(deps.setRuntimePaneTitle).not.toHaveBeenCalledWith('tab-1', 1, 'Terminal')
     expect(deps.updateTabTitle).not.toHaveBeenCalledWith('tab-1', 'Terminal')
+    expect(pane.terminal.write).not.toHaveBeenCalledWith(RESET_TERMINAL_INTERACTIVE_MODES)
   })
 
   it('does not clear title-only working indicators when interrupt writes are unacknowledged', async () => {

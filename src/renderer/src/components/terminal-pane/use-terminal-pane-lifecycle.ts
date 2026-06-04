@@ -29,7 +29,7 @@ import { resolveTerminalFontWeights } from '../../../../shared/terminal-fonts'
 import {
   buildFontFamily,
   normalizeTerminalLayoutSnapshot,
-  RESET_TERMINAL_INTERACTIVE_MODES,
+  RESET_KITTY_KEYBOARD_PROTOCOL,
   replayTerminalLayout,
   restoreScrollbackBuffers
 } from './layout-serialization'
@@ -629,9 +629,10 @@ export function useTerminalPaneLifecycle({
               // ETX must stay transport-agnostic through the existing onData path.
               pendingTerminalInterruptKeyup = true
               pane.terminal.input(TERMINAL_INTERRUPT_INPUT)
-              // Why: TUIs can die on SIGINT before restoring renderer-side
-              // modes, leaving mouse/keyboard reports echoed at the shell.
-              pane.terminal.write(RESET_TERMINAL_INTERACTIVE_MODES)
+              // Why: this immediate path can run while a TUI stays alive after
+              // Ctrl+C. Keep it to renderer-local Kitty cleanup; broader mode
+              // resets are gated on confirmed process exit in pty-connection.
+              pane.terminal.write(RESET_KITTY_KEYBOARD_PROTOCOL)
             } else {
               pendingTerminalInterruptKeyup = false
             }

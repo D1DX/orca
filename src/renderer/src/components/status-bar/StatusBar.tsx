@@ -1524,6 +1524,7 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
   const [containerWidth, setContainerWidth] = useState(900)
   const resizeObserverRef = useRef<ResizeObserver | null>(null)
   const resizeObserverRafRef = useRef<number | null>(null)
+  const pendingResizeObserverWidthRef = useRef<number | null>(null)
 
   useEffect(() => {
     mountedRef.current = true
@@ -1555,6 +1556,7 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
       cancelAnimationFrame(resizeObserverRafRef.current)
       resizeObserverRafRef.current = null
     }
+    pendingResizeObserverWidthRef.current = null
     if (node) {
       containerRef.current = node
       const updateWidth = (width: number): void => {
@@ -1565,6 +1567,7 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
         if (typeof width !== 'number') {
           return
         }
+        pendingResizeObserverWidthRef.current = width
         if (resizeObserverRafRef.current !== null) {
           return
         }
@@ -1572,7 +1575,11 @@ function StatusBarInner({ floatingTerminalOpen }: StatusBarProps): React.JSX.Ele
         // status-bar layout cannot participate in Chromium resize loops.
         resizeObserverRafRef.current = requestAnimationFrame(() => {
           resizeObserverRafRef.current = null
-          updateWidth(width)
+          const latestWidth = pendingResizeObserverWidthRef.current
+          pendingResizeObserverWidthRef.current = null
+          if (typeof latestWidth === 'number') {
+            updateWidth(latestWidth)
+          }
         })
       })
       observer.observe(node)
