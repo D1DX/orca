@@ -1944,6 +1944,23 @@ describe('createUISlice contextual tours', () => {
     expect(store.getState().activeContextualTourStepIndex).toBe(2)
   })
 
+  it('advances the browser tour to the cookie step before Import Cookies is measurable', () => {
+    const store = createUIStore()
+    const visibleSelectors = [
+      '[data-contextual-tour-target="browser-grab-control"]',
+      '[data-contextual-tour-target="browser-annotation-control"]'
+    ]
+    stubContextualTourTargets(visibleSelectors)
+    store.getState().hydratePersistedUI(makeAutoTourEligibleUI())
+    store.getState().requestContextualTour('browser', 'browser_visible')
+
+    store.getState().advanceContextualTour()
+    expect(store.getState().activeContextualTourStepIndex).toBe(1)
+
+    store.getState().advanceContextualTour()
+    expect(store.getState().activeContextualTourStepIndex).toBe(2)
+  })
+
   it('advances the active split step when the split command interaction is recorded', () => {
     const setMock = vi.fn(() => Promise.resolve())
     vi.stubGlobal('window', {

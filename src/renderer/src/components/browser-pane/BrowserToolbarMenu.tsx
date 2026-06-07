@@ -61,7 +61,7 @@ export function BrowserToolbarMenu({
   const browserSessionImportState = useAppStore((s) => s.browserSessionImportState)
   const setBrowserPageViewportPreset = useAppStore((s) => s.setBrowserPageViewportPreset)
   const browserCookieTourStepActive = useAppStore(
-    (s) => s.activeContextualTourId === 'browser' && s.activeContextualTourStepIndex >= 1
+    (s) => s.activeContextualTourId === 'browser' && s.activeContextualTourStepIndex === 2
   )
   const shouldForceMenuOpen = browserCookieTourStepActive && isActive
 
@@ -82,9 +82,8 @@ export function BrowserToolbarMenu({
   const mountedRef = useMountedRef()
 
   useLayoutEffect(() => {
-    // Why: step 3's target lives inside this menu, and tour advancement only
-    // visits steps whose targets are measurable. Open from step 2 onward so Next
-    // can reach Import Cookies before the overlay's layout measurement runs.
+    // Why: step 3 anchors on Import Cookies inside this menu, so open it only
+    // once the tour reaches the final browser step.
     setMenuOpen(shouldForceMenuOpen)
   }, [shouldForceMenuOpen])
 
