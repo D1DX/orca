@@ -26,6 +26,13 @@ const BUDGETS = {
   maxRendererDroppedBacklogs: 0
 }
 
+const HIDDEN_RENDERER_SKIP_SCENARIOS = [
+  /^opencode-cross-workspace-typing$/,
+  /^opencode-scale-cross-workspace-\d+$/,
+  /^opencode-hidden-real-pty-pressure-typing(?:-\d+)?$/
+]
+const HIDDEN_RESTORE_SCENARIOS = [/^opencode-hidden-real-pty-restore(?:-\d+)?$/]
+
 function readJsonReport(path) {
   const raw = readFileSync(path, 'utf8')
   const start = raw.indexOf('{')
@@ -108,6 +115,20 @@ function addMaxFailure(failures, row, label, actual, budget, unit = '') {
   )
 }
 
+function addMinFailure(failures, row, label, actual, budget, unit = '') {
+  if (actual != null && actual >= budget) {
+    return
+  }
+  const actualLabel = actual == null ? 'missing' : `${actual}${unit}`
+  failures.push(
+    `${row.source} ${row.scenario}: ${label} ${actualLabel} was below required ${budget}${unit}`
+  )
+}
+
+function matchesAny(patterns, value) {
+  return patterns.some((pattern) => pattern.test(value))
+}
+
 function validateRow(row) {
   const failures = []
   let checkedMetricCount = 0
@@ -162,6 +183,23 @@ function validateRow(row) {
     parseCount(row.rendererDroppedBacklogs, 'rendererDroppedBacklogs', row, failures),
     BUDGETS.maxRendererDroppedBacklogs
   )
+  const hiddenSkips = parseCount(row.hiddenSkips, 'hiddenSkips', row, failures)
+  const hiddenSkippedChars = parseCount(row.hiddenSkippedChars, 'hiddenSkippedChars', row, failures)
+  if (hiddenSkips != null) {
+    checkedMetricCount += 1
+  }
+  if (hiddenSkippedChars != null) {
+    checkedMetricCount += 1
+  }
+  if (matchesAny(HIDDEN_RENDERER_SKIP_SCENARIOS, row.scenario)) {
+    // Why: these scenarios exist to prove hidden agents do not consume renderer writes.
+    addMinFailure(failures, row, 'hidden renderer skips', hiddenSkips, 1)
+    addMinFailure(failures, row, 'hidden renderer skipped chars', hiddenSkippedChars, 1)
+  }
+  if (matchesAny(HIDDEN_RESTORE_SCENARIOS, row.scenario)) {
+    // Why: restore latency is meaningful only if there was hidden output to restore.
+    addMinFailure(failures, row, 'hidden renderer skipped chars', hiddenSkippedChars, 1)
+  }
   if (checkedMetricCount === 0) {
     failures.push(`${row.source} ${row.scenario}: no recognized budget metrics found`)
   }

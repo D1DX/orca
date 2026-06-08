@@ -104,6 +104,61 @@ describe('check-terminal-perf-report-budgets', () => {
     expect(result.stderr).toContain('renderer dropped backlogs 1 exceeded budget 0')
   })
 
+  it('requires hidden renderer skip evidence for hidden OpenCode typing scenarios', () => {
+    const reportPath = writeReport(
+      [
+        'panes=51',
+        'frames=180',
+        'median=2.9ms',
+        'worst=5.9ms',
+        'maxTimerDrift=12.1ms',
+        'hiddenSkips=0',
+        'hiddenSkippedChars=0'
+      ].join(' '),
+      'opencode-scale-cross-workspace-50'
+    )
+
+    const result = runChecker(reportPath)
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('hidden renderer skips 0 was below required 1')
+    expect(result.stderr).toContain('hidden renderer skipped chars 0 was below required 1')
+  })
+
+  it('passes hidden OpenCode reports that prove hidden renderer output was skipped', () => {
+    const reportPath = writeReport(
+      [
+        'panes=51',
+        'frames=180',
+        'median=2.9ms',
+        'worst=5.9ms',
+        'maxTimerDrift=12.1ms',
+        'hiddenSkips=150',
+        'hiddenSkippedChars=1048576'
+      ].join(' '),
+      'opencode-hidden-real-pty-pressure-typing-50'
+    )
+
+    const output = execFileSync(process.execPath, [scriptPath, reportPath], {
+      cwd: process.cwd(),
+      encoding: 'utf8'
+    })
+
+    expect(output).toContain('Terminal perf budget check passed for 1 annotation row(s).')
+  })
+
+  it('requires hidden output evidence for hidden restore scenarios', () => {
+    const reportPath = writeReport(
+      ['panes=51', 'restore=642.0ms', 'hiddenSkippedChars=0'].join(' '),
+      'opencode-hidden-real-pty-restore-50'
+    )
+
+    const result = runChecker(reportPath)
+
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain('hidden renderer skipped chars 0 was below required 1')
+  })
+
   it('fails malformed metric values instead of treating them as absent', () => {
     const reportPath = writeReport('panes=1 median=999 worst=abcms rendererQueuedChars=wat')
 
