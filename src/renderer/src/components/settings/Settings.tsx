@@ -585,10 +585,7 @@ function Settings(): React.JSX.Element {
   const windowsTerminalCapabilityOwnerKey = getWindowsTerminalCapabilityOwnerKey(
     settings?.activeRuntimeEnvironmentId
   )
-  const runtimeTarget = useMemo(
-    () => getActiveRuntimeTarget(settings),
-    [settings?.activeRuntimeEnvironmentId]
-  )
+  const runtimeTarget = useMemo(() => getActiveRuntimeTarget(settings), [settings])
   const hasActiveRuntimeEnvironment = Boolean(settings?.activeRuntimeEnvironmentId?.trim())
   const shouldLoadWindowsTerminalCapabilities =
     hasActiveRuntimeEnvironment ||

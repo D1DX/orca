@@ -606,10 +606,7 @@ function ClaudeSwitcherMenu({
   const claudeTarget = useAppStore((s) => s.rateLimits.claudeTarget)
   const settings = useAppStore((s) => s.settings)
   const hasActiveRuntimeEnvironment = Boolean(settings?.activeRuntimeEnvironmentId?.trim())
-  const runtimeTarget = useMemo(
-    () => getActiveRuntimeTarget(settings),
-    [settings?.activeRuntimeEnvironmentId]
-  )
+  const runtimeTarget = useMemo(() => getActiveRuntimeTarget(settings), [settings])
   const windowsTerminalCapabilities = useWindowsTerminalCapabilities(
     navigator.userAgent.includes('Windows') || hasActiveRuntimeEnvironment,
     false,
@@ -1102,10 +1099,7 @@ function CodexSwitcherMenu({
   const codexTarget = useAppStore((s) => s.rateLimits.codexTarget)
   const settings = useAppStore((s) => s.settings)
   const hasActiveRuntimeEnvironment = Boolean(settings?.activeRuntimeEnvironmentId?.trim())
-  const runtimeTarget = useMemo(
-    () => getActiveRuntimeTarget(settings),
-    [settings?.activeRuntimeEnvironmentId]
-  )
+  const runtimeTarget = useMemo(() => getActiveRuntimeTarget(settings), [settings])
   const windowsTerminalCapabilities = useWindowsTerminalCapabilities(
     navigator.userAgent.includes('Windows') || hasActiveRuntimeEnvironment,
     false,

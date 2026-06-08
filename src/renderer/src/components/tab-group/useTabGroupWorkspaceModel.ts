@@ -274,7 +274,6 @@ export function useTabGroupWorkspaceModel({
     [
       closeBrowserTab,
       closeEditorIfUnreferenced,
-      closeTab,
       closeUnifiedTab,
       groupTabs,
       leaveWorktreeIfEmpty,
