@@ -1,5 +1,6 @@
 /* eslint-disable max-lines */
 import React, { useMemo, useCallback, useRef, useState, useEffect, useLayoutEffect } from 'react'
+import { toast } from 'sonner'
 import {
   measureElement as measureVirtualElementSize,
   useVirtualizer
@@ -521,11 +522,11 @@ function areWorktreeDragPreviewOffsetsEqual(
 
 function updateLatestWorktreeStatusDropTarget(
   drag: WorktreePointerDrag,
-  target: WorktreeSidebarStatusDropTarget,
+  target: WorktreeSidebarStatusDropTarget & { lineageParentId: string | null },
   preview: WorktreeSidebarDropPreview | null
 ): void {
   drag.latestStatusDropTarget =
-    target.status || target.isPinDrop
+    target.status || target.isPinDrop || target.lineageParentId
       ? {
           target,
           preview,
@@ -544,14 +545,19 @@ function getPointerDropStatusTarget(args: {
   container: HTMLElement
   x: number
   y: number
-}): WorktreeSidebarStatusDropTarget {
+}): WorktreeSidebarStatusDropTarget & { lineageParentId: string | null } {
   const target = document.elementFromPoint(args.x, args.y)
   if (!(target instanceof Element) || !args.container.contains(target)) {
-    return { status: null, isPinDrop: false }
+    return { status: null, isPinDrop: false, lineageParentId: null }
   }
   const pinTarget = target.closest<HTMLElement>('[data-workspace-pin-drop-target]')
   if (pinTarget && args.container.contains(pinTarget)) {
-    return { status: null, isPinDrop: true }
+    return { status: null, isPinDrop: true, lineageParentId: null }
+  }
+  const rowTarget = target.closest<HTMLElement>('[data-worktree-drag-id]')
+  let lineageParentId: string | null = null
+  if (rowTarget && args.container.contains(rowTarget)) {
+    lineageParentId = rowTarget.dataset.worktreeDragId ?? null
   }
   const statusTarget = target.closest<HTMLElement>('[data-workspace-status-drop-target]')
   return {
@@ -559,7 +565,8 @@ function getPointerDropStatusTarget(args: {
       statusTarget && args.container.contains(statusTarget)
         ? ((statusTarget.dataset.workspaceStatus as WorkspaceStatus | undefined) ?? null)
         : null,
-    isPinDrop: false
+    isPinDrop: false,
+    lineageParentId
   }
 }
 
@@ -764,6 +771,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   const renamingWorktreeId = useAppStore((s) => s.renamingWorktreeId)
   const setRenamingWorktreeId = useAppStore((s) => s.setRenamingWorktreeId)
   const updateWorktreeMeta = useAppStore((s) => s.updateWorktreeMeta)
+  const updateWorktreeLineage = useAppStore((s) => s.updateWorktreeLineage)
   const worktreeDragSessionRef = useRef<WorktreeSidebarDragSession | null>(null)
   const worktreePointerDragRef = useRef<WorktreePointerDrag | null>(null)
   const worktreePointerAutoscrollFrameIdRef = useRef<number | null>(null)
@@ -1690,7 +1698,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
           x: drag.currentX,
           y: drag.currentY
         })
-      : { status: null, isPinDrop: false }
+      : { status: null, isPinDrop: false, lineageParentId: null }
     if (
       shouldPreferSidebarStatusDropTarget({
         sourceGroupKey: drag.sourceGroupKey,
@@ -2036,7 +2044,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
               x: event.clientX,
               y: event.clientY
             })
-          : { status: null, isPinDrop: false }
+          : { status: null, isPinDrop: false, lineageParentId: null }
         if (
           shouldPreferSidebarStatusDropTarget({
             sourceGroupKey: drag.sourceGroupKey,
@@ -2315,13 +2323,47 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
         clearWorktreeDrag()
         return
       }
+      const target = getPointerDropStatusTarget({
+        container: event.currentTarget,
+        x: event.clientX,
+        y: event.clientY
+      })
+      if (target.lineageParentId && !session.draggedIds.includes(target.lineageParentId)) {
+        const parentId = target.lineageParentId
+        const isDescendantDrop = session.draggedIds.some((draggedId) => {
+          let current: string | undefined = parentId
+          while (current) {
+            if (current === draggedId) {
+              return true
+            }
+            const lineage = worktreeLineageById[current]
+            current = lineage?.parentWorktreeId
+          }
+          return false
+        })
+
+        if (!isDescendantDrop) {
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'move'
+          setWorktreeDragState((prev) =>
+            prev.dropIndex === null &&
+            prev.dropIndicatorY === null &&
+            prev.previewOffsetsByWorktreeId.size === 0
+              ? prev
+              : {
+                  ...prev,
+                  dropIndex: null,
+                  dropIndicatorY: null,
+                  previewOffsetsByWorktreeId: EMPTY_WORKTREE_DRAG_PREVIEW_OFFSETS,
+                  pointerY: event.clientY
+                }
+          )
+          return
+        }
+      }
+
       const drop = computeWorktreeDrop(event.clientY)
       if (!drop) {
-        const target = getPointerDropStatusTarget({
-          container: event.currentTarget,
-          x: event.clientX,
-          y: event.clientY
-        })
         const statusDrop = target.status
           ? computeWorktreeStatusDrop({
               pointerY: event.clientY,
@@ -2377,7 +2419,8 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
       computeWorktreeDrop,
       computeWorktreeStatusDrop,
       refreshWorktreeDragSession,
-      startWorktreeNativeAutoscroll
+      startWorktreeNativeAutoscroll,
+      worktreeLineageById
     ]
   )
 
@@ -2396,16 +2439,49 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
         clearWorktreeDrag()
         return
       }
+
+      const container = scrollRef.current
+      const target = container
+        ? getPointerDropStatusTarget({
+            container,
+            x: event.clientX,
+            y: event.clientY
+          })
+        : { status: null, isPinDrop: false, lineageParentId: null }
+
+      if (target.lineageParentId && !session.draggedIds.includes(target.lineageParentId)) {
+        event.preventDefault()
+        event.stopPropagation()
+
+        const parentId = target.lineageParentId
+        const isDescendantDrop = session.draggedIds.some((draggedId) => {
+          let current: string | undefined = parentId
+          while (current) {
+            if (current === draggedId) {
+              return true
+            }
+            const lineage = worktreeLineageById[current]
+            current = lineage?.parentWorktreeId
+          }
+          return false
+        })
+
+        if (isDescendantDrop) {
+          clearWorktreeDrag()
+          return
+        }
+
+        void Promise.all(
+          session.draggedIds.map((id) => updateWorktreeLineage(id, { parentWorktreeId: parentId }))
+        ).catch((err) => {
+          toast.error(err instanceof Error ? err.message : 'Failed to nest workspace')
+        })
+        clearWorktreeDrag()
+        return
+      }
+
       const drop = computeWorktreeDrop(event.clientY)
       if (!drop) {
-        const container = scrollRef.current
-        const target = container
-          ? getPointerDropStatusTarget({
-              container,
-              x: event.clientX,
-              y: event.clientY
-            })
-          : { status: null, isPinDrop: false }
         const statusDrop = target.status
           ? computeWorktreeStatusDrop({
               pointerY: event.clientY,
@@ -2448,8 +2524,10 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
       onMoveWorktreesToStatusAtIndex,
       onReorderWorktrees,
       refreshWorktreeDragSession,
+      updateWorktreeLineage,
       worktreeDragGroups,
-      worktreeDragUnitGroups
+      worktreeDragUnitGroups,
+      worktreeLineageById
     ]
   )
 
@@ -2635,7 +2713,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
               x: event.clientX,
               y: event.clientY
             })
-          : { status: null, isPinDrop: false }
+          : { status: null, isPinDrop: false, lineageParentId: null }
         const statusDrop = target.status
           ? computeWorktreeStatusDrop({
               pointerY: event.clientY,
@@ -3216,6 +3294,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
               const worktreeDragGroupIndex = groupIndexByWorktreeId.get(itemRow.worktree.id)
               const revealHighlightTone =
                 agentSendTargetWorktreeId === itemRow.worktree.id ? 'ai' : 'default'
+              const isLineageDropTarget =
+                worktreeDragState.draggingWorktreeId &&
+                worktreePointerDragRef.current?.latestStatusDropTarget?.target.lineageParentId ===
+                  itemRow.worktree.id
+
               return (
                 <div
                   key={itemRow.worktree.id}
@@ -3266,6 +3349,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                     nativeDragEnabled={false}
                     contentIndent={nested ? 0 : paddingLeft}
                     flushSurface={!nested}
+                    isLineageDropTarget={Boolean(isLineageDropTarget)}
                     onImmediateActivate={onImmediateWorktreeActivate}
                     onSelectionGesture={onSelectionGesture}
                     onContextMenuSelect={onContextMenuSelect}
@@ -3334,6 +3418,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
               const lineageToggleGroupKey = child.lineageGroupKey
               const childCardIndent = Math.max(0, child.depth) * LINEAGE_INDENT
               const childContentIndent = Math.max(0, child.depth - 1) * LINEAGE_INDENT
+              const isLineageDropTarget =
+                worktreeDragState.draggingWorktreeId &&
+                worktreePointerDragRef.current?.latestStatusDropTarget?.target.lineageParentId ===
+                  child.worktree.id
+
               return (
                 <div
                   key={child.worktree.id}
@@ -3361,9 +3450,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                           revealHighlightTone === 'ai' &&
                             'scroll-to-current-workspace-reveal-highlight--ai'
                         ],
-                        isActive
-                          ? 'border-black/[0.015] bg-black/[0.08] shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:border-border/40 dark:bg-white/[0.10] dark:shadow-[0_1px_2px_rgba(0,0,0,0.03)]'
-                          : 'worktree-sidebar-card-hover',
+                        isLineageDropTarget
+                          ? 'bg-accent/80 border-accent-foreground/20'
+                          : isActive
+                            ? 'border-black/[0.015] bg-black/[0.08] shadow-[0_1px_2px_rgba(0,0,0,0.04)] dark:border-border/40 dark:bg-white/[0.10] dark:shadow-[0_1px_2px_rgba(0,0,0,0.03)]'
+                            : 'worktree-sidebar-card-hover',
                         isDeleting && 'cursor-not-allowed opacity-50 grayscale'
                       )}
                       data-scroll-reveal-highlight={

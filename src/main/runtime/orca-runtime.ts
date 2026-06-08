@@ -9924,6 +9924,56 @@ export class OrcaRuntimeService {
     return { base, behind: drift.behind, recentSubjects }
   }
 
+  private async ensureWorktreeInstanceId(worktree: Worktree): Promise<void> {
+    if (worktree.instanceId) {
+      return
+    }
+
+    const instanceId = randomUUID()
+    const now = Date.now()
+
+    const metaUpdates: Partial<WorktreeMeta> = {
+      instanceId,
+      createdAt: now,
+      orcaCreatedAt: now
+    }
+
+    try {
+      const dotOrcaPath = join(worktree.path, '.orca')
+      const jsonPath = join(dotOrcaPath, 'worktree.json')
+      const jsonContent = JSON.stringify(metaUpdates, null, 2)
+
+      const repo = this.store?.getRepos().find((r) => r.id === worktree.repoId)
+      if (repo?.connectionId) {
+        const fsProvider = getSshFilesystemProvider(repo.connectionId)
+        if (!fsProvider) {
+          throw new Error('SSH filesystem provider not found')
+        }
+        try {
+          await fsProvider.createDir(dotOrcaPath)
+        } catch {
+          // ignore if exists
+        }
+        await fsProvider.writeFile(jsonPath, jsonContent)
+      } else {
+        const { writeFile } = require('fs/promises')
+        await mkdir(dotOrcaPath, { recursive: true })
+        await writeFile(jsonPath, jsonContent, 'utf-8')
+      }
+    } catch (err) {
+      throw new RuntimeLineageError(
+        'LINEAGE_PARENT_CONTEXT_MISSING',
+        'Workspace directory is not writable. Cannot manage this external worktree.',
+        err
+      )
+    }
+
+    if (this.store) {
+      this.store.setWorktreeMeta(worktree.id, metaUpdates)
+    }
+    worktree.instanceId = instanceId
+  }
+
   async updateManagedWorktreeMeta(
     worktreeSelector: string,
     updates: Partial<WorktreeMeta> & {
@@ -9942,6 +9992,10 @@ export class OrcaRuntimeService {
       this.store.removeWorktreeLineage?.(worktree.id)
     } else if (lineage?.parentWorktree) {
       const parent = await this.resolveWorktreeSelector(lineage.parentWorktree)
+
+      await this.ensureWorktreeInstanceId(worktree)
+      await this.ensureWorktreeInstanceId(parent)
+
       this.validateLineageParent(worktree, parent)
       if (!worktree.instanceId || !parent.instanceId) {
         throw new RuntimeLineageError(
