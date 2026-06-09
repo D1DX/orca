@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { rmSync } from 'node:fs'
 import path from 'node:path'
 import { sendToTerminal } from './helpers/terminal'
-import { writePressureOutputScript } from './artificial-opencode-hidden-pressure-scenario'
+import { writePressureOutputScript } from './artificial-opencode-hidden-pressure-script'
 import {
   annotateScrollMeasurement,
   getResponsiveScrollPath,
@@ -128,7 +128,7 @@ export async function runMainPressureScenario<
   const pressureScriptPath = path.join(testRepoPath, `.orca-opencode-pressure-load-${runId}.mjs`)
   await seedActiveTerminalScrollback(orcaPage, typingPane.ptyId, scrollRunId)
   deps.writeInteractivePromptScript(typingScriptPath, runId)
-  writePressureOutputScript(pressureScriptPath, runId)
+  writePressureOutputScript(pressureScriptPath, runId, 'tui')
   await deps.resetTerminalPtyOutputDebug(orcaPage)
   await deps.holdTerminalAckGate(
     orcaPage,
