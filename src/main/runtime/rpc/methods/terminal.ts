@@ -1771,13 +1771,24 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
           if (!recovery) {
             break
           }
+          // Why: without an output seq (renderer-source fallback) covered
+          // chunks cannot be trimmed exactly, and the renderer view may lag
+          // the queued chunks under backpressure. Keep the bounded replay
+          // instead of applying an unverifiable snapshot.
+          if (typeof recovery.seq !== 'number') {
+            break
+          }
+          // Why: shipped mobile clients drop a second scrollback snapshot for
+          // an initialized handle but apply a resized snapshot inline by
+          // re-initializing xterm with fresh scrollback. Omit seq on the wire
+          // so the client's layout-seq staleness filter is not polluted with
+          // output-byte sequences.
           const recoveryStats = sendSnapshotFrames(sendFrame, {
-            kind: 'scrollback',
+            kind: 'resized',
             cols: recovery.cols,
             rows: recovery.rows,
             displayMode,
             reason: 'pending-output-overflow',
-            seq: recovery.seq,
             source: recovery.source,
             truncated: false,
             truncatedByByteBudget: recovery.truncatedByByteBudget,
