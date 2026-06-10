@@ -8,6 +8,7 @@ import {
   buildExecutionHostRegistry,
   type ExecutionHostHealth
 } from '../../../../shared/execution-host-registry'
+import type { RuntimeCompatVerdict } from '../../../../shared/protocol-compat'
 import type { SshConnectionState } from '../../../../shared/ssh-types'
 import { translate } from '@/i18n/i18n'
 
@@ -17,6 +18,8 @@ export type SidebarHostOption = {
   detail: string
   kind: 'local' | 'ssh' | 'runtime'
   health: ExecutionHostHealth
+  // Why: surfaced to the sidebar host-header menu so it can warn on version skew.
+  compatibility?: RuntimeCompatVerdict
 }
 
 export type SidebarHostScopeOption = {

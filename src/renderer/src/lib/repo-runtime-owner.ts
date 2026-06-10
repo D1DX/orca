@@ -31,3 +31,20 @@ export function getSettingsForRepoRuntimeOwner(
     activeRuntimeEnvironmentId: getRuntimeEnvironmentIdForRepo(state, repoId)
   }
 }
+
+// Why: git/file/terminal mutations must route by the OWNER host of the repo,
+// not the currently focused runtime. This rebinds activeRuntimeEnvironmentId to
+// the repo owner while preserving every other (display/AI) settings field.
+export function getRepoOwnerRoutedSettings<T extends GlobalSettings | null>(
+  settings: T,
+  repo: Pick<Repo, 'id' | 'connectionId' | 'executionHostId'> | null | undefined
+): T {
+  if (!settings) {
+    return settings
+  }
+  const activeRuntimeEnvironmentId = getRuntimeEnvironmentIdForRepo(
+    { repos: repo ? [repo] : [], settings },
+    repo?.id ?? null
+  )
+  return { ...settings, activeRuntimeEnvironmentId }
+}

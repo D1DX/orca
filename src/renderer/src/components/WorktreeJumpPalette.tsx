@@ -56,6 +56,8 @@ import {
   queueBrowserFocusRequest
 } from '@/components/browser-pane/browser-focus'
 import { RepoBadgeMark } from '@/components/repo/RepoBadgeLabel'
+import { buildSidebarHostOptions } from '@/components/sidebar/sidebar-host-options'
+import { getPaletteHostBadge, type PaletteHostBadge } from '@/components/cmd-j/palette-host-badge'
 import { useSettingsNavigationMetadata } from '@/hooks/useSettingsNavigationMetadata'
 import { runWorktreeDelete } from '@/components/sidebar/delete-worktree-flow'
 import {
@@ -212,6 +214,29 @@ function FooterKey({ children }: { children: React.ReactNode }): React.JSX.Eleme
   )
 }
 
+function PaletteHostBadgeChip({
+  badge
+}: {
+  badge: PaletteHostBadge | null
+}): React.JSX.Element | null {
+  if (!badge) {
+    return null
+  }
+  // Host labels come from the registry and are intentionally not translated.
+  return (
+    <span
+      aria-label={translate(
+        'auto.components.WorktreeJumpPalette.paletteHostBadge',
+        'Host: {{value0}}',
+        { value0: badge.label }
+      )}
+      className="max-w-[140px] truncate rounded-[6px] border border-border/60 bg-background/45 px-1.5 py-px text-[9px] font-medium leading-normal text-muted-foreground/88"
+    >
+      {badge.label}
+    </span>
+  )
+}
+
 function findBrowserSelection(
   pageId: string,
   workspaceId: string,
@@ -280,7 +305,8 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
   const unifiedTabsByWorktree = useAppStore((s) => s.unifiedTabsByWorktree)
   const activeGroupIdByWorktree = useAppStore((s) => s.activeGroupIdByWorktree)
   const groupsByWorktree = useAppStore((s) => s.groupsByWorktree)
-  useAppStore((s) => s.settings?.activeRuntimeEnvironmentId)
+  const settings = useAppStore((s) => s.settings)
+  const sshTargetLabels = useAppStore((s) => s.sshTargetLabels)
   const sshConnectionStates = useAppStore((s) => s.sshConnectionStates)
   const hideDefaultBranchWorkspace = useAppStore((s) => s.hideDefaultBranchWorkspace)
   const showSleepingWorkspaces = useAppStore((s) => s.showSleepingWorkspaces)
@@ -314,6 +340,12 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
   const preserveCreateLookupOnCloseRef = useRef(false)
 
   const repoMap = useMemo(() => new Map(repos.map((r) => [r.id, r])), [repos])
+  // Why: host badges only appear when more than one execution host exists; reuse
+  // the same registry the sidebar host-scope strip builds so labels stay in sync.
+  const hostOptions = useMemo(
+    () => buildSidebarHostOptions({ repos, sshTargetLabels, sshConnectionStates, settings }),
+    [repos, sshTargetLabels, sshConnectionStates, settings]
+  )
   const canCreateWorktree = repos.length > 0
 
   const hasQuery = deferredQuery.trim().length > 0
@@ -1435,6 +1467,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
                   ? (sshConnectionStates.get(sshConnectionId)?.status ?? 'disconnected')
                   : null
                 const isSshDisconnected = sshStatus != null && sshStatus !== 'connected'
+                const hostBadge = getPaletteHostBadge(repo, hostOptions)
 
                 return (
                   <CommandItem
@@ -1550,6 +1583,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
                               </span>
                             </span>
                           )}
+                          <PaletteHostBadgeChip badge={hostBadge} />
                         </div>
                       </div>
                     </div>
@@ -1601,6 +1635,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
                   ? repoMap.get(simulatorWorktree.repoId)
                   : undefined
                 const simulatorRepoName = simulatorRepo?.displayName ?? result.repoName
+                const simulatorHostBadge = getPaletteHostBadge(simulatorRepo, hostOptions)
 
                 return (
                   <CommandItem
@@ -1666,6 +1701,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
                               </span>
                             </span>
                           )}
+                          <PaletteHostBadgeChip badge={simulatorHostBadge} />
                         </div>
                       </div>
                     </div>
@@ -1677,6 +1713,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
               const browserWorktree = worktreeMap.get(result.worktreeId)
               const browserRepo = browserWorktree ? repoMap.get(browserWorktree.repoId) : undefined
               const browserRepoName = browserRepo?.displayName ?? result.repoName
+              const browserHostBadge = getPaletteHostBadge(browserRepo, hostOptions)
 
               return (
                 <CommandItem
@@ -1742,6 +1779,7 @@ export default function WorktreeJumpPalette(): React.JSX.Element | null {
                             </span>
                           </span>
                         )}
+                        <PaletteHostBadgeChip badge={browserHostBadge} />
                       </div>
                     </div>
                   </div>

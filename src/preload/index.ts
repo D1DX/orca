@@ -2193,14 +2193,16 @@ const api = {
   } satisfies PreloadApi['cache'],
 
   session: {
-    get: () => ipcRenderer.invoke('session:get'),
-    set: (args) => ipcRenderer.invoke('session:set', args),
-    patch: (args) => ipcRenderer.invoke('session:patch', args),
+    // hostId is optional and defaults to 'local' on the main side, so existing
+    // call sites that omit it keep targeting the local session partition.
+    get: (hostId) => ipcRenderer.invoke('session:get', hostId),
+    set: (args, hostId) => ipcRenderer.invoke('session:set', args, hostId),
+    patch: (args, hostId) => ipcRenderer.invoke('session:patch', args, hostId),
     readTerminalScrollback: (args) =>
       ipcRenderer.sendSync('session:read-terminal-scrollback-sync', args),
     /** Synchronous session save for beforeunload — blocks until flushed to disk. */
-    setSync: (args) => {
-      ipcRenderer.sendSync('session:set-sync', args)
+    setSync: (args, hostId) => {
+      ipcRenderer.sendSync('session:set-sync', args, hostId)
     }
   } satisfies PreloadApi['session'],
 

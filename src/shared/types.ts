@@ -1,4 +1,5 @@
 /* eslint-disable max-lines */
+import type { ExecutionHostId } from './execution-host'
 import type { SshRemotePtyLease, SshTarget } from './ssh-types'
 import type { Automation, AutomationRun } from './automations-types'
 import type { WorkspaceSource } from './workspace-source'
@@ -2879,7 +2880,14 @@ export type PersistedState = {
     pr: Record<string, { data: PRInfo | null; fetchedAt: number }>
     issue: Record<string, { data: IssueInfo | null; fetchedAt: number }>
   }
+  /** Legacy single-blob session. Retained as the canonical 'local' execution
+   *  host partition so an app downgrade still reads its workspace. Non-local
+   *  hosts live in workspaceSessionsByHostId, keyed by ExecutionHostId. */
   workspaceSession: WorkspaceSessionState
+  /** Per-execution-host session partitions for non-'local' hosts (ssh:/runtime:).
+   *  Mixed-host writes stay isolated here; 'local' stays in workspaceSession so
+   *  pre-partition builds keep working. Optional/absent on legacy files. */
+  workspaceSessionsByHostId?: Partial<Record<ExecutionHostId, WorkspaceSessionState>>
   sshTargets: SshTarget[]
   sshRemotePtyLeases: SshRemotePtyLease[]
   migrationUnsupportedPtyEntries: MigrationUnsupportedPtyEntry[]

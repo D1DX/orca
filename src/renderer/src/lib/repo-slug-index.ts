@@ -18,34 +18,9 @@ import { useAppStore } from '@/store'
 import type { Repo } from '../../../shared/types'
 import type { GlobalSettings } from '../../../shared/types'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
-import { getSettingsForRepoRuntimeOwner } from './repo-runtime-owner'
+import { settingsForRepoOwner, slugByRepoId, slugCacheKey, type SlugIndex } from './repo-slug-cache'
 
-/** Lowercased `owner/repo` → Repo[]. Case folded because GitHub treats slugs
- *  case-insensitively but displays the canonical casing; the lookup side
- *  uses the row's `content.repository` which may or may not match the
- *  canonical casing depending on when the project item was indexed. */
-type SlugIndex = Map<string, Repo[]>
-
-/** Module-scope cache keyed by runtime scope + repo.id. A Repo that has already failed
- *  resolution is not retried on re-mount; the value in the map is `null`
- *  to record the negative result so we don't keep poking `git remote` for
- *  repos that will never match. */
-const slugByRepoId = new Map<string, string | null>()
-
-function slugCacheKey(
-  repoId: string,
-  settings: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null | undefined
-): string {
-  const target = getActiveRuntimeTarget(settings)
-  return `${target.kind === 'environment' ? `runtime:${target.environmentId}` : 'local'}:${repoId}`
-}
-
-function settingsForRepoOwner(
-  repo: Repo,
-  settings: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null | undefined
-): Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> {
-  return getSettingsForRepoRuntimeOwner({ repos: [repo], settings }, repo.id)
-}
+export { lookupReposBySlugFromCache } from './repo-slug-cache'
 
 /** Drop a repo's cached slug result. Call when a repo is removed or its
  *  remote URL is known to have changed (e.g. after `git remote set-url`),

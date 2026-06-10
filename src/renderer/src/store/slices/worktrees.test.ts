@@ -3195,6 +3195,54 @@ describe('fetchAllWorktrees hydration-time purge (design §4.4)', () => {
     expect(mockApi.worktrees.list).toHaveBeenCalledTimes(4)
     expect(store.getState().tabsByWorktree['repoA::/a/new-zombie']).toBeDefined()
   })
+
+  // Why: multi-host regression — once hydration has fired, a mid-session
+  // fetchAllWorktrees (e.g. triggered by switching focus) must NEVER purge
+  // terminal state, even if a host transiently reports zero worktrees. The
+  // hydration-time purge is the only purge path here; it is gated to boot.
+  it('does not purge another host tab state when hasHydratedWorktreePurge is already true and a host reports zero worktrees', async () => {
+    const store = createTestStore()
+    const wtA = makeWorktree({ id: 'repoA::/a/wt1', repoId: 'repoA', path: '/a/wt1' })
+
+    // repoB reports zero worktrees this round (host briefly empty), repoA fine.
+    mockApi.worktrees.list.mockImplementation(async ({ repoId }: { repoId: string }) =>
+      repoId === 'repoA' ? [wtA] : []
+    )
+
+    store.setState({
+      hasHydratedWorktreePurge: true,
+      repos: [repoA, repoB],
+      tabsByWorktree: {
+        'repoB::/b/wt1': [{ id: 'tab-B', worktreeId: 'repoB::/b/wt1' }]
+      },
+      ptyIdsByTabId: { 'tab-B': ['remote:env-b@@terminal-b'] },
+      terminalLayoutsByTabId: {
+        'tab-B': {
+          root: null,
+          activeLeafId: null,
+          expandedLeafId: null,
+          ptyIdsByLeafId: { 'pane:1': 'remote:env-b@@terminal-b' }
+        }
+      }
+    } as unknown as Partial<AppState>)
+
+    await store.getState().fetchAllWorktrees()
+
+    // The zero-worktree host's live tab/terminal state is untouched.
+    expect(store.getState().tabsByWorktree).toEqual({
+      'repoB::/b/wt1': [{ id: 'tab-B', worktreeId: 'repoB::/b/wt1' }]
+    })
+    expect(store.getState().ptyIdsByTabId).toEqual({ 'tab-B': ['remote:env-b@@terminal-b'] })
+    expect(store.getState().terminalLayoutsByTabId).toEqual({
+      'tab-B': {
+        root: null,
+        activeLeafId: null,
+        expandedLeafId: null,
+        ptyIdsByLeafId: { 'pane:1': 'remote:env-b@@terminal-b' }
+      }
+    })
+    expect(store.getState().hasHydratedWorktreePurge).toBe(true)
+  })
 })
 
 // Why: design §4.4 — purgeWorktreeTerminalState wipes every worktree-scoped

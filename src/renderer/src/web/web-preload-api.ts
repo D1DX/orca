@@ -36,6 +36,7 @@ import {
 import { legacyBaseRefSearchResult } from '../../../shared/base-ref-search-result'
 import { createE2EConfig } from '../../../shared/e2e-config'
 import { relativePathInsideRoot } from '../../../shared/cross-platform-path'
+import { LOCAL_EXECUTION_HOST_ID, normalizeExecutionHostId } from '../../../shared/execution-host'
 import { toRuntimeWorktreeSelector } from '../runtime/runtime-worktree-selector'
 import { normalizeDisabledTuiAgents } from '../../../shared/tui-agent-selection'
 import { normalizeAutoRenameBranchFromWorkDefaultOn } from '../../../shared/auto-rename-branch-from-work-settings'
@@ -493,22 +494,25 @@ function createWebPreloadApi(): Partial<PreloadApi> {
       deleteBundle: () => Promise.reject(new Error('Diagnostic bundles are unavailable on web.'))
     },
     session: {
-      get: () => Promise.resolve(getStoredWorkspaceSession()),
-      set: async (session) => {
-        writeJson(SESSION_STORAGE_KEY, sanitizeWebRuntimeWorkspaceSession(session))
+      // hostId mirrors the desktop bridge: omitted/'local' targets the existing
+      // storage key; non-local hosts persist under a host-suffixed key so their
+      // sessions stay isolated from the local one.
+      get: (hostId) => Promise.resolve(getStoredWorkspaceSession(hostId)),
+      set: async (session, hostId) => {
+        writeJson(sessionStorageKeyForHost(hostId), sanitizeWebRuntimeWorkspaceSession(session))
       },
-      patch: async (patch: WorkspaceSessionPatch) => {
+      patch: async (patch: WorkspaceSessionPatch, hostId) => {
         writeJson(
-          SESSION_STORAGE_KEY,
+          sessionStorageKeyForHost(hostId),
           sanitizeWebRuntimeWorkspaceSession({
-            ...getStoredWorkspaceSession(),
+            ...getStoredWorkspaceSession(hostId),
             ...patch
           })
         )
       },
       readTerminalScrollback: () => null,
-      setSync: (session) => {
-        writeJson(SESSION_STORAGE_KEY, sanitizeWebRuntimeWorkspaceSession(session))
+      setSync: (session, hostId) => {
+        writeJson(sessionStorageKeyForHost(hostId), sanitizeWebRuntimeWorkspaceSession(session))
       }
     },
     onboarding: {
@@ -2552,7 +2556,22 @@ function getStoredOnboarding(): OnboardingState {
   return closed
 }
 
-function getStoredWorkspaceSession(): WorkspaceSessionState {
+/** Resolve the localStorage key for a session partition. Non-'local' hosts get
+ *  a host-suffixed key so their sessions never clobber the local one. */
+function sessionStorageKeyForHost(hostId?: string | null): string {
+  const resolved = normalizeExecutionHostId(hostId) ?? LOCAL_EXECUTION_HOST_ID
+  return resolved === LOCAL_EXECUTION_HOST_ID
+    ? SESSION_STORAGE_KEY
+    : `${SESSION_STORAGE_KEY}.${resolved}`
+}
+
+function getStoredWorkspaceSession(hostId?: string | null): WorkspaceSessionState {
+  const resolvedHostId = normalizeExecutionHostId(hostId) ?? LOCAL_EXECUTION_HOST_ID
+  if (resolvedHostId !== LOCAL_EXECUTION_HOST_ID) {
+    return sanitizeWebRuntimeWorkspaceSession(
+      readJson(sessionStorageKeyForHost(resolvedHostId), getDefaultWorkspaceSession())
+    )
+  }
   const localSession = sanitizeWebRuntimeWorkspaceSession(
     readJson(SESSION_STORAGE_KEY, getDefaultWorkspaceSession())
   )

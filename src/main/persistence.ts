@@ -70,6 +70,11 @@ import {
   ONBOARDING_FINAL_STEP
 } from '../shared/constants'
 import { parseWorkspaceSession } from '../shared/workspace-session-schema'
+import {
+  LOCAL_EXECUTION_HOST_ID,
+  normalizeExecutionHostId,
+  type ExecutionHostId
+} from '../shared/execution-host'
 import { toRelaySshPtyId } from './providers/ssh-pty-id'
 import {
   isTerminalLeafId,
@@ -212,6 +217,39 @@ function workspaceSessionPatchNeedsFullNormalization(patch: WorkspaceSessionPatc
   return Object.keys(patch).some((key) =>
     WORKSPACE_SESSION_PATCH_FULL_NORMALIZATION_KEYS.has(key as keyof WorkspaceSessionState)
   )
+}
+
+/** Normalize the persisted non-'local' host partitions. 'local' is intentionally
+ *  dropped here — it is the legacy workspaceSession blob — so the two surfaces
+ *  never diverge. Each partition is zod-validated independently: a corrupt host
+ *  drops to defaults without taking out the others. Idempotent: re-running on an
+ *  already-normalized map yields the same shape. */
+function parseWorkspaceSessionsByHostId(
+  raw: unknown,
+  defaults: WorkspaceSessionState
+): Partial<Record<ExecutionHostId, WorkspaceSessionState>> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return {}
+  }
+  const partitions: Partial<Record<ExecutionHostId, WorkspaceSessionState>> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const hostId = normalizeExecutionHostId(key)
+    // Why: 'local' belongs in workspaceSession; an invalid/local key here is
+    // legacy noise and must not shadow the canonical local partition.
+    if (!hostId || hostId === LOCAL_EXECUTION_HOST_ID) {
+      continue
+    }
+    const result = parseWorkspaceSession(value)
+    if (!result.ok) {
+      console.error(
+        `[persistence] Corrupt workspace session for host ${hostId}, using defaults:`,
+        result.error
+      )
+      continue
+    }
+    partitions[hostId] = { ...defaults, ...result.value }
+  }
+  return partitions
 }
 
 function backupPath(dataFile: string, index: number): string {
@@ -2155,6 +2193,15 @@ export class Store {
             }
             return { ...defaults.workspaceSession, ...result.value }
           })(),
+          // Why: per-host session partitions for non-'local' hosts. 'local'
+          // stays in workspaceSession (legacy field) so a downgrade still
+          // reads the user's workspace. Each entry is zod-validated the same
+          // way as the legacy blob — a corrupt partition drops to that host's
+          // defaults without poisoning the others.
+          workspaceSessionsByHostId: parseWorkspaceSessionsByHostId(
+            parsed.workspaceSessionsByHostId,
+            defaults.workspaceSession
+          ),
           sshTargets: (parsed.sshTargets ?? []).map(normalizeSshTarget),
           sshRemotePtyLeases: (parsed.sshRemotePtyLeases ?? [])
             .map(normalizeSshRemotePtyLease)
@@ -3325,8 +3372,19 @@ export class Store {
 
   // ── Workspace Session ─────────────────────────────────────────────
 
-  getWorkspaceSession(): PersistedState['workspaceSession'] {
-    return this.state.workspaceSession ?? getDefaultWorkspaceSession()
+  /** Resolve an execution host argument to a canonical id. Unknown/empty
+   *  values fall back to 'local' so legacy callers without a hostId keep
+   *  reading and writing the local partition exactly as before. */
+  private resolveHostId(hostId?: string | null): ExecutionHostId {
+    return normalizeExecutionHostId(hostId) ?? LOCAL_EXECUTION_HOST_ID
+  }
+
+  getWorkspaceSession(hostId?: string | null): PersistedState['workspaceSession'] {
+    const resolved = this.resolveHostId(hostId)
+    if (resolved === LOCAL_EXECUTION_HOST_ID) {
+      return this.state.workspaceSession ?? getDefaultWorkspaceSession()
+    }
+    return this.state.workspaceSessionsByHostId?.[resolved] ?? getDefaultWorkspaceSession()
   }
 
   readTerminalScrollbackSnapshot(ref: string): string | null {
@@ -3339,7 +3397,30 @@ export class Store {
     return findWorktreeIdForTab(this.getWorkspaceSession(), tabId)
   }
 
-  setWorkspaceSession(session: PersistedState['workspaceSession']): void {
+  setWorkspaceSession(session: PersistedState['workspaceSession'], hostId?: string | null): void {
+    const resolved = this.resolveHostId(hostId)
+    if (resolved === LOCAL_EXECUTION_HOST_ID) {
+      this.setLocalWorkspaceSession(session)
+      return
+    }
+    this.setHostWorkspaceSession(resolved, session)
+  }
+
+  /** Persist a non-'local' host partition. The PTY-binding race protections in
+   *  setLocalWorkspaceSession only apply to the local daemon, so remote hosts
+   *  take the lighter prune-and-store path. */
+  private setHostWorkspaceSession(hostId: ExecutionHostId, session: WorkspaceSessionState): void {
+    const pruned = pruneWorkspaceSessionBrowserHistory(
+      pruneLocalTerminalScrollbackBuffers(session, this.state.repos)
+    )
+    this.state.workspaceSessionsByHostId = {
+      ...this.state.workspaceSessionsByHostId,
+      [hostId]: pruned
+    }
+    this.scheduleSave()
+  }
+
+  private setLocalWorkspaceSession(session: PersistedState['workspaceSession']): void {
     session = pruneWorkspaceSessionBrowserHistory(
       pruneLocalTerminalScrollbackBuffers(session, this.state.repos)
     )
@@ -3488,22 +3569,30 @@ export class Store {
     this.scheduleSave()
   }
 
-  patchWorkspaceSession(patch: WorkspaceSessionPatch): void {
+  patchWorkspaceSession(patch: WorkspaceSessionPatch, hostId?: string | null): void {
+    const resolved = this.resolveHostId(hostId)
     // Why: the renderer's debounced hot path sends only changed top-level
     // session slices. Scalar/UI patches avoid the terminal normalization path;
     // terminal topology/layout patches still reuse the stale-PTY protections.
     let next: WorkspaceSessionState = {
-      ...this.getWorkspaceSession(),
+      ...this.getWorkspaceSession(resolved),
       ...patch
     }
     if (workspaceSessionPatchNeedsFullNormalization(patch)) {
-      this.setWorkspaceSession(next)
+      this.setWorkspaceSession(next, resolved)
       return
     }
     if (Object.hasOwn(patch, 'browserUrlHistory')) {
       next = pruneWorkspaceSessionBrowserHistory(next)
     }
-    this.state.workspaceSession = next
+    if (resolved === LOCAL_EXECUTION_HOST_ID) {
+      this.state.workspaceSession = next
+    } else {
+      this.state.workspaceSessionsByHostId = {
+        ...this.state.workspaceSessionsByHostId,
+        [resolved]: next
+      }
+    }
     this.scheduleSave()
   }
 

@@ -1719,6 +1719,8 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   setShowSleepingWorkspaces: (v) => set({ showSleepingWorkspaces: v }),
 
   workspaceHostScope: 'all',
+  // Why (multi-host design): host scope is presentation/filtering only — it must
+  // never trigger resource teardown (terminals, browser pages, etc.).
   setWorkspaceHostScope: (scope) => {
     const normalized = normalizeExecutionHostScope(scope)
     set({ workspaceHostScope: normalized })

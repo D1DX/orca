@@ -17,6 +17,7 @@ import { normalizeRepoBadgeColor } from '../../../../shared/repo-badge-color'
 import { getProjectGroupSubtreeIds } from '../../../../shared/project-groups'
 import { getRepoIdFromWorktreeId } from './worktree-helpers'
 import { reconcileFetchedRepos } from './repo-identity-reconcile'
+import { splitRepoReorderByHost } from './repo-reorder-host-split'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '../../runtime/runtime-rpc-client'
 import { toRuntimeWorktreeSelector } from '../../runtime/runtime-worktree-selector'
 import { buildDismissedOnboardingFolderAgentStartup } from '@/lib/onboarding-folder-agent-startup'
@@ -398,6 +399,8 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
 
   updateProjectGroup: async (groupId, updates) => {
     try {
+      // Why: project groups are focused-host-scoped by design — fetch/create/update/
+      // delete all route by the focused host, and the list is replaced (not merged).
       const target = getActiveRuntimeTarget(get().settings)
       const updated =
         target.kind === 'local'
@@ -425,6 +428,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
 
   deleteProjectGroup: async (groupId) => {
     try {
+      // Why: project groups are focused-host-scoped by design (see updateProjectGroup).
       const target = getActiveRuntimeTarget(get().settings)
       const deleted =
         target.kind === 'local'
@@ -834,17 +838,28 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
     }
     set({ repos: next })
     try {
-      const target = getActiveRuntimeTarget(get().settings)
-      const result =
-        target.kind === 'local'
-          ? await window.api.repos.reorder({ orderedIds })
-          : await callRuntimeRpc<{ status: 'applied' | 'rejected' }>(
-              target,
-              'repo.reorder',
-              { orderedIds },
-              { timeoutMs: 15_000 }
-            )
-      if (result.status === 'rejected') {
+      // Why: each host persists only its own repos and rejects non-permutations,
+      // so split the cross-host order into per-host permutations and dispatch one
+      // reorder per owner host.
+      const groups = splitRepoReorderByHost(orderedIds, next, get().settings)
+      const results = await Promise.all(
+        groups.map(async (group) => {
+          const parsed = parseExecutionHostId(group.hostId)
+          const target =
+            parsed?.kind === 'runtime'
+              ? ({ kind: 'environment', environmentId: parsed.environmentId } as const)
+              : ({ kind: 'local' } as const)
+          return target.kind === 'local'
+            ? window.api.repos.reorder({ orderedIds: group.orderedIds })
+            : callRuntimeRpc<{ status: 'applied' | 'rejected' }>(
+                target,
+                'repo.reorder',
+                { orderedIds: group.orderedIds },
+                { timeoutMs: 15_000 }
+              )
+        })
+      )
+      if (results.some((result) => result.status === 'rejected')) {
         await get().fetchRepos()
       }
     } catch (err) {

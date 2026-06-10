@@ -39,6 +39,8 @@ import {
 } from '../../../../shared/work-items'
 import { deriveCheckStatusFromChecks, syncPRChecksStatus } from './github-checks'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '../../runtime/runtime-rpc-client'
+import { getSettingsForRepoRuntimeOwner } from '@/lib/repo-runtime-owner'
+import { settingsForProjectRowOwner } from './github-project-row-owner'
 import { rightSidebarShowsPullRequestData } from '@/lib/right-sidebar-visibility'
 import { hostedReviewInfoFromGitHubPRInfo } from '../../../../shared/hosted-review-github'
 import { getHostedReviewCacheKey, linkedReviewHintKey } from './hosted-review-cache-identity'
@@ -1800,7 +1802,9 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
     // PRs goes through updatePullRequestBySlug; for issues through
     // updateIssueBySlug. We dispatch both as needed.
     let envelope: GitHubProjectMutationResult = { ok: true }
-    const target = getActiveRuntimeTarget(get().settings)
+    // Why: route the row edit to the matched repo's owner host so it lands where
+    // the repo lives; fall back to focused settings when no repo matches the slug.
+    const target = getActiveRuntimeTarget(settingsForProjectRowOwner(get(), owner, repo))
     if (
       previousRow.itemType === 'PULL_REQUEST' &&
       (updates.title !== undefined || updates.body !== undefined)
@@ -1919,7 +1923,9 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       content: { ...previousRow.content, issueType }
     }
     applyRowPatch(set, cacheKey, rowId, optimistic)
-    const target = getActiveRuntimeTarget(get().settings)
+    // Why: route the issue-type edit to the matched repo's owner host; fall back
+    // to focused settings when no repo matches the slug.
+    const target = getActiveRuntimeTarget(settingsForProjectRowOwner(get(), owner, repo))
     const args = {
       owner,
       repo,
@@ -3361,7 +3367,9 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       // normalizes `'auto'` to `undefined` so the persisted record drops
       // the key entirely (see main/persistence.ts#updateRepo).
       const updates = { issueSourcePreference: preference === 'auto' ? undefined : preference }
-      const target = getActiveRuntimeTarget(get().settings)
+      // Why: persist to the repo's owner host (same routing as updateRepo) so the
+      // write lands where the repo lives, not on the focused runtime.
+      const target = getActiveRuntimeTarget(getSettingsForRepoRuntimeOwner(get(), repoId))
       await (target.kind === 'local'
         ? window.api.repos.update({ repoId, updates })
         : callRuntimeRpc(target, 'repo.update', { repo: repoId, updates }, { timeoutMs: 15_000 }))

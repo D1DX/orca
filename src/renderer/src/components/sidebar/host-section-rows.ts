@@ -3,9 +3,11 @@ import {
   LOCAL_EXECUTION_HOST_ID,
   getRepoExecutionHostId,
   type ExecutionHostId,
+  type ExecutionHostKind,
   type ExecutionHostScope
 } from '../../../../shared/execution-host'
 import type { ExecutionHostHealth } from '../../../../shared/execution-host-registry'
+import type { RuntimeCompatVerdict } from '../../../../shared/protocol-compat'
 import type { Repo } from '../../../../shared/types'
 import type { Row } from './worktree-list-groups'
 
@@ -13,9 +15,13 @@ export type HostHeaderRow = {
   type: 'host-header'
   key: string
   hostId: ExecutionHostId
+  kind: ExecutionHostKind
   label: string
   detail: string
   health: ExecutionHostHealth
+  // Why: blocked-host guidance in the header menu needs the verdict reason so
+  // it can deep-link an "Update server/client required" row per skew direction.
+  compatibility?: RuntimeCompatVerdict
   count: number
 }
 
@@ -23,16 +29,20 @@ export type HostSectionRow = Row | HostHeaderRow
 
 export type HostSectionOption = {
   id: ExecutionHostId
+  kind: ExecutionHostKind
   label: string
   detail: string
   health: ExecutionHostHealth
+  compatibility?: RuntimeCompatVerdict
 }
 
 function getRepoHostId(
-  repo: Pick<Repo, 'connectionId'> | undefined,
+  repo: Pick<Repo, 'connectionId' | 'executionHostId'> | undefined,
   defaultHostId: ExecutionHostId
 ): ExecutionHostId {
-  if (repo?.connectionId) {
+  // Why: explicit executionHostId must win over the focused/default host, or
+  // runtime-owned repos group under whichever host happens to be focused.
+  if (repo?.connectionId || repo?.executionHostId) {
     return getRepoExecutionHostId(repo)
   }
   return defaultHostId
@@ -51,11 +61,13 @@ function getRowHostId(row: Row, defaultHostId: ExecutionHostId): ExecutionHostId
 }
 
 function getFallbackHost(hostId: ExecutionHostId): HostSectionOption {
+  const isLocal = hostId === LOCAL_EXECUTION_HOST_ID
   return {
     id: hostId,
-    label: hostId === LOCAL_EXECUTION_HOST_ID ? 'Local Mac' : hostId,
-    detail: hostId === LOCAL_EXECUTION_HOST_ID ? 'This computer' : 'Host',
-    health: hostId === LOCAL_EXECUTION_HOST_ID ? 'local' : 'available'
+    kind: isLocal ? 'local' : hostId.startsWith('ssh:') ? 'ssh' : 'runtime',
+    label: isLocal ? 'Local Mac' : hostId,
+    detail: isLocal ? 'This computer' : 'Host',
+    health: isLocal ? 'local' : 'available'
   }
 }
 
@@ -128,9 +140,11 @@ export function addHostSectionRows(args: {
       type: 'host-header',
       key: `host:${host.id}`,
       hostId: host.id,
+      kind: host.kind,
       label: host.label,
       detail: host.detail,
       health: host.health,
+      compatibility: host.compatibility,
       count: countWorktreeRows(hostRows)
     })
     result.push(...hostRows)

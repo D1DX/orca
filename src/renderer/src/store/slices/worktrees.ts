@@ -961,6 +961,8 @@ export const createWorktreeSlice: StateCreator<AppState, [], [], WorktreeSlice> 
 
   fetchWorktreeLineage: async () => {
     try {
+      // Why: lineage is a focused-host refresh — fetch from the focused host and
+      // host-merge so other hosts' previously fetched lineage is preserved.
       const settings = get().settings
       const lineage = await listWorktreeLineageForRuntime(settings)
       set((s) => ({

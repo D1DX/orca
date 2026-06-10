@@ -180,8 +180,12 @@ import {
   updateWorktreeSelection
 } from './worktree-multi-selection'
 import { branchDisplayName } from './WorktreeCardHelpers'
-import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
-import { getSettingsFocusedExecutionHostId } from '../../../../shared/execution-host'
+import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
+import { splitWorktreeSortOrderByHost } from '@/lib/worktree-sort-order-host-split'
+import {
+  getSettingsFocusedExecutionHostId,
+  parseExecutionHostId
+} from '../../../../shared/execution-host'
 import { getRepoHeaderCreateState } from './repo-header-create-state'
 import type { PendingSidebarWorktreeReveal } from '@/store/slices/ui'
 import { getRepositoryIconSectionId } from '@/components/settings/repository-settings-targets'
@@ -210,6 +214,7 @@ import {
 } from './worktree-list-indentation'
 import { addHostSectionRows, type HostHeaderRow, type HostSectionRow } from './host-section-rows'
 import { buildSidebarHostOptions } from './sidebar-host-options'
+import { HostSectionHeaderMenu } from './HostSectionHeaderMenu'
 import { translate } from '@/i18n/i18n'
 
 export {
@@ -501,20 +506,38 @@ function HostHeaderHealthIcon({ health }: { health: HostHeaderRow['health'] }): 
 }
 
 function HostSectionHeader({ row }: { row: HostHeaderRow }): React.JSX.Element {
+  // Why: a blocked compatibility verdict gets a compact warning treatment so one
+  // skewed host stands out without altering how its siblings render.
+  const isBlocked = row.health === 'blocked'
   return (
     <div className="px-2 pt-1">
-      <div className="flex h-7 items-center gap-2 rounded-md border border-worktree-sidebar-border bg-worktree-sidebar-accent/70 px-2 text-left">
+      <div
+        className={cn(
+          'group/host-header flex h-7 items-center gap-2 rounded-md border px-2 text-left',
+          isBlocked
+            ? 'border-destructive/40 bg-destructive/10'
+            : 'border-worktree-sidebar-border bg-worktree-sidebar-accent/70'
+        )}
+      >
         <Server className="size-3.5 shrink-0 text-muted-foreground" />
         <HostHeaderHealthIcon health={row.health} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-[12px] font-semibold leading-none text-foreground">
             {row.label}
           </div>
-          <div className="mt-0.5 truncate text-[10px] leading-none text-muted-foreground">
-            {row.detail}
+          <div
+            className={cn(
+              'mt-0.5 truncate text-[10px] leading-none',
+              isBlocked ? 'text-destructive' : 'text-muted-foreground'
+            )}
+          >
+            {isBlocked
+              ? translate('auto.components.sidebar.WorktreeList.7a8b9c0d1e', 'Update required')
+              : row.detail}
           </div>
         </div>
         <SectionMetricsBadge count={row.count} />
+        <HostSectionHeaderMenu row={row} />
       </div>
     </div>
   )
@@ -4169,15 +4192,24 @@ const WorktreeList = React.memo(function WorktreeList({
     if (sortBy !== 'smart' || sortedIds.length === 0 || !sessionHasHadPty.current) {
       return
     }
-    const target = getActiveRuntimeTarget(useAppStore.getState().settings)
-    void (target.kind === 'environment'
-      ? callRuntimeRpc(
-          target,
-          'worktree.persistSortOrder',
-          { orderedIds: sortedIds },
-          { timeoutMs: 15_000 }
-        )
-      : window.api.worktrees.persistSortOrder({ orderedIds: sortedIds }))
+    // Why: sortOrder is persisted in each host's worktreeMeta and enriched from
+    // the owner host, so persist each host's ids on that host.
+    const state = useAppStore.getState()
+    for (const group of splitWorktreeSortOrderByHost(state, sortedIds)) {
+      const parsed = parseExecutionHostId(group.hostId)
+      const target =
+        parsed?.kind === 'runtime'
+          ? ({ kind: 'environment', environmentId: parsed.environmentId } as const)
+          : ({ kind: 'local' } as const)
+      void (target.kind === 'environment'
+        ? callRuntimeRpc(
+            target,
+            'worktree.persistSortOrder',
+            { orderedIds: group.orderedIds },
+            { timeoutMs: 15_000 }
+          )
+        : window.api.worktrees.persistSortOrder({ orderedIds: group.orderedIds }))
+    }
   }, [sortedIds, sortBy])
 
   // Flatten, filter, and apply stable sort order via the shared utility so

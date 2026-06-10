@@ -6542,3 +6542,153 @@ describe('Store', () => {
     })
   })
 })
+
+describe('Store host-partitioned workspace sessions', () => {
+  beforeEach(() => {
+    testState.dir = mkdtempSync(join(tmpdir(), 'orca-test-'))
+  })
+
+  afterEach(() => {
+    rmSync(testState.dir, { recursive: true, force: true })
+  })
+
+  const makeHostSession = (activeRepoId: string): WorkspaceSessionState => ({
+    ...getDefaultWorkspaceSession(),
+    activeRepoId
+  })
+
+  it('migrates a legacy workspaceSession blob into the local partition', async () => {
+    writeDataFile({
+      schemaVersion: 1,
+      workspaceSession: makeHostSession('legacy-repo')
+    })
+
+    const store = await createStore()
+
+    // The legacy blob is the 'local' partition; an explicit/default hostId reads it.
+    expect(store.getWorkspaceSession().activeRepoId).toBe('legacy-repo')
+    expect(store.getWorkspaceSession('local').activeRepoId).toBe('legacy-repo')
+    // No data was moved, so a downgrade still finds the legacy field intact.
+    store.flush()
+    const persisted = readDataFile() as { workspaceSession?: { activeRepoId?: string } }
+    expect(persisted.workspaceSession?.activeRepoId).toBe('legacy-repo')
+  })
+
+  it('is idempotent: re-loading already-partitioned state preserves all hosts', async () => {
+    writeDataFile({
+      schemaVersion: 1,
+      workspaceSession: makeHostSession('local-repo'),
+      workspaceSessionsByHostId: {
+        'runtime:env-a': makeHostSession('runtime-repo'),
+        'ssh:host-b': makeHostSession('ssh-repo')
+      }
+    })
+
+    const readSessionPartitions = (): unknown => {
+      const data = readDataFile() as {
+        workspaceSession?: unknown
+        workspaceSessionsByHostId?: unknown
+      }
+      return {
+        workspaceSession: data.workspaceSession,
+        workspaceSessionsByHostId: data.workspaceSessionsByHostId
+      }
+    }
+
+    const first = await createStore()
+    first.flush()
+    const afterFirst = readSessionPartitions()
+
+    const second = await createStore()
+    second.flush()
+    const afterSecond = readSessionPartitions()
+
+    // Re-running the partition migration must not move or reshape any host.
+    expect(afterSecond).toEqual(afterFirst)
+    expect(second.getWorkspaceSession('runtime:env-a').activeRepoId).toBe('runtime-repo')
+    expect(second.getWorkspaceSession('ssh:host-b').activeRepoId).toBe('ssh-repo')
+    expect(second.getWorkspaceSession('local').activeRepoId).toBe('local-repo')
+  })
+
+  it('drops a stray "local" key in workspaceSessionsByHostId in favor of the legacy blob', async () => {
+    writeDataFile({
+      schemaVersion: 1,
+      workspaceSession: makeHostSession('canonical-local'),
+      workspaceSessionsByHostId: {
+        local: makeHostSession('shadow-local')
+      }
+    })
+
+    const store = await createStore()
+
+    expect(store.getWorkspaceSession('local').activeRepoId).toBe('canonical-local')
+  })
+
+  it('isolates writes: setting host A does not mutate host B or local', async () => {
+    const store = await createStore()
+
+    store.setWorkspaceSession(makeHostSession('repo-local'), 'local')
+    store.setWorkspaceSession(makeHostSession('repo-a'), 'runtime:env-a')
+    store.setWorkspaceSession(makeHostSession('repo-b'), 'runtime:env-b')
+
+    expect(store.getWorkspaceSession('local').activeRepoId).toBe('repo-local')
+    expect(store.getWorkspaceSession('runtime:env-a').activeRepoId).toBe('repo-a')
+    expect(store.getWorkspaceSession('runtime:env-b').activeRepoId).toBe('repo-b')
+
+    // Overwriting host A leaves host B and local untouched.
+    store.setWorkspaceSession(makeHostSession('repo-a2'), 'runtime:env-a')
+    expect(store.getWorkspaceSession('runtime:env-a').activeRepoId).toBe('repo-a2')
+    expect(store.getWorkspaceSession('runtime:env-b').activeRepoId).toBe('repo-b')
+    expect(store.getWorkspaceSession('local').activeRepoId).toBe('repo-local')
+  })
+
+  it('patches a single host partition without touching the others', async () => {
+    const store = await createStore()
+    store.setWorkspaceSession(makeHostSession('repo-local'), 'local')
+    store.setWorkspaceSession(makeHostSession('repo-a'), 'runtime:env-a')
+
+    store.patchWorkspaceSession({ activeTabId: 'tab-a' }, 'runtime:env-a')
+
+    expect(store.getWorkspaceSession('runtime:env-a').activeTabId).toBe('tab-a')
+    expect(store.getWorkspaceSession('runtime:env-a').activeRepoId).toBe('repo-a')
+    // Local was never given that tab id.
+    expect(store.getWorkspaceSession('local').activeTabId).toBeNull()
+    expect(store.getWorkspaceSession('local').activeRepoId).toBe('repo-local')
+  })
+
+  it('defaults an omitted hostId to the local partition', async () => {
+    const store = await createStore()
+    store.setWorkspaceSession(makeHostSession('repo-a'), 'runtime:env-a')
+
+    // No hostId → local, which is still empty/default and unaffected by host A.
+    store.setWorkspaceSession(makeHostSession('repo-local'))
+    expect(store.getWorkspaceSession().activeRepoId).toBe('repo-local')
+    expect(store.getWorkspaceSession('runtime:env-a').activeRepoId).toBe('repo-a')
+  })
+
+  it('round-trips host partitions through disk', async () => {
+    const store = await createStore()
+    store.setWorkspaceSession(makeHostSession('repo-a'), 'runtime:env-a')
+    store.flush()
+
+    const reloaded = await createStore()
+    expect(reloaded.getWorkspaceSession('runtime:env-a').activeRepoId).toBe('repo-a')
+  })
+
+  it('drops a corrupt host partition to defaults without failing the others', async () => {
+    writeDataFile({
+      schemaVersion: 1,
+      workspaceSessionsByHostId: {
+        'runtime:good': makeHostSession('good-repo'),
+        // activeRepoId must be string|null; a number fails the zod parse.
+        'runtime:bad': { ...makeHostSession('x'), activeRepoId: 123 }
+      }
+    })
+
+    const store = await createStore()
+
+    expect(store.getWorkspaceSession('runtime:good').activeRepoId).toBe('good-repo')
+    // Bad partition collapses to defaults rather than poisoning the map.
+    expect(store.getWorkspaceSession('runtime:bad').activeRepoId).toBeNull()
+  })
+})

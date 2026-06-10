@@ -32,6 +32,7 @@ import {
   resolveDirectSetupDecision
 } from '@/lib/launch-work-item-direct-preflight'
 import { resolveSourceControlLaunchPlatform } from '@/lib/source-control-launch-platform'
+import { getSettingsForRepoRuntimeOwner } from '@/lib/repo-runtime-owner'
 import { translate } from '@/i18n/i18n'
 
 export type LaunchableWorkItem = {
@@ -125,6 +126,9 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
   }
 
   const settings = store.settings
+  // Why: preflight (PR base + hooks probe) must run on the repo's owner host so it
+  // matches the owner-routed createWorktree below, not the focused runtime.
+  const repoOwnerSettings = getSettingsForRepoRuntimeOwner(store, repoId)
   const promptDelivery = args.promptDelivery ?? 'draft'
   const repoConnectionId = repo.connectionId?.trim() || null
   const preflightLaunchPlatform =
@@ -151,7 +155,7 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
       ? store.ensureRemoteDetectedAgents(repoConnectionId)
       : store.ensureDetectedAgents()
 
-  const setupResolution = await resolveDirectSetupDecision(repoId, repo)
+  const setupResolution = await resolveDirectSetupDecision(repoId, repo, repoOwnerSettings)
   if (setupResolution.kind === 'needs-modal') {
     openModalFallback()
     return false
@@ -183,12 +187,16 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
     try {
       // Why: direct "Use PR" launches bypass the Start-from picker, so they
       // must still resolve the PR head before `git worktree add`.
-      const result = await resolveDirectPrStartPoint(repoId, item.number, settings)
+      const result = await resolveDirectPrStartPoint(repoId, item.number, repoOwnerSettings)
       resolvedBaseBranch = result.baseBranch
       resolvedPushTarget = result.pushTarget
       resolvedBranchNameOverride = result.branchNameOverride
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : translate("auto.lib.launch.work.item.direct.8bc45efdbc", "Failed to resolve PR head."))
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : translate('auto.lib.launch.work.item.direct.8bc45efdbc', 'Failed to resolve PR head.')
+      )
       openModalFallback()
       return false
     }
@@ -247,7 +255,12 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
           sidebarRevealBehavior: 'auto',
           setup: result.setup
         })
-        toast.error(translate("auto.lib.launch.work.item.direct.19c7683acf", "Selected agent is not available in the created workspace."))
+        toast.error(
+          translate(
+            'auto.lib.launch.work.item.direct.19c7683acf',
+            'Selected agent is not available in the created workspace.'
+          )
+        )
         return false
       }
       effectiveAgent = agentOverride
@@ -339,7 +352,12 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
     if (!activation) {
       // Worktree vanished between create and activate — extremely unlikely but
       // worth handling explicitly rather than silently dropping the draft.
-      toast.error(translate("auto.lib.launch.work.item.direct.67e103dd60", "Workspace created but could not be activated."))
+      toast.error(
+        translate(
+          'auto.lib.launch.work.item.direct.67e103dd60',
+          'Workspace created but could not be activated.'
+        )
+      )
       return false
     }
     primaryTabId = activation.primaryTabId
@@ -352,7 +370,12 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
   store.setSidebarOpen(true)
 
   if (startupPlanFailed) {
-    toast.error(translate("auto.lib.launch.work.item.direct.3de6371df3", "Could not build the agent launch command."))
+    toast.error(
+      translate(
+        'auto.lib.launch.work.item.direct.3de6371df3',
+        'Could not build the agent launch command.'
+      )
+    )
     return false
   }
 

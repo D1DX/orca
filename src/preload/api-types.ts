@@ -150,6 +150,7 @@ import type { GitHistoryOptions, GitHistoryResult } from '../shared/git-history'
 import type { PublicKnownRuntimeEnvironment } from '../shared/runtime-environments'
 import type { RuntimeAccessGrant } from '../shared/runtime-access-grants'
 import type { RuntimeRpcResponse } from '../shared/runtime-rpc-envelope'
+import type { ExecutionHostId } from '../shared/execution-host'
 import type { FeatureInteractionId } from '../shared/feature-interactions'
 import type {
   AddIssueCommentBySlugArgs,
@@ -1784,11 +1785,13 @@ export type PreloadApi = {
     }) => Promise<void>
   }
   session: {
-    get: () => Promise<WorkspaceSessionState>
-    set: (args: WorkspaceSessionState) => Promise<void>
-    patch: (args: WorkspaceSessionPatch) => Promise<void>
+    // hostId is optional and defaults to the 'local' partition on the main
+    // side, so existing callers that omit it behave exactly as before.
+    get: (hostId?: ExecutionHostId) => Promise<WorkspaceSessionState>
+    set: (args: WorkspaceSessionState, hostId?: ExecutionHostId) => Promise<void>
+    patch: (args: WorkspaceSessionPatch, hostId?: ExecutionHostId) => Promise<void>
     readTerminalScrollback: (args: { ref: string }) => string | null
-    setSync: (args: WorkspaceSessionState) => void
+    setSync: (args: WorkspaceSessionState, hostId?: ExecutionHostId) => void
   }
   remoteWorkspace: {
     get: (args: { targetId: string }) => Promise<RemoteWorkspaceSnapshot | null>

@@ -389,6 +389,99 @@ describe('createSettingsSlice runtime switching', () => {
     })
   })
 
+  it('keeps the previous host live terminal and browser resources intact on switch (multi-host keepalive)', async () => {
+    const store = createTestStore()
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-1' } as AppState['settings'],
+      repos: [
+        {
+          id: 'repo-env-1',
+          path: '/env-1/repo',
+          displayName: 'Env 1',
+          executionHostId: 'runtime:env-1'
+        } as never
+      ],
+      worktreesByRepo: {
+        'repo-env-1': [makeWorktree({ id: 'repo-env-1::/env-1/repo', repoId: 'repo-env-1' })]
+      },
+      activeWorktreeId: 'repo-env-1::/env-1/repo',
+      tabsByWorktree: {
+        'repo-env-1::/env-1/repo': [
+          {
+            id: 'host-tab-1',
+            ptyId: 'remote:env-1@@terminal-a',
+            worktreeId: 'repo-env-1::/env-1/repo',
+            title: 'Terminal 1',
+            defaultTitle: 'Terminal 1',
+            customTitle: null,
+            color: null,
+            sortOrder: 0,
+            createdAt: 1
+          }
+        ]
+      },
+      ptyIdsByTabId: { 'host-tab-1': ['remote:env-1@@terminal-a'] },
+      terminalLayoutsByTabId: {
+        'host-tab-1': {
+          root: null,
+          activeLeafId: null,
+          expandedLeafId: null,
+          ptyIdsByLeafId: { 'pane:1': 'remote:env-1@@terminal-a' }
+        }
+      },
+      browserPagesByWorkspace: {
+        'browser-env-1': [{ id: 'page-env-1', worktreeId: 'repo-env-1::/env-1/repo' }] as never
+      },
+      remoteBrowserPageHandlesByPageId: {
+        'page-env-1': { environmentId: 'env-1', remotePageId: 'remote-page-1' }
+      }
+    })
+
+    await expect(store.getState().switchRuntimeEnvironment('env-2')).resolves.toBe(true)
+
+    // No teardown RPC was issued against the previous host's live resources.
+    expect(runtimeEnvironmentCall).not.toHaveBeenCalledWith(
+      expect.objectContaining({ selector: 'env-1', method: 'terminal.close' })
+    )
+    expect(runtimeEnvironmentCall).not.toHaveBeenCalledWith(
+      expect.objectContaining({ selector: 'env-1', method: 'browser.tabClose' })
+    )
+
+    // Every previous-host map is byte-for-byte unchanged after the switch.
+    expect(store.getState().tabsByWorktree).toEqual({
+      'repo-env-1::/env-1/repo': [
+        {
+          id: 'host-tab-1',
+          ptyId: 'remote:env-1@@terminal-a',
+          worktreeId: 'repo-env-1::/env-1/repo',
+          title: 'Terminal 1',
+          defaultTitle: 'Terminal 1',
+          customTitle: null,
+          color: null,
+          sortOrder: 0,
+          createdAt: 1
+        }
+      ]
+    })
+    expect(store.getState().ptyIdsByTabId).toEqual({
+      'host-tab-1': ['remote:env-1@@terminal-a']
+    })
+    expect(store.getState().terminalLayoutsByTabId).toEqual({
+      'host-tab-1': {
+        root: null,
+        activeLeafId: null,
+        expandedLeafId: null,
+        ptyIdsByLeafId: { 'pane:1': 'remote:env-1@@terminal-a' }
+      }
+    })
+    expect(store.getState().browserPagesByWorkspace).toEqual({
+      'browser-env-1': [{ id: 'page-env-1', worktreeId: 'repo-env-1::/env-1/repo' }]
+    })
+    expect(store.getState().remoteBrowserPageHandlesByPageId).toEqual({
+      'page-env-1': { environmentId: 'env-1', remotePageId: 'remote-page-1' }
+    })
+  })
+
   it('allows switching focus while editor tabs have unsaved state', async () => {
     const store = createTestStore()
     store.setState({

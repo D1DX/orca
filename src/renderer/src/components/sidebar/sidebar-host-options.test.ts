@@ -90,6 +90,18 @@ describe('sidebar host options', () => {
     ])
   })
 
+  it('carries host kind so the header menu can pick lifecycle actions', () => {
+    const hosts = buildSidebarHostOptions({
+      repos: [{ connectionId: 'ssh-1' }],
+      sshTargetLabels: new Map([['ssh-1', 'Builder']]),
+      settings: { activeRuntimeEnvironmentId: 'runtime-1' }
+    })
+
+    expect(hosts.find((host) => host.id === 'local')?.kind).toBe('local')
+    expect(hosts.find((host) => host.id === 'ssh:ssh-1')?.kind).toBe('ssh')
+    expect(hosts.find((host) => host.id === 'runtime:runtime-1')?.kind).toBe('runtime')
+  })
+
   it('labels host health for compact sidebar UI', () => {
     expect(getSidebarHostHealthLabel('available')).toBe('Connected')
     expect(getSidebarHostHealthLabel('connecting')).toBe('Connecting')

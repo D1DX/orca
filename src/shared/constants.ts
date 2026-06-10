@@ -384,6 +384,7 @@ export function getDefaultPersistedState(homedir: string): PersistedState {
     ui: getDefaultUIState(),
     githubCache: { pr: {}, issue: {} },
     workspaceSession: getDefaultWorkspaceSession(),
+    workspaceSessionsByHostId: {},
     sshTargets: [],
     sshRemotePtyLeases: [],
     migrationUnsupportedPtyEntries: [],

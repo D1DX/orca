@@ -78,8 +78,14 @@ describe('addHostSectionRows', () => {
     const sectioned = addHostSectionRows({
       rows,
       hostOptions: [
-        { id: 'local', label: 'Local Mac', detail: 'This computer', health: 'local' },
-        { id: 'ssh:ssh-1', label: 'Builder', detail: 'SSH', health: 'available' }
+        {
+          id: 'local',
+          kind: 'local',
+          label: 'Local Mac',
+          detail: 'This computer',
+          health: 'local'
+        },
+        { id: 'ssh:ssh-1', kind: 'ssh', label: 'Builder', detail: 'SSH', health: 'available' }
       ],
       workspaceHostScope: 'local',
       defaultHostId: 'local'
@@ -97,7 +103,13 @@ describe('addHostSectionRows', () => {
       addHostSectionRows({
         rows,
         hostOptions: [
-          { id: 'local', label: 'Local Mac', detail: 'This computer', health: 'local' }
+          {
+            id: 'local',
+            kind: 'local',
+            label: 'Local Mac',
+            detail: 'This computer',
+            health: 'local'
+          }
         ],
         workspaceHostScope: 'all',
         defaultHostId: 'local'
@@ -113,8 +125,14 @@ describe('addHostSectionRows', () => {
     const sectioned = addHostSectionRows({
       rows,
       hostOptions: [
-        { id: 'local', label: 'Local Mac', detail: 'This computer', health: 'local' },
-        { id: 'ssh:ssh-1', label: 'Builder', detail: 'SSH', health: 'available' }
+        {
+          id: 'local',
+          kind: 'local',
+          label: 'Local Mac',
+          detail: 'This computer',
+          health: 'local'
+        },
+        { id: 'ssh:ssh-1', kind: 'ssh', label: 'Builder', detail: 'SSH', health: 'available' }
       ],
       workspaceHostScope: 'all',
       defaultHostId: 'local'
@@ -142,8 +160,14 @@ describe('addHostSectionRows', () => {
     const sectioned = addHostSectionRows({
       rows,
       hostOptions: [
-        { id: 'local', label: 'Local Mac', detail: 'This computer', health: 'local' },
-        { id: 'ssh:ssh-1', label: 'Builder', detail: 'SSH', health: 'available' }
+        {
+          id: 'local',
+          kind: 'local',
+          label: 'Local Mac',
+          detail: 'This computer',
+          health: 'local'
+        },
+        { id: 'ssh:ssh-1', kind: 'ssh', label: 'Builder', detail: 'SSH', health: 'available' }
       ],
       workspaceHostScope: 'all',
       defaultHostId: 'local'
@@ -159,6 +183,55 @@ describe('addHostSectionRows', () => {
     ])
   })
 
+  it('groups explicitly runtime-owned repos under their owner host, not the focused host', () => {
+    const localOwned: Repo = { ...repo('local-project'), executionHostId: 'local' }
+    const runtimeOwned: Repo = { ...repo('remote-project'), executionHostId: 'runtime:env-2' }
+    const rows = [
+      repoHeader(localOwned),
+      item('local-wt', localOwned),
+      repoHeader(runtimeOwned),
+      item('remote-wt', runtimeOwned)
+    ]
+
+    const sectioned = addHostSectionRows({
+      rows,
+      hostOptions: [
+        {
+          id: 'local',
+          kind: 'local',
+          label: 'Local Mac',
+          detail: 'This computer',
+          health: 'local'
+        },
+        {
+          id: 'runtime:env-1',
+          kind: 'runtime',
+          label: 'env-1',
+          detail: 'Orca server',
+          health: 'available'
+        },
+        {
+          id: 'runtime:env-2',
+          kind: 'runtime',
+          label: 'env-2',
+          detail: 'Orca server',
+          health: 'available'
+        }
+      ],
+      workspaceHostScope: 'all',
+      defaultHostId: 'runtime:env-1'
+    })
+
+    expect(sectioned.map(rowKey)).toEqual([
+      'host:local',
+      'repo:local-project',
+      'local-wt',
+      'host:runtime:env-2',
+      'repo:remote-project',
+      'remote-wt'
+    ])
+  })
+
   it('uses the focused runtime as the owner for non-SSH repos', () => {
     const project = repo('runtime-project')
     const rows = [repoHeader(project), item('runtime-wt', project)]
@@ -166,8 +239,20 @@ describe('addHostSectionRows', () => {
     const sectioned = addHostSectionRows({
       rows,
       hostOptions: [
-        { id: 'local', label: 'Local Mac', detail: 'This computer', health: 'local' },
-        { id: 'runtime:env-1', label: 'env-1', detail: 'Orca server', health: 'available' }
+        {
+          id: 'local',
+          kind: 'local',
+          label: 'Local Mac',
+          detail: 'This computer',
+          health: 'local'
+        },
+        {
+          id: 'runtime:env-1',
+          kind: 'runtime',
+          label: 'env-1',
+          detail: 'Orca server',
+          health: 'available'
+        }
       ],
       workspaceHostScope: 'all',
       defaultHostId: 'runtime:env-1'
@@ -177,6 +262,47 @@ describe('addHostSectionRows', () => {
       type: 'host-header',
       key: 'host:runtime:env-1',
       label: 'env-1'
+    })
+  })
+
+  it('passes host kind and blocked compatibility through to the header row', () => {
+    const project = repo('runtime-project')
+    const rows = [repoHeader(project), item('runtime-wt', project)]
+
+    const sectioned = addHostSectionRows({
+      rows,
+      hostOptions: [
+        {
+          id: 'local',
+          kind: 'local',
+          label: 'Local Mac',
+          detail: 'This computer',
+          health: 'local'
+        },
+        {
+          id: 'runtime:env-1',
+          kind: 'runtime',
+          label: 'env-1',
+          detail: 'Orca server',
+          health: 'blocked',
+          compatibility: {
+            kind: 'blocked',
+            reason: 'server-too-old',
+            clientProtocolVersion: 5,
+            serverProtocolVersion: 1,
+            requiredServerProtocolVersion: 4
+          }
+        }
+      ],
+      workspaceHostScope: 'all',
+      defaultHostId: 'runtime:env-1'
+    })
+
+    expect(sectioned[0]).toMatchObject({
+      type: 'host-header',
+      kind: 'runtime',
+      health: 'blocked',
+      compatibility: { kind: 'blocked', reason: 'server-too-old' }
     })
   })
 })

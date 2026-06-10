@@ -38,3 +38,13 @@ export function getRuntimeEnvironmentIdForWorktree(
   }
   return state.settings?.activeRuntimeEnvironmentId?.trim() || null
 }
+
+export function getSettingsForWorktreeRuntimeOwner(
+  state: WorktreeRuntimeOwnerState,
+  worktreeId: string | null | undefined
+): Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> {
+  return {
+    ...state.settings,
+    activeRuntimeEnvironmentId: getRuntimeEnvironmentIdForWorktree(state, worktreeId)
+  }
+}

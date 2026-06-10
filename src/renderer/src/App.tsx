@@ -87,6 +87,11 @@ import {
 } from './lib/workspace-session'
 import { createSessionWriteSubscriber } from './lib/session-write-subscriber'
 import {
+  fetchWorkspaceSessionFromHosts,
+  patchWorkspaceSessionByHost,
+  persistWorkspaceSessionByHostSync
+} from './lib/workspace-session-host-persistence'
+import {
   getStartupErrorFallbackUI,
   hydratePersistedUIAfterStartupRead
 } from './lib/startup-ui-hydration'
@@ -731,7 +736,14 @@ function App(): React.JSX.Element {
           cancelled,
           hydratePersistedUI: actions.hydratePersistedUI
         })
-        const session = await window.api.session.get()
+        // Why: runtime-owned worktree slices live in per-host partitions.
+        // Repos were fetched above, so the known runtime hosts are derivable
+        // here; merge their slices into the unified session the hydrators
+        // expect. An unreadable host partition is skipped (fail-soft).
+        const session = await fetchWorkspaceSessionFromHosts(
+          window.api.session,
+          useAppStore.getState().repos
+        )
         await actions.fetchKeybindings()
         if (!cancelled) {
           actions.hydrateWorkspaceSession(session)
@@ -1023,9 +1035,12 @@ function App(): React.JSX.Element {
       store: useAppStore,
       shouldSchedulePersist: () => !isRemoteWorkspaceSnapshotApplyInProgress(),
       persist: ({ patch }) => {
-        const localWrite = window.api.session.patch(patch)
-        void localWrite
         const state = useAppStore.getState()
+        // Why: route each runtime host's worktree-scoped slice to its own
+        // partition; the returned promise is the local write so the
+        // remote-workspace upload chain below keeps its ordering.
+        const localWrite = patchWorkspaceSessionByHost(window.api.session, patch, state)
+        void localWrite
         const hydratedTargetIds = Array.from(state.remoteWorkspaceHydratedTargetIds).filter(
           (targetId) => state.remoteWorkspaceSyncStatusByTargetId[targetId]?.phase !== 'conflict'
         )
@@ -1080,7 +1095,11 @@ function App(): React.JSX.Element {
       // into the store via Zustand setters. The earlier read is only for the
       // gating flags and would miss those updates.
       const freshState = useAppStore.getState()
-      window.api.session.setSync(buildWorkspaceSessionPayload(freshState))
+      persistWorkspaceSessionByHostSync(
+        window.api.session,
+        buildWorkspaceSessionPayload(freshState),
+        freshState
+      )
       shutdownBuffersCaptured = true
     }
     window.addEventListener('beforeunload', captureAndFlush)
