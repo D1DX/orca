@@ -78,7 +78,7 @@ import {
 import {
   estimateRenderRowSize,
   extractWorktreeVirtualRowIndexes,
-  getActiveStickyHeaderIndexForScroll,
+  getActiveStickyIndexesForScroll,
   getStickyHeaderIndexes,
   getVirtualRowTransform,
   shouldUseHeaderTopSpacing,
@@ -1125,6 +1125,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   const stickyHeaderIndexesRef = useRef(stickyHeaderIndexes)
   stickyHeaderIndexesRef.current = stickyHeaderIndexes
   const activeStickyHeaderIndexRef = useRef<number | null>(null)
+  const activeStickyHostIndexRef = useRef<number | null>(null)
   const stickyRangeStartIndexRef = useRef(0)
   const activeWorktreeRowIndex = useMemo(
     () => renderRows.findIndex((row) => renderRowContainsWorktree(row, activeWorktreeId)),
@@ -1236,7 +1237,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     rangeExtractor: useCallback(
       (range: Range) => {
         stickyRangeStartIndexRef.current = range.startIndex
-        return extractWorktreeVirtualRowIndexes({ range, stickyHeaderIndexes })
+        return extractWorktreeVirtualRowIndexes({
+          range,
+          stickyHeaderIndexes,
+          rows: renderRowsRef.current
+        })
       },
       [stickyHeaderIndexes]
     ),
@@ -1456,13 +1461,15 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   )
   const totalSize = virtualizer.getTotalSize()
   const virtualItems = virtualizer.getVirtualItems()
-  const activeStickyHeaderIndex = getActiveStickyHeaderIndexForScroll({
+  const activeStickyIndexes = getActiveStickyIndexesForScroll({
+    rows: renderRows,
     rangeStartIndex: stickyRangeStartIndexRef.current,
     scrollOffset: virtualizer.scrollOffset ?? scrollOffsetRef.current,
     stickyHeaderIndexes,
     virtualItems
   })
-  activeStickyHeaderIndexRef.current = activeStickyHeaderIndex
+  activeStickyHeaderIndexRef.current = activeStickyIndexes.groupIndex
+  activeStickyHostIndexRef.current = activeStickyIndexes.hostIndex
 
   const measureMountedRows = useCallback(() => {
     virtualizer.elementsCache.forEach((element) => {
@@ -2881,7 +2888,9 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
             }
 
             if (row.type === 'host-header') {
-              const isActiveStickyHeader = activeStickyHeaderIndexRef.current === vItem.index
+              // Why: the host card is the outer hierarchy tier — it pins above
+              // group headers (z-30 vs z-20) and stays put while they hand off.
+              const isActiveStickyHost = activeStickyHostIndexRef.current === vItem.index
               const hasHeaderTopSpacing = shouldUseHeaderTopSpacing({
                 rows: renderRows,
                 index: vItem.index,
@@ -2894,18 +2903,18 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                   data-worktree-virtual-row
                   data-worktree-virtual-row-key={String(vItem.key)}
                   data-worktree-sticky-header=""
-                  data-worktree-sticky-header-active={isActiveStickyHeader ? '' : undefined}
+                  data-worktree-sticky-header-active={isActiveStickyHost ? '' : undefined}
                   data-index={vItem.index}
                   ref={measureVirtualRowElement}
                   className={cn(
                     'left-0 right-0',
-                    hasHeaderTopSpacing && !isActiveStickyHeader && 'pt-1',
-                    isActiveStickyHeader
-                      ? 'sticky -top-px z-20 bg-worktree-sidebar'
+                    hasHeaderTopSpacing && !isActiveStickyHost && 'pt-1',
+                    isActiveStickyHost
+                      ? 'sticky -top-px z-30 bg-worktree-sidebar'
                       : 'absolute top-0'
                   )}
                   style={
-                    isActiveStickyHeader
+                    isActiveStickyHost
                       ? undefined
                       : { transform: getVirtualRowTransform(vItem.start) }
                   }
@@ -2920,6 +2929,10 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
 
             if (row.type === 'header') {
               const isActiveStickyHeader = activeStickyHeaderIndexRef.current === vItem.index
+              // Why: when a host card is pinned, the group tier pins flush
+              // beneath it instead of at the viewport top.
+              const stickyTopClass =
+                activeStickyHostIndexRef.current !== null ? 'top-[35px]' : '-top-px'
               const hasHeaderTopSpacing = shouldUseHeaderTopSpacing({
                 rows: renderRows,
                 index: vItem.index,
@@ -2979,7 +2992,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                     // so the previous repo no longer stays pinned over it.
                     hasHeaderTopSpacing && !isActiveStickyHeader && 'pt-1',
                     isActiveStickyHeader
-                      ? 'sticky -top-px z-20 bg-worktree-sidebar'
+                      ? cn('sticky z-20 bg-worktree-sidebar', stickyTopClass)
                       : 'absolute top-0'
                   )}
                   style={
