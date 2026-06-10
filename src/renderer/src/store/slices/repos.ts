@@ -23,6 +23,12 @@ import { buildDismissedOnboardingFolderAgentStartup } from '@/lib/onboarding-fol
 import { markOnboardingProjectAdded } from '@/lib/onboarding-project-checklist'
 import { filterSetupScriptPromptDismissalsToValidRepos } from '@/lib/setup-script-prompt'
 import { translate } from '@/i18n/i18n'
+import {
+  getRepoExecutionHostId,
+  LOCAL_EXECUTION_HOST_ID,
+  parseExecutionHostId,
+  toRuntimeExecutionHostId
+} from '../../../../shared/execution-host'
 
 const ERROR_TOAST_DURATION = 60_000
 
@@ -107,6 +113,74 @@ function getKnownRepoWorktreeIds(state: AppState, projectId: string): string[] {
   return [...ids]
 }
 
+function getRuntimeTargetHostId(
+  target: ReturnType<typeof getActiveRuntimeTarget>
+): ReturnType<typeof toRuntimeExecutionHostId> | typeof LOCAL_EXECUTION_HOST_ID {
+  return target.kind === 'environment'
+    ? toRuntimeExecutionHostId(target.environmentId)
+    : LOCAL_EXECUTION_HOST_ID
+}
+
+function repoWithFetchedOwner(repo: Repo, target: ReturnType<typeof getActiveRuntimeTarget>): Repo {
+  if (repo.connectionId) {
+    return { ...repo, executionHostId: getRepoExecutionHostId(repo) }
+  }
+  return { ...repo, executionHostId: getRuntimeTargetHostId(target) }
+}
+
+function mergeFetchedReposForHost(
+  previous: readonly Repo[],
+  fetched: Repo[],
+  hostId: string
+): Repo[] {
+  const fetchedIds = new Set(fetched.map((repo) => repo.id))
+  const preserved = previous.filter((repo) => {
+    const existingHostId = getRepoExecutionHostId(repo)
+    return existingHostId !== hostId || fetchedIds.has(repo.id)
+  })
+  const preservedById = new Map(preserved.map((repo) => [repo.id, repo]))
+  const merged = [...preserved]
+  for (const repo of fetched) {
+    const existingIndex = merged.findIndex((entry) => entry.id === repo.id)
+    if (existingIndex === -1) {
+      merged.push(repo)
+      continue
+    }
+    merged[existingIndex] = repo
+  }
+  return reconcileFetchedRepos(
+    previous,
+    merged.filter((repo) => preservedById.has(repo.id) || fetchedIds.has(repo.id))
+  )
+}
+
+function settingsForRepoOwner(state: Pick<AppState, 'repos' | 'settings'>, repoId: string) {
+  const repo = state.repos.find((entry) => entry.id === repoId)
+  if (!repo) {
+    return state.settings
+  }
+  if (!repo.executionHostId && !repo.connectionId) {
+    return state.settings
+  }
+  const parsed = parseExecutionHostId(getRepoExecutionHostId(repo))
+  if (parsed?.kind === 'runtime') {
+    return state.settings
+      ? { ...state.settings, activeRuntimeEnvironmentId: parsed.environmentId }
+      : ({ activeRuntimeEnvironmentId: parsed.environmentId } as AppState['settings'])
+  }
+  if (parsed?.kind === 'local' && state.settings?.activeRuntimeEnvironmentId) {
+    return { ...state.settings, activeRuntimeEnvironmentId: null }
+  }
+  if (parsed?.kind !== 'ssh') {
+    return state.settings
+  }
+  // Why: SSH repos are owned through local IPC/SSH plumbing. Existing repo
+  // mutations must not follow whichever runtime server is currently focused.
+  return state.settings
+    ? { ...state.settings, activeRuntimeEnvironmentId: null }
+    : ({ activeRuntimeEnvironmentId: null } as AppState['settings'])
+}
+
 export type RepoSlice = {
   repos: Repo[]
   projectGroups: ProjectGroup[]
@@ -155,7 +229,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
   fetchRepos: async () => {
     try {
       const target = getActiveRuntimeTarget(get().settings)
-      const repos =
+      const fetchedRepos =
         target.kind === 'local'
           ? await window.api.repos.list()
           : (
@@ -169,9 +243,11 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
                 { timeoutMs: 15_000 }
               )
             ).repos
+      const hostId = getRuntimeTargetHostId(target)
+      const repos = fetchedRepos.map((repo) => repoWithFetchedOwner(repo, target))
       set((s) => {
-        const validRepoIds = new Set(repos.map((repo) => repo.id))
-        const reconciledRepos = reconcileFetchedRepos(s.repos, repos)
+        const reconciledRepos = mergeFetchedReposForHost(s.repos, repos, hostId)
+        const validRepoIds = new Set(reconciledRepos.map((repo) => repo.id))
         return {
           repos: reconciledRepos,
           activeRepoId: s.activeRepoId && validRepoIds.has(s.activeRepoId) ? s.activeRepoId : null,
@@ -285,9 +361,12 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
       return result
     } catch (err) {
       console.error('Failed to import nested repos:', err)
-      toast.error(translate("auto.store.slices.repos.6d3318e813", "Failed to import repositories"), {
-        description: err instanceof Error ? err.message : String(err)
-      })
+      toast.error(
+        translate('auto.store.slices.repos.6d3318e813', 'Failed to import repositories'),
+        {
+          description: err instanceof Error ? err.message : String(err)
+        }
+      )
       return null
     }
   },
@@ -381,7 +460,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
 
   moveProjectToGroup: async (projectId, groupId, order) => {
     try {
-      const target = getActiveRuntimeTarget(get().settings)
+      const target = getActiveRuntimeTarget(settingsForRepoOwner(get(), projectId))
       const moved =
         target.kind === 'local'
           ? await window.api.projectGroups.moveProject({
@@ -400,7 +479,8 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
       if (!moved) {
         return false
       }
-      set((s) => ({ repos: s.repos.map((repo) => (repo.id === projectId ? moved : repo)) }))
+      const ownedMoved = repoWithFetchedOwner(moved, target)
+      set((s) => ({ repos: s.repos.map((repo) => (repo.id === projectId ? ownedMoved : repo)) }))
       return true
     } catch (err) {
       console.error('Failed to move repo to group:', err)
@@ -442,6 +522,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
         openModal('confirm-non-git-folder', { folderPath: path })
         return null
       }
+      repo = repoWithFetchedOwner(repo, target)
       const alreadyAdded = get().repos.some((r) => r.id === repo.id)
       if (alreadyAdded) {
         get().clearOrcaHookTrustForRepo(repo.id)
@@ -453,18 +534,25 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
         return { repos: [...s.repos, repo] }
       })
       if (alreadyAdded) {
-        toast.info(translate("auto.store.slices.repos.a8e4b3af5b", "Project already added"), { description: repo.displayName })
-      } else {
-        toast.success(isGitRepoKind(repo) ? translate("auto.store.slices.repos.8bb3ad7935", "Project added") : translate("auto.store.slices.repos.90d129b48b", "Folder added"), {
+        toast.info(translate('auto.store.slices.repos.a8e4b3af5b', 'Project already added'), {
           description: repo.displayName
         })
+      } else {
+        toast.success(
+          isGitRepoKind(repo)
+            ? translate('auto.store.slices.repos.8bb3ad7935', 'Project added')
+            : translate('auto.store.slices.repos.90d129b48b', 'Folder added'),
+          {
+            description: repo.displayName
+          }
+        )
       }
       return repo
     } catch (err) {
       console.error('Failed to add project:', err)
       const message = err instanceof Error ? err.message : String(err)
       const duration = ERROR_TOAST_DURATION
-      toast.error(translate("auto.store.slices.repos.c6e022ddfc", "Failed to add project"), {
+      toast.error(translate('auto.store.slices.repos.c6e022ddfc', 'Failed to add project'), {
         description: message,
         duration
       })
@@ -477,7 +565,12 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
     if (target.kind !== 'local') {
       // Why: OS folder pickers return client-local paths. Remote environments
       // need an explicit server path, which the Add Project dialog handles.
-      toast.error(translate("auto.store.slices.repos.e649269645", "Use a server path to add projects from a remote runtime."))
+      toast.error(
+        translate(
+          'auto.store.slices.repos.e649269645',
+          'Use a server path to add projects from a remote runtime.'
+        )
+      )
       return null
     }
     const path = await window.api.repos.pickFolder()
@@ -523,14 +616,17 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
     } catch (err) {
       console.error('Failed to add folder:', err)
       const message = err instanceof Error ? err.message : String(err)
-      toast.error(translate("auto.store.slices.repos.b7e14472ae", "Failed to add folder"), { description: message, duration: ERROR_TOAST_DURATION })
+      toast.error(translate('auto.store.slices.repos.b7e14472ae', 'Failed to add folder'), {
+        description: message,
+        duration: ERROR_TOAST_DURATION
+      })
       return null
     }
   },
 
   removeProject: async (projectId) => {
     try {
-      const target = getActiveRuntimeTarget(get().settings)
+      const target = getActiveRuntimeTarget(settingsForRepoOwner(get(), projectId))
       await (target.kind === 'local'
         ? window.api.repos.remove({ repoId: projectId })
         : callRuntimeRpc(target, 'repo.rm', { repo: projectId }, { timeoutMs: 15_000 }))
@@ -662,7 +758,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
     const applyRepoUpdate = async () => {
       try {
         const sanitizedUpdates = sanitizeRepoUpdate(updates)
-        const target = getActiveRuntimeTarget(get().settings)
+        const target = getActiveRuntimeTarget(settingsForRepoOwner(get(), projectId))
         const updatedRepo =
           target.kind === 'local'
             ? await window.api.repos.update({ repoId: projectId, updates: sanitizedUpdates })
@@ -680,7 +776,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
               return r
             }
             if (updatedRepo) {
-              return updatedRepo
+              return repoWithFetchedOwner(updatedRepo, target)
             }
             if (sanitizedUpdates.sourceControlAi === null) {
               const { sourceControlAi: _sourceControlAi, ...repoWithoutSourceControlAi } = r

@@ -407,6 +407,7 @@ export function getDefaultUIState(): PersistedUIState {
     projectOrderBy: 'manual',
     showActiveOnly: false,
     hideSleepingWorkspaces: DEFAULT_HIDE_SLEEPING_WORKSPACES,
+    workspaceHostScope: 'all',
     showSleepingWorkspaces: DEFAULT_SHOW_SLEEPING_WORKSPACES,
     hideDefaultBranchWorkspace: false,
     showDotfilesByWorktree: {},

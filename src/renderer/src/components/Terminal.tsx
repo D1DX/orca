@@ -95,6 +95,7 @@ import { useContextualTour } from './contextual-tours/use-contextual-tour'
 import { openTabBarEntry, type TabCreateEntryArgs } from './tab-bar/tab-create-entry-action'
 import { closeTerminalTab } from './terminal/terminal-tab-actions'
 import { translate } from '@/i18n/i18n'
+import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 
 const EditorPanel = lazy(() => import('./editor/EditorPanel'))
 
@@ -141,6 +142,10 @@ function isPinnedVisibleTab(
   visibleId: string
 ): boolean {
   return findUnifiedTabByVisibleId(state, worktreeId, visibleId)?.isPinned === true
+}
+
+function getActiveWorktreeRuntimeEnvironmentId(worktreeId: string | null): string | null {
+  return getRuntimeEnvironmentIdForWorktree(useAppStore.getState(), worktreeId)
 }
 
 function isPinnedActiveEditorTab(
@@ -196,9 +201,6 @@ function Terminal(): React.JSX.Element | null {
   const closeTab = useAppStore((s) => s.closeTab)
   const setActiveTab = useAppStore((s) => s.setActiveTab)
   const setActiveWorktree = useAppStore((s) => s.setActiveWorktree)
-  const activeRuntimeEnvironmentId = useAppStore(
-    (s) => s.settings?.activeRuntimeEnvironmentId ?? null
-  )
   const setTabCustomTitle = useAppStore((s) => s.setTabCustomTitle)
   const setTabColor = useAppStore((s) => s.setTabColor)
   const consumeSuppressedPtyExit = useAppStore((s) => s.consumeSuppressedPtyExit)
@@ -546,7 +548,12 @@ function Terminal(): React.JSX.Element | null {
         releaseCloseDialogGuardAfterDebounce()
         return
       }
-      toast.error(translate("auto.components.Terminal.a2a279b32a", "Save timed out or failed. Fix errors before closing."))
+      toast.error(
+        translate(
+          'auto.components.Terminal.a2a279b32a',
+          'Save timed out or failed. Fix errors before closing.'
+        )
+      )
       setSaveDialogFileId(fileId)
       // Why: a genuine timeout leaves the user back on the same dialog, so
       // release the guard immediately — a new click here is a deliberate
@@ -740,7 +747,7 @@ function Terminal(): React.JSX.Element | null {
     }
     // Why: in the paired web client, host session-tabs are authoritative.
     // Creating a local fallback races the host's initial terminal and duplicates tabs.
-    if (isWebRuntimeSessionActive(activeRuntimeEnvironmentId)) {
+    if (isWebRuntimeSessionActive(getActiveWorktreeRuntimeEnvironmentId(activeWorktreeId))) {
       return
     }
 
@@ -757,13 +764,7 @@ function Terminal(): React.JSX.Element | null {
     // activity and reshuffle the sidebar. Explicit "New Tab" actions
     // (handleNewTab below) still bump normally.
     createTab(activeWorktreeId, undefined, undefined, { pendingActivationSpawn: true })
-  }, [
-    workspaceSessionReady,
-    activeWorktreeId,
-    activeRuntimeEnvironmentId,
-    createTab,
-    reconcileWorktreeTabModel
-  ])
+  }, [workspaceSessionReady, activeWorktreeId, createTab, reconcileWorktreeTabModel])
 
   const handleNewTab = useCallback(
     (shellOverride?: string) => {
@@ -777,10 +778,11 @@ function Terminal(): React.JSX.Element | null {
         void openNewTerminalTabInActiveWorkspace(targetGroupId)
         return
       }
-      if (isWebRuntimeSessionActive(activeRuntimeEnvironmentId)) {
+      const runtimeEnvironmentId = getActiveWorktreeRuntimeEnvironmentId(activeWorktreeId)
+      if (isWebRuntimeSessionActive(runtimeEnvironmentId)) {
         void createWebRuntimeSessionTerminal({
           worktreeId: activeWorktreeId,
-          environmentId: activeRuntimeEnvironmentId,
+          environmentId: runtimeEnvironmentId,
           command: shellOverride,
           activate: true
         })
@@ -818,7 +820,6 @@ function Terminal(): React.JSX.Element | null {
       focusTerminalTabSurface(newTab.id)
     },
     [
-      activeRuntimeEnvironmentId,
       activeWorktreeId,
       createTab,
       openNewTerminalTabInActiveWorkspace,
@@ -852,24 +853,20 @@ function Terminal(): React.JSX.Element | null {
       return
     }
     const defaultUrl = useAppStore.getState().browserDefaultUrl ?? 'about:blank'
-    if (isWebRuntimeSessionActive(activeRuntimeEnvironmentId)) {
+    const runtimeEnvironmentId = getActiveWorktreeRuntimeEnvironmentId(activeWorktreeId)
+    if (isWebRuntimeSessionActive(runtimeEnvironmentId)) {
       void createWebRuntimeSessionBrowserTab({
         worktreeId: activeWorktreeId,
-        environmentId: activeRuntimeEnvironmentId,
+        environmentId: runtimeEnvironmentId,
         url: defaultUrl
       })
       return
     }
     createBrowserTab(activeWorktreeId, defaultUrl, {
-      title: translate("auto.components.Terminal.37da0d736f", "New Browser Tab"),
+      title: translate('auto.components.Terminal.37da0d736f', 'New Browser Tab'),
       focusAddressBar: true
     })
-  }, [
-    activeRuntimeEnvironmentId,
-    activeWorktreeId,
-    createBrowserTab,
-    openNewBrowserTabInActiveWorkspace
-  ])
+  }, [activeWorktreeId, createBrowserTab, openNewBrowserTabInActiveWorkspace])
 
   const handleOpenEntry = useCallback(async (args: TabCreateEntryArgs) => {
     await openTabBarEntry(args)
@@ -886,10 +883,11 @@ function Terminal(): React.JSX.Element | null {
       if (!source) {
         return
       }
-      if (isWebRuntimeSessionActive(activeRuntimeEnvironmentId)) {
+      const runtimeEnvironmentId = getActiveWorktreeRuntimeEnvironmentId(activeWorktreeId)
+      if (isWebRuntimeSessionActive(runtimeEnvironmentId)) {
         void createWebRuntimeSessionBrowserTab({
           worktreeId: activeWorktreeId,
-          environmentId: activeRuntimeEnvironmentId,
+          environmentId: runtimeEnvironmentId,
           url: source.url,
           profileId: source.sessionProfileId
         })
@@ -900,7 +898,7 @@ function Terminal(): React.JSX.Element | null {
         sessionProfileId: source.sessionProfileId
       })
     },
-    [activeRuntimeEnvironmentId, activeWorktreeId, createBrowserTab]
+    [activeWorktreeId, createBrowserTab]
   )
 
   const handleNewFile = useCallback(async () => {
@@ -933,11 +931,12 @@ function Terminal(): React.JSX.Element | null {
       if (isPinnedVisibleTab(state, owningWorktreeId, tabId)) {
         return
       }
-      if (isWebRuntimeSessionActive(activeRuntimeEnvironmentId)) {
+      const runtimeEnvironmentId = getActiveWorktreeRuntimeEnvironmentId(owningWorktreeId)
+      if (isWebRuntimeSessionActive(runtimeEnvironmentId)) {
         void closeWebRuntimeSessionTab({
           worktreeId: owningWorktreeId,
           tabId,
-          environmentId: activeRuntimeEnvironmentId
+          environmentId: runtimeEnvironmentId
         })
         return
       }
@@ -973,7 +972,6 @@ function Terminal(): React.JSX.Element | null {
       closeBrowserTab(tabId)
     },
     [
-      activeRuntimeEnvironmentId,
       closeBrowserTab,
       setActiveBrowserTab,
       setActiveFile,
@@ -1011,14 +1009,15 @@ function Terminal(): React.JSX.Element | null {
         if (unifiedTab?.isPinned) {
           continue
         }
+        const runtimeEnvironmentId = getActiveWorktreeRuntimeEnvironmentId(activeWorktreeId)
         if (
-          isWebRuntimeSessionActive(activeRuntimeEnvironmentId) &&
+          isWebRuntimeSessionActive(runtimeEnvironmentId) &&
           (unifiedTab?.contentType === 'terminal' || unifiedTab?.contentType === 'browser')
         ) {
           void closeWebRuntimeSessionTab({
             worktreeId: activeWorktreeId,
             tabId: unifiedTab.contentType === 'browser' ? unifiedTab.id : unifiedTab.entityId,
-            environmentId: activeRuntimeEnvironmentId
+            environmentId: runtimeEnvironmentId
           })
           continue
         }
@@ -1044,14 +1043,7 @@ function Terminal(): React.JSX.Element | null {
         queueEditorCloseRequests(dirtyFileIds)
       }
     },
-    [
-      activeRuntimeEnvironmentId,
-      activeWorktreeId,
-      closeBrowserTab,
-      closeFile,
-      closeTab,
-      queueEditorCloseRequests
-    ]
+    [activeWorktreeId, closeBrowserTab, closeFile, closeTab, queueEditorCloseRequests]
   )
 
   const handleCloseTabsToRight = useCallback(
@@ -1074,14 +1066,15 @@ function Terminal(): React.JSX.Element | null {
         if (unifiedTab?.isPinned) {
           continue
         }
+        const runtimeEnvironmentId = getActiveWorktreeRuntimeEnvironmentId(activeWorktreeId)
         if (
-          isWebRuntimeSessionActive(activeRuntimeEnvironmentId) &&
+          isWebRuntimeSessionActive(runtimeEnvironmentId) &&
           (unifiedTab?.contentType === 'terminal' || unifiedTab?.contentType === 'browser')
         ) {
           void closeWebRuntimeSessionTab({
             worktreeId: activeWorktreeId,
             tabId: unifiedTab.contentType === 'browser' ? unifiedTab.id : unifiedTab.entityId,
-            environmentId: activeRuntimeEnvironmentId
+            environmentId: runtimeEnvironmentId
           })
           continue
         }
@@ -1107,14 +1100,7 @@ function Terminal(): React.JSX.Element | null {
         queueEditorCloseRequests(dirtyFileIds)
       }
     },
-    [
-      activeRuntimeEnvironmentId,
-      activeWorktreeId,
-      closeBrowserTab,
-      closeFile,
-      closeTab,
-      queueEditorCloseRequests
-    ]
+    [activeWorktreeId, closeBrowserTab, closeFile, closeTab, queueEditorCloseRequests]
   )
 
   const handleCloseAllFiles = useCallback(() => {
@@ -1139,17 +1125,18 @@ function Terminal(): React.JSX.Element | null {
 
   const handleActivateTab = useCallback(
     (tabId: string) => {
-      if (activeWorktreeId && isWebRuntimeSessionActive(activeRuntimeEnvironmentId)) {
+      const runtimeEnvironmentId = getActiveWorktreeRuntimeEnvironmentId(activeWorktreeId)
+      if (activeWorktreeId && isWebRuntimeSessionActive(runtimeEnvironmentId)) {
         void activateWebRuntimeSessionTab({
           worktreeId: activeWorktreeId,
           tabId,
-          environmentId: activeRuntimeEnvironmentId
+          environmentId: runtimeEnvironmentId
         })
       }
       setActiveTab(tabId)
       setActiveTabType('terminal')
     },
-    [activeRuntimeEnvironmentId, activeWorktreeId, setActiveTab, setActiveTabType]
+    [activeWorktreeId, setActiveTab, setActiveTabType]
   )
 
   const handleTogglePaneExpand = useCallback(
@@ -1168,17 +1155,18 @@ function Terminal(): React.JSX.Element | null {
 
   const handleActivateBrowserTab = useCallback(
     (tabId: string) => {
-      if (activeWorktreeId && isWebRuntimeSessionActive(activeRuntimeEnvironmentId)) {
+      const runtimeEnvironmentId = getActiveWorktreeRuntimeEnvironmentId(activeWorktreeId)
+      if (activeWorktreeId && isWebRuntimeSessionActive(runtimeEnvironmentId)) {
         void activateWebRuntimeSessionTab({
           worktreeId: activeWorktreeId,
           tabId,
-          environmentId: activeRuntimeEnvironmentId
+          environmentId: runtimeEnvironmentId
         })
       }
       setActiveBrowserTab(tabId)
       setActiveTabType('browser')
     },
-    [activeRuntimeEnvironmentId, activeWorktreeId, setActiveBrowserTab, setActiveTabType]
+    [activeWorktreeId, setActiveBrowserTab, setActiveTabType]
   )
 
   // Keyboard shortcuts
@@ -1292,7 +1280,12 @@ function Terminal(): React.JSX.Element | null {
         if (floatingWorkspaceFocused) {
           void createFloatingWorkspaceMarkdownTab(useAppStore.getState()).catch((err) => {
             toast.error(
-              err instanceof Error ? err.message : translate("auto.components.Terminal.f0600556b3", "Failed to create untitled markdown file.")
+              err instanceof Error
+                ? err.message
+                : translate(
+                    'auto.components.Terminal.f0600556b3',
+                    'Failed to create untitled markdown file.'
+                  )
             )
           })
           return
@@ -1806,11 +1799,12 @@ function Terminal(): React.JSX.Element | null {
             })}
           </div>
 
-          {renderedActiveWorktreeId && activeTabType === "editor" && worktreeFiles.length > 0 && (
+          {renderedActiveWorktreeId && activeTabType === 'editor' && worktreeFiles.length > 0 && (
             <Suspense
               fallback={
                 <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
-                  {translate("auto.components.Terminal.5c1d2a32bb", "Loading editor...")}</div>
+                  {translate('auto.components.Terminal.5c1d2a32bb', 'Loading editor...')}
+                </div>
               }
             >
               <EditorPanel />
@@ -1830,20 +1824,32 @@ function Terminal(): React.JSX.Element | null {
       >
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle className="text-sm">{translate("auto.components.Terminal.21295c6b8c", "Unsaved Changes")}</DialogTitle>
+            <DialogTitle className="text-sm">
+              {translate('auto.components.Terminal.21295c6b8c', 'Unsaved Changes')}
+            </DialogTitle>
             <DialogDescription className="text-xs">
               {saveDialogFile
-                ? translate("auto.components.Terminal.61ed600d29", "\"{{value0}}\" has unsaved changes. Do you want to save before closing?", { value0: basename(saveDialogFile.relativePath) })
-                : translate("auto.components.Terminal.46e08bc5c8", "This file has unsaved changes.")}
+                ? translate(
+                    'auto.components.Terminal.61ed600d29',
+                    '"{{value0}}" has unsaved changes. Do you want to save before closing?',
+                    { value0: basename(saveDialogFile.relativePath) }
+                  )
+                : translate(
+                    'auto.components.Terminal.46e08bc5c8',
+                    'This file has unsaved changes.'
+                  )}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2">
             <Button type="button" variant="outline" size="sm" onClick={handleSaveDialogCancel}>
-              {translate("auto.components.Terminal.f82e9f02df", "Cancel")}</Button>
+              {translate('auto.components.Terminal.f82e9f02df', 'Cancel')}
+            </Button>
             <Button type="button" variant="outline" size="sm" onClick={handleSaveDialogDiscard}>
-              {translate("auto.components.Terminal.0037b21794", "Don't Save")}</Button>
+              {translate('auto.components.Terminal.0037b21794', "Don't Save")}
+            </Button>
             <Button type="button" size="sm" onClick={handleSaveDialogSave}>
-              {translate("auto.components.Terminal.cd51e28d8b", "Save")}</Button>
+              {translate('auto.components.Terminal.cd51e28d8b', 'Save')}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1859,9 +1865,15 @@ function Terminal(): React.JSX.Element | null {
       >
         <DialogContent className="max-w-sm" showCloseButton={false}>
           <DialogHeader>
-            <DialogTitle className="text-sm">{translate("auto.components.Terminal.2fa9c69ff3", "Close Window?")}</DialogTitle>
+            <DialogTitle className="text-sm">
+              {translate('auto.components.Terminal.2fa9c69ff3', 'Close Window?')}
+            </DialogTitle>
             <DialogDescription className="text-xs">
-              {translate("auto.components.Terminal.7958465754", "There are local terminals with running processes. Close the window anyway?")}</DialogDescription>
+              {translate(
+                'auto.components.Terminal.7958465754',
+                'There are local terminals with running processes. Close the window anyway?'
+              )}
+            </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2">
             <Button
@@ -1870,7 +1882,8 @@ function Terminal(): React.JSX.Element | null {
               size="sm"
               onClick={() => setWindowCloseDialogOpen(false)}
             >
-              {translate("auto.components.Terminal.f82e9f02df", "Cancel")}</Button>
+              {translate('auto.components.Terminal.f82e9f02df', 'Cancel')}
+            </Button>
             <Button
               type="button"
               variant="destructive"
@@ -1881,7 +1894,8 @@ function Terminal(): React.JSX.Element | null {
                 window.api.ui.confirmWindowClose()
               }}
             >
-              {translate("auto.components.Terminal.73768427cf", "Close")}</Button>
+              {translate('auto.components.Terminal.73768427cf', 'Close')}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

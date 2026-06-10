@@ -4,6 +4,7 @@ import { useAppStore } from '@/store'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip'
 import SidebarWorkspaceOptionsMenu from './SidebarWorkspaceOptionsMenu'
+import SidebarHostScopeStrip from './SidebarHostScopeStrip'
 import WorkspaceKanbanDrawer from './WorkspaceKanbanDrawer'
 import { useShortcutLabel } from '@/hooks/useShortcutLabel'
 import { openWorkspaceCreationComposerWithTourHandoff } from '../contextual-tours/workspace-creation-tour-handoff'
@@ -166,6 +167,7 @@ const SidebarHeader = React.memo(function SidebarHeader() {
           </Tooltip>
         </div>
       </div>
+      <SidebarHostScopeStrip />
       <WorkspaceKanbanDrawer
         open={workspaceBoardOpen}
         preserveOpenForMenu={workspaceBoardMenuOpen}

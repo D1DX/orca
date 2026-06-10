@@ -472,6 +472,57 @@ describe('createBrowserSlice runtime guard', () => {
         source: null
       }
     ])
+    expect(store.getState().browserSessionProfilesByHostId['runtime:env-1']).toEqual([
+      {
+        id: 'default',
+        scope: 'default',
+        partition: 'persist:orca-default',
+        label: 'Default',
+        source: null
+      }
+    ])
+  })
+
+  it('keeps browser profile lists separate per host', async () => {
+    const store = createTestStore()
+    runtimeEnvironmentCall.mockResolvedValueOnce({
+      id: 'rpc-remote',
+      ok: true,
+      result: {
+        profiles: [
+          {
+            id: 'remote-default',
+            scope: 'default',
+            partition: 'persist:orca-remote',
+            label: 'Remote Default',
+            source: null
+          }
+        ]
+      },
+      _meta: { runtimeId: 'runtime-remote' }
+    })
+    store.setState({ settings: settingsWithRuntime('env-1') })
+
+    await store.getState().fetchBrowserSessionProfiles()
+
+    mockApi.browser.sessionListProfiles.mockResolvedValueOnce([
+      {
+        id: 'local-default',
+        scope: 'default',
+        partition: 'persist:orca-local',
+        label: 'Local Default',
+        source: null
+      }
+    ])
+    store.setState({ settings: { activeRuntimeEnvironmentId: null } as AppState['settings'] })
+
+    await store.getState().fetchBrowserSessionProfiles()
+
+    expect(store.getState().browserSessionProfilesByHostId['runtime:env-1']?.[0]?.id).toBe(
+      'remote-default'
+    )
+    expect(store.getState().browserSessionProfilesByHostId.local?.[0]?.id).toBe('local-default')
+    expect(store.getState().browserSessionProfiles[0]?.id).toBe('local-default')
   })
 
   it('does not import local browser cookies while a runtime environment is active', async () => {

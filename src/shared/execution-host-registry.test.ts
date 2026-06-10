@@ -1,0 +1,134 @@
+import { describe, expect, it } from 'vitest'
+import { MIN_COMPATIBLE_RUNTIME_SERVER_VERSION, RUNTIME_PROTOCOL_VERSION } from './protocol-version'
+import { buildExecutionHostRegistry } from './execution-host-registry'
+
+describe('execution host registry', () => {
+  it('returns only the local host for local-only state', () => {
+    expect(
+      buildExecutionHostRegistry({
+        repos: [{ connectionId: null }],
+        settings: { activeRuntimeEnvironmentId: null }
+      })
+    ).toEqual([
+      {
+        id: 'local',
+        kind: 'local',
+        label: 'Local Mac',
+        detail: 'This computer',
+        health: 'local'
+      }
+    ])
+  })
+
+  it('includes saved and repo-derived SSH hosts with connection health', () => {
+    const hosts = buildExecutionHostRegistry({
+      repos: [{ connectionId: 'repo-ssh' }],
+      settings: { activeRuntimeEnvironmentId: null },
+      sshTargetLabels: new Map([['saved-ssh', 'Saved SSH']]),
+      sshConnectionStates: new Map([
+        [
+          'repo-ssh',
+          {
+            targetId: 'repo-ssh',
+            status: 'connected',
+            error: null,
+            reconnectAttempt: 0
+          }
+        ],
+        [
+          'saved-ssh',
+          {
+            targetId: 'saved-ssh',
+            status: 'auth-failed',
+            error: 'Permission denied',
+            reconnectAttempt: 1
+          }
+        ]
+      ])
+    })
+
+    expect(hosts).toMatchObject([
+      { id: 'local', health: 'local' },
+      { id: 'ssh:saved-ssh', label: 'Saved SSH', health: 'error', connectionStatus: 'auth-failed' },
+      { id: 'ssh:repo-ssh', label: 'repo-ssh', health: 'available', connectionStatus: 'connected' }
+    ])
+  })
+
+  it('adds saved runtime environments and preserves compatibility state per host', () => {
+    const hosts = buildExecutionHostRegistry({
+      repos: [],
+      settings: { activeRuntimeEnvironmentId: 'old-server' },
+      runtimeEnvironments: [{ id: 'builder', name: 'Linux Builder' }],
+      runtimeStatusByEnvironmentId: new Map([
+        [
+          'builder',
+          {
+            appVersion: '1.8.0',
+            status: {
+              runtimeId: 'runtime-builder',
+              rendererGraphEpoch: 1,
+              graphStatus: 'ready',
+              authoritativeWindowId: 1,
+              liveTabCount: 0,
+              liveLeafCount: 0,
+              runtimeProtocolVersion: RUNTIME_PROTOCOL_VERSION,
+              minCompatibleRuntimeClientVersion: 1,
+              capabilities: ['terminal.binary-stream.v1'],
+              hostPlatform: 'linux'
+            }
+          }
+        ],
+        [
+          'old-server',
+          {
+            appVersion: '1.6.0',
+            status: {
+              runtimeId: 'runtime-old',
+              rendererGraphEpoch: 1,
+              graphStatus: 'ready',
+              authoritativeWindowId: 1,
+              liveTabCount: 0,
+              liveLeafCount: 0,
+              runtimeProtocolVersion: MIN_COMPATIBLE_RUNTIME_SERVER_VERSION - 1,
+              minCompatibleRuntimeClientVersion: 1,
+              capabilities: []
+            }
+          }
+        ]
+      ])
+    })
+
+    expect(hosts).toMatchObject([
+      { id: 'local', health: 'local' },
+      {
+        id: 'runtime:builder',
+        label: 'Linux Builder',
+        health: 'available',
+        appVersion: '1.8.0',
+        protocolVersion: RUNTIME_PROTOCOL_VERSION,
+        capabilities: ['terminal.binary-stream.v1'],
+        platform: 'linux',
+        compatibility: { kind: 'ok' }
+      },
+      {
+        id: 'runtime:old-server',
+        label: 'old-server',
+        health: 'blocked',
+        appVersion: '1.6.0',
+        compatibility: { kind: 'blocked', reason: 'server-too-old' }
+      }
+    ])
+  })
+
+  it('includes runtime hosts from repo ownership even when they are not focused', () => {
+    const hosts = buildExecutionHostRegistry({
+      repos: [{ connectionId: null, executionHostId: 'runtime:env-2' }],
+      settings: { activeRuntimeEnvironmentId: null }
+    })
+
+    expect(hosts).toMatchObject([
+      { id: 'local', health: 'local' },
+      { id: 'runtime:env-2', kind: 'runtime', label: 'env-2', health: 'available' }
+    ])
+  })
+})

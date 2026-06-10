@@ -38,6 +38,11 @@ import type {
 } from '../../../../shared/runtime-types'
 import { createBrowserUuid } from '@/lib/browser-uuid'
 import { translate } from '@/i18n/i18n'
+import {
+  getSettingsFocusedExecutionHostId,
+  type ExecutionHostId
+} from '../../../../shared/execution-host'
+import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 
 type CreateBrowserTabOptions = {
   activate?: boolean
@@ -157,6 +162,7 @@ export type BrowserSlice = {
   hydrateBrowserSession: (session: WorkspaceSessionState) => void
   switchBrowserTabProfile: (workspaceId: string, profileId: string | null) => void
   browserSessionProfiles: BrowserSessionProfile[]
+  browserSessionProfilesByHostId: Partial<Record<ExecutionHostId, BrowserSessionProfile[]>>
   browserSessionImportState: {
     profileId: string
     status: 'idle' | 'importing' | 'success' | 'error'
@@ -189,6 +195,7 @@ export type BrowserSlice = {
   addBrowserHistoryEntry: (url: string, title: string) => void
   clearBrowserHistory: () => void
   defaultBrowserSessionProfileId: string | null
+  defaultBrowserSessionProfileIdByHostId: Partial<Record<ExecutionHostId, string | null>>
   setDefaultBrowserSessionProfileId: (profileId: string | null) => void
 }
 
@@ -223,6 +230,23 @@ function normalizeBrowserTitle(title: string | null | undefined, url: string): s
 
 function isRuntimeEnvironmentActive(state: AppState): boolean {
   return Boolean(state.settings?.activeRuntimeEnvironmentId?.trim())
+}
+
+function getBrowserSettingsHostId(state: Pick<AppState, 'settings'>): ExecutionHostId {
+  return getSettingsFocusedExecutionHostId(state.settings)
+}
+
+function profileListByHostUpdate(
+  state: Pick<AppState, 'browserSessionProfilesByHostId' | 'settings'>,
+  profiles: BrowserSessionProfile[]
+): Partial<BrowserSlice> {
+  return {
+    browserSessionProfiles: profiles,
+    browserSessionProfilesByHostId: {
+      ...state.browserSessionProfilesByHostId,
+      [getBrowserSettingsHostId(state)]: profiles
+    }
+  }
 }
 
 function closeRemoteBrowserPageInOwningEnvironment(
@@ -298,7 +322,7 @@ function mirrorWorkspaceFromActivePage(
       activePageId: null,
       pageIds: pages.map((page) => page.id),
       url: 'about:blank',
-      title: translate("auto.store.slices.browser.08fc23631d", "Browser"),
+      title: translate('auto.store.slices.browser.08fc23631d', 'Browser'),
       loading: false,
       faviconUrl: null,
       canGoBack: false,
@@ -412,12 +436,20 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
   pendingAddressBarFocusByTabId: {},
   pendingAddressBarFocusByPageId: {},
   browserSessionProfiles: [],
+  browserSessionProfilesByHostId: {},
   browserSessionImportState: null,
   browserUrlHistory: [],
   defaultBrowserSessionProfileId: null,
+  defaultBrowserSessionProfileIdByHostId: {},
 
   setDefaultBrowserSessionProfileId: (profileId) => {
-    set({ defaultBrowserSessionProfileId: profileId })
+    set((s) => ({
+      defaultBrowserSessionProfileId: profileId,
+      defaultBrowserSessionProfileIdByHostId: {
+        ...s.defaultBrowserSessionProfileIdByHostId,
+        [getBrowserSettingsHostId(s)]: profileId
+      }
+    }))
   },
 
   createBrowserTab: (worktreeId, url, options) => {
@@ -532,7 +564,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
     const defaultUrl = state.browserDefaultUrl ?? 'about:blank'
     const pairedWebRuntimeEnvironmentId = (globalThis as { __ORCA_WEB_CLIENT__?: boolean })
       .__ORCA_WEB_CLIENT__
-      ? state.settings?.activeRuntimeEnvironmentId?.trim()
+      ? getRuntimeEnvironmentIdForWorktree(state, worktreeId)
       : null
     if (pairedWebRuntimeEnvironmentId) {
       const { createWebRuntimeSessionBrowserTab } = await import('@/runtime/web-runtime-session')
@@ -545,7 +577,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
       return
     }
     get().createBrowserTab(worktreeId, defaultUrl, {
-      title: translate("auto.store.slices.browser.d175274b6d", "New Browser Tab"),
+      title: translate('auto.store.slices.browser.d175274b6d', 'New Browser Tab'),
       focusAddressBar: true,
       targetGroupId: groupId
     })
@@ -1613,15 +1645,15 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
           undefined,
           { timeoutMs: 15_000 }
         )
-        set({ browserSessionProfiles: result.profiles })
+        set((s) => profileListByHostUpdate(s, result.profiles))
       } catch {
-        set({ browserSessionProfiles: [] })
+        set((s) => profileListByHostUpdate(s, []))
       }
       return
     }
     try {
       const profiles = (await window.api.browser.sessionListProfiles()) as BrowserSessionProfile[]
-      set({ browserSessionProfiles: profiles })
+      set((s) => profileListByHostUpdate(s, profiles))
     } catch {
       /* best-effort — stale profile list is preferable to a crash */
     }
@@ -1639,7 +1671,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
         const profile = result.profile
         if (profile) {
           set((s) => ({
-            browserSessionProfiles: [...s.browserSessionProfiles, profile]
+            ...profileListByHostUpdate(s, [...s.browserSessionProfiles, profile])
           }))
         }
         return profile
@@ -1654,7 +1686,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
       })) as BrowserSessionProfile | null
       if (profile) {
         set((s) => ({
-          browserSessionProfiles: [...s.browserSessionProfiles, profile]
+          ...profileListByHostUpdate(s, [...s.browserSessionProfiles, profile])
         }))
       }
       return profile
@@ -1674,9 +1706,18 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
         )
         if (result.deleted) {
           set((s) => ({
-            browserSessionProfiles: s.browserSessionProfiles.filter((p) => p.id !== profileId),
+            ...profileListByHostUpdate(
+              s,
+              s.browserSessionProfiles.filter((p) => p.id !== profileId)
+            ),
             ...(s.defaultBrowserSessionProfileId === profileId
-              ? { defaultBrowserSessionProfileId: null }
+              ? {
+                  defaultBrowserSessionProfileId: null,
+                  defaultBrowserSessionProfileIdByHostId: {
+                    ...s.defaultBrowserSessionProfileIdByHostId,
+                    [getBrowserSettingsHostId(s)]: null
+                  }
+                }
               : {})
           }))
         }
@@ -1689,9 +1730,18 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
       const ok = await window.api.browser.sessionDeleteProfile({ profileId })
       if (ok) {
         set((s) => ({
-          browserSessionProfiles: s.browserSessionProfiles.filter((p) => p.id !== profileId),
+          ...profileListByHostUpdate(
+            s,
+            s.browserSessionProfiles.filter((p) => p.id !== profileId)
+          ),
           ...(s.defaultBrowserSessionProfileId === profileId
-            ? { defaultBrowserSessionProfileId: null }
+            ? {
+                defaultBrowserSessionProfileId: null,
+                defaultBrowserSessionProfileIdByHostId: {
+                  ...s.defaultBrowserSessionProfileIdByHostId,
+                  [getBrowserSettingsHostId(s)]: null
+                }
+              }
             : {})
         }))
       }

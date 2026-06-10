@@ -168,6 +168,7 @@ import type {
 } from '../../../shared/types'
 import { PER_REPO_FETCH_LIMIT } from '../../../shared/work-items'
 import { translate } from '@/i18n/i18n'
+import { getSettingsForRepoRuntimeOwner } from '@/lib/repo-runtime-owner'
 
 const IS_MAC = navigator.userAgent.includes('Mac')
 
@@ -451,6 +452,9 @@ function PRReviewersPanel({
   }))
   const patchWorkItem = useAppStore((s) => s.patchWorkItem)
   const settings = useAppStore((s) => s.settings)
+  const repoOwnerSettings = useAppStore((s) =>
+    getSettingsForRepoRuntimeOwner(s, item.repoId ?? null)
+  )
   const reviewerInputRef = useRef<HTMLInputElement | null>(null)
   const reviewerInputFocusFrameRef = useRef<number | null>(null)
   const reviewerPanelMountedRef = useRef(true)
@@ -628,7 +632,8 @@ function PRReviewersPanel({
     localReviewRequests.length > 0 ||
     item.reviewRequests !== undefined ||
     item.latestReviews !== undefined
-  const canRequestReview = !!repoPath || getActiveRuntimeTarget(settings).kind === 'environment'
+  const canRequestReview =
+    !!repoPath || getActiveRuntimeTarget(repoOwnerSettings).kind === 'environment'
 
   const measureReviewerPickerPlacement = useCallback(() => {
     const rect = reviewerInputRef.current?.getBoundingClientRect()
@@ -671,7 +676,7 @@ function PRReviewersPanel({
       )
       return
     }
-    const target = getActiveRuntimeTarget(settings)
+    const target = getActiveRuntimeTarget(repoOwnerSettings)
     if (target.kind !== 'environment' && !repoPath) {
       toast.error(
         translate(
@@ -745,7 +750,7 @@ function PRReviewersPanel({
     if (logins.length === 0) {
       return
     }
-    const target = getActiveRuntimeTarget(settings)
+    const target = getActiveRuntimeTarget(repoOwnerSettings)
     if (target.kind !== 'environment' && !repoPath) {
       toast.error(
         translate(
@@ -4262,6 +4267,13 @@ function ChecksTab({
 // repo. The edit IPCs return a structured `{ ok, error }` shape; we adapt
 // to a thrown rejection so the existing `useImmediateMutation` flow
 // (which expects throws on failure) continues to work unchanged.
+function getGitHubMutationSettings(repoId: string | null | undefined) {
+  const state = useAppStore.getState()
+  // Why: project-origin mutations are slug-addressed, but when we know the
+  // backing repo id they must still execute on that repo's owner host.
+  return getSettingsForRepoRuntimeOwner(state, repoId ?? null)
+}
+
 async function runIssueUpdate(args: {
   repoPath: string | null
   repoId?: string | null
@@ -4270,7 +4282,7 @@ async function runIssueUpdate(args: {
   updates: Parameters<typeof window.api.gh.updateIssue>[0]['updates']
 }): Promise<void> {
   if (args.projectOrigin) {
-    const target = getActiveRuntimeTarget(useAppStore.getState().settings)
+    const target = getActiveRuntimeTarget(getGitHubMutationSettings(args.repoId))
     const updateArgs = {
       owner: args.projectOrigin.owner,
       repo: args.projectOrigin.repo,
@@ -4319,7 +4331,7 @@ async function runWorkItemBodyUpdate(args: {
     if (!targetSlug) {
       throw new Error('No GitHub repository context available for this pull request.')
     }
-    const target = getActiveRuntimeTarget(useAppStore.getState().settings)
+    const target = getActiveRuntimeTarget(getGitHubMutationSettings(args.item.repoId))
     const updateArgs = {
       owner: targetSlug.owner,
       repo: targetSlug.repo,
@@ -4358,7 +4370,7 @@ async function runPullRequestStateUpdate(args: {
   updates: { state: 'open' | 'closed' }
 }): Promise<void> {
   if (args.projectOrigin) {
-    const target = getActiveRuntimeTarget(useAppStore.getState().settings)
+    const target = getActiveRuntimeTarget(getGitHubMutationSettings(args.repoId))
     const updateArgs = {
       owner: args.projectOrigin.owner,
       repo: args.projectOrigin.repo,
@@ -5372,10 +5384,12 @@ function GHCommentComposer({
 // doc §1 rule: hide when either side is unknown rather than guessing.
 function WorkItemIssueSourceIndicator({
   url,
-  repoId
+  repoId,
+  repoPath
 }: {
   url: string
   repoId: string | null
+  repoPath?: string | null
 }): React.JSX.Element | null {
   // Why: subscribe to a single store-side selector that returns the resolved
   // sources for this repo — either the primary `(repoPath, PER_REPO_FETCH_LIMIT, '')`
@@ -5389,7 +5403,7 @@ function WorkItemIssueSourceIndicator({
   // indicator is small and the cache rewrite rate is bounded by user-initiated
   // refresh/search actions.
   const sources = useAppStore((s) =>
-    s.getWorkItemsAnySourcesForRepo(repoId ?? '', PER_REPO_FETCH_LIMIT)
+    s.getWorkItemsAnySourcesForRepo(repoId ?? '', PER_REPO_FETCH_LIMIT, repoPath ?? undefined)
   )
   const issues = useMemo<GitHubOwnerRepo | null>(() => {
     const fromUrl = parseOwnerRepoFromItemUrl(url)
@@ -6068,7 +6082,11 @@ export default function GitHubItemDialog({
                   {formatRelativeTime(workItem.updatedAt)}
                 </span>
               </span>
-              <WorkItemIssueSourceIndicator url={workItem.url} repoId={effectiveRepoId} />
+              <WorkItemIssueSourceIndicator
+                url={workItem.url}
+                repoId={effectiveRepoId}
+                repoPath={repoPath}
+              />
               {issueAttachedWorkspaceLabel ? (
                 <span className="inline-flex min-w-0 items-center gap-1.5">
                   <FolderKanban className="size-3.5 shrink-0" />
@@ -6132,7 +6150,11 @@ export default function GitHubItemDialog({
                 ) : null}
               </div>
               {workItem.type === 'issue' && (
-                <WorkItemIssueSourceIndicator url={workItem.url} repoId={effectiveRepoId} />
+                <WorkItemIssueSourceIndicator
+                  url={workItem.url}
+                  repoId={effectiveRepoId}
+                  repoPath={repoPath}
+                />
               )}
             </div>
             <div className="flex shrink-0 items-center justify-end gap-1">

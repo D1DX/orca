@@ -14,6 +14,7 @@ import { useAppStore } from '@/store'
 import type { OpenFile } from '@/store/slices/editor'
 import type { BrowserTab as BrowserTabState } from '../../../../shared/types'
 import type { RuntimeFileListState } from '../quick-open-file-list'
+import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import {
   classifyTabEntryQuery,
   type TabEntryActionClassification
@@ -210,7 +211,9 @@ export async function openTabBarEntry(args: TabCreateEntryArgs): Promise<void> {
     throw new Error('No active worktree.')
   }
   const runtimeContext: RuntimeFileOperationArgs = {
-    settings: state.settings,
+    settings: {
+      activeRuntimeEnvironmentId: getRuntimeEnvironmentIdForWorktree(state, args.worktreeId)
+    },
     worktreeId: args.worktreeId,
     worktreePath: worktree.path,
     connectionId: getConnectionId(args.worktreeId) ?? undefined
@@ -222,7 +225,7 @@ export async function openTabBarEntry(args: TabCreateEntryArgs): Promise<void> {
     groupId: args.groupId,
     worktreePath: worktree.path,
     runtimeContext,
-    activeRuntimeEnvironmentId: state.settings?.activeRuntimeEnvironmentId?.trim() ?? null,
+    activeRuntimeEnvironmentId: runtimeContext.settings?.activeRuntimeEnvironmentId?.trim() ?? null,
     classification: args.classification,
     operations: {
       createBrowserTab: state.createBrowserTab,

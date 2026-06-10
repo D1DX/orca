@@ -84,6 +84,18 @@ describe('task page cache selectors', () => {
     expect(selectTaskPageWorkItemsCacheEntries(cache, [repo], 20, '')).toEqual([repoEntry])
   })
 
+  it('selects host-scoped work-item cache entries for remote repos', () => {
+    const repo = { id: 'repo-1', path: '/same/path', executionHostId: 'runtime:env-1' }
+    const remoteEntry = entry<GitHubWorkItem[]>([workItem('issue-remote', 'repo-1')])
+    const localEntry = entry<GitHubWorkItem[]>([workItem('issue-local', 'repo-1')])
+    const cache = {
+      [workItemsCacheKey(repo.id, 20, '')]: localEntry,
+      [workItemsCacheKey(repo.id, 20, '', repo.executionHostId)]: remoteEntry
+    }
+
+    expect(selectTaskPageWorkItemsCacheEntries(cache, [repo], 20, '')).toEqual([remoteEntry])
+  })
+
   it('returns null while the GitHub dialog is closed so cache writes do not re-render it', () => {
     const item = workItem('issue-1', 'repo-1')
     const cache = {

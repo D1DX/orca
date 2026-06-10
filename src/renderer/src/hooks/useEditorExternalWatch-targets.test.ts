@@ -17,13 +17,15 @@ vi.mock('@/components/editor/editor-autosave', () => ({
 describe('getEditorExternalWatchTargets', () => {
   const makeRepo = (
     id: string,
-    connectionId: string | null = null
+    connectionId: string | null = null,
+    executionHostId?: EditorExternalWatchTargetState['repos'][number]['executionHostId']
   ): EditorExternalWatchTargetState['repos'][number] =>
     ({
       id,
       path: `/${id}`,
       kind: 'git',
-      connectionId
+      connectionId,
+      executionHostId
     }) as EditorExternalWatchTargetState['repos'][number]
 
   const makeWorktree = (
@@ -122,6 +124,56 @@ describe('getEditorExternalWatchTargets', () => {
       {
         worktreeId: 'wt-active-visible',
         worktreePath: '/repo-active-visible/worktree',
+        connectionId: undefined,
+        runtimeEnvironmentId: null
+      }
+    ])
+  })
+
+  it('watches the active worktree through its runtime owner when focus differs', () => {
+    const repo = makeRepo('repo-runtime-visible', null, 'runtime:owner-runtime')
+    const worktree = makeWorktree(repo.id, 'wt-runtime-visible')
+
+    expect(
+      getEditorExternalWatchTargets(
+        makeState({
+          repo,
+          worktree,
+          activeWorktreeId: worktree.id,
+          runtimeEnvironmentId: 'focused-runtime',
+          rightSidebarOpen: true,
+          rightSidebarTab: 'explorer'
+        })
+      ).targets
+    ).toEqual([
+      {
+        worktreeId: 'wt-runtime-visible',
+        worktreePath: '/repo-runtime-visible/worktree',
+        connectionId: undefined,
+        runtimeEnvironmentId: 'owner-runtime'
+      }
+    ])
+  })
+
+  it('keeps an explicitly local active worktree local when a runtime is focused', () => {
+    const repo = makeRepo('repo-local-visible', null, 'local')
+    const worktree = makeWorktree(repo.id, 'wt-local-visible')
+
+    expect(
+      getEditorExternalWatchTargets(
+        makeState({
+          repo,
+          worktree,
+          activeWorktreeId: worktree.id,
+          runtimeEnvironmentId: 'focused-runtime',
+          rightSidebarOpen: true,
+          rightSidebarTab: 'explorer'
+        })
+      ).targets
+    ).toEqual([
+      {
+        worktreeId: 'wt-local-visible',
+        worktreePath: '/repo-local-visible/worktree',
         connectionId: undefined,
         runtimeEnvironmentId: null
       }

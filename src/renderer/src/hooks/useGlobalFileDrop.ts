@@ -5,6 +5,7 @@ import { isPathInsideWorktree, toWorktreeRelativePath } from '@/lib/terminal-lin
 import { useAppStore } from '@/store'
 import { getConnectionId } from '@/lib/connection-context'
 import { joinPath } from '@/lib/path'
+import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import {
   importExternalPathsToRuntime,
   isRemoteRuntimeFileOperation,
@@ -13,6 +14,20 @@ import {
 } from '@/runtime/runtime-file-client'
 import type { GlobalSettings } from '../../../shared/types'
 import { translate } from '@/i18n/i18n'
+import type { WorktreeRuntimeOwnerState } from '@/lib/worktree-runtime-owner'
+
+export function getEditorFileDropSettingsForWorktree(
+  store: WorktreeRuntimeOwnerState,
+  worktreeId: string
+): Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> {
+  const runtimeEnvironmentId = getRuntimeEnvironmentIdForWorktree(store, worktreeId)
+  // Why: OS drops target the selected worktree. Use that worktree's host owner
+  // so a focused runtime cannot hijack local/SSH editor drops.
+  return {
+    ...store.settings,
+    activeRuntimeEnvironmentId: runtimeEnvironmentId
+  }
+}
 
 export function shouldUploadRemoteEditorFileDrop(
   settings: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null | undefined,
@@ -37,11 +52,16 @@ export function useGlobalFileDrop(): void {
       const activeWorktree = store.getKnownWorktreeById(activeWorktreeId)
       const worktreePath = activeWorktree?.path
       const connectionId = getConnectionId(activeWorktreeId) ?? undefined
-      const dropSettings = store.settings
-      const runtimeEnvironmentId = dropSettings?.activeRuntimeEnvironmentId?.trim() || undefined
+      const dropSettings = getEditorFileDropSettingsForWorktree(store, activeWorktreeId)
+      const runtimeEnvironmentId = dropSettings.activeRuntimeEnvironmentId
       if (shouldUploadRemoteEditorFileDrop(dropSettings, connectionId)) {
         if (!worktreePath) {
-          toast.error(translate("auto.hooks.useGlobalFileDrop.245faa95b9", "No remote workspace path is available for dropped files."))
+          toast.error(
+            translate(
+              'auto.hooks.useGlobalFileDrop.245faa95b9',
+              'No remote workspace path is available for dropped files.'
+            )
+          )
           return
         }
         void (async () => {
@@ -72,18 +92,28 @@ export function useGlobalFileDrop(): void {
                   filePath: result.destPath,
                   relativePath: maybeRelative ?? result.destPath,
                   worktreeId: activeWorktreeId,
-                  runtimeEnvironmentId,
+                  runtimeEnvironmentId: runtimeEnvironmentId ?? undefined,
                   language: detectLanguage(result.destPath),
                   mode: 'edit'
                 },
-                { suppressActiveRuntimeFallback: runtimeEnvironmentId === undefined }
+                { suppressActiveRuntimeFallback: runtimeEnvironmentId === null }
               )
             }
             if (results.some((result) => result.status !== 'imported')) {
-              toast.error(translate("auto.hooks.useGlobalFileDrop.d720e2f855", "Some dropped files could not be uploaded."))
+              toast.error(
+                translate(
+                  'auto.hooks.useGlobalFileDrop.d720e2f855',
+                  'Some dropped files could not be uploaded.'
+                )
+              )
             }
           } catch {
-            toast.error(translate("auto.hooks.useGlobalFileDrop.38c9f034ff", "Failed to upload dropped files."))
+            toast.error(
+              translate(
+                'auto.hooks.useGlobalFileDrop.38c9f034ff',
+                'Failed to upload dropped files.'
+              )
+            )
           }
         })()
         return

@@ -346,6 +346,35 @@ describe('updateDiffComment', () => {
     })
   })
 
+  it('persists explicit local worktree comments locally while a runtime is focused', async () => {
+    const store = createTestStore()
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-1' } as never,
+      repos: [
+        {
+          id: REPO,
+          path: '/path/repo',
+          displayName: 'Repo',
+          badgeColor: '#000',
+          addedAt: 1,
+          executionHostId: 'local'
+        }
+      ]
+    })
+    seed(store, [makeComment({ id: 'c1', body: 'old body' })])
+
+    const ok = await store.getState().updateDiffComment(WT, 'c1', 'local body')
+
+    expect(ok).toBe(true)
+    expect(updateMeta).toHaveBeenCalledWith({
+      worktreeId: WT,
+      updates: {
+        diffComments: [expect.objectContaining({ id: 'c1', body: 'local body' })]
+      }
+    })
+    expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
+  })
+
   it('rejects an empty body without persisting', async () => {
     const store = createTestStore()
     seed(store, [

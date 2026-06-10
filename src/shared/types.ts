@@ -102,6 +102,11 @@ export type Repo = {
   hookSettings?: RepoHookSettings
   /** SSH target ID for remote repos. null/undefined = local. */
   connectionId?: string | null
+  /**
+   * Explicit execution owner for this repo. Runtime-host repos need this
+   * because they otherwise look identical to local repos (`connectionId: null`).
+   */
+  executionHostId?: 'local' | `ssh:${string}` | `runtime:${string}` | null
   /** Per-repo override for issue-source resolution. `undefined` is treated
    *  identically to `'auto'`; writers leave it undefined on creation so
    *  existing persisted records stay forward-compatible. */
@@ -824,6 +829,7 @@ export type GitHubPRRefreshAlias = {
   branch: string
   worktreeId?: string
   connectionId?: string | null
+  executionHostId?: string | null
   linkedPRNumber?: number | null
   fallbackPRNumber?: number | null
   fallbackPRSource?: 'explicit' | 'pr-cache' | 'hosted-review' | null
@@ -835,6 +841,7 @@ export type GitHubPRRefreshCandidate = GitHubPRRefreshAlias & {
   isBare?: boolean
   isArchived?: boolean
   connectionId?: string | null
+  executionHostId?: string | null
   connectionState?: 'connected' | 'disconnected' | 'unknown'
   cachedFetchedAt?: number | null
   cachedHasPR?: boolean | null
@@ -2587,6 +2594,7 @@ export type TaskResumeState = {
 export type RightSidebarTab = 'explorer' | 'search' | 'source-control' | 'checks' | 'ports'
 
 export type ProjectOrderBy = 'manual' | 'recent'
+export type WorkspaceHostScope = 'all' | 'local' | `ssh:${string}` | `runtime:${string}`
 
 export type PersistedUIState = {
   lastActiveRepoId: string | null
@@ -2606,6 +2614,10 @@ export type PersistedUIState = {
   showActiveOnly: boolean
   /** Hide sleeping/inactive workspaces from workspace navigation. Off by default. */
   hideSleepingWorkspaces?: boolean
+  /** Which execution hosts the workspace sidebar shows. `all` keeps the mixed
+   *  command-center view; specific host IDs focus the sidebar without tearing
+   *  down sessions owned by other hosts. */
+  workspaceHostScope?: WorkspaceHostScope
   /** Deprecated legacy positive-form setting. Ignored on hydration. */
   showSleepingWorkspaces?: boolean
   /** Deprecated legacy name used by a short-lived build. Ignored on hydration. */

@@ -81,6 +81,7 @@ import {
   cancelScheduledHiddenOutputRestore,
   scheduleHiddenOutputRestore
 } from './hidden-output-restore-scheduler'
+import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 
 const pendingSpawnByPaneKey = new Map<string, Promise<string | null>>()
 const SSH_SESSION_EXPIRED_ERROR = 'SSH_SESSION_EXPIRED'
@@ -1424,8 +1425,8 @@ export function connectPanePty(
     (restoredPtyIdForTransport
       ? getRemoteRuntimePtyEnvironmentId(restoredPtyIdForTransport)
       : null) ?? (tab?.ptyId ? getRemoteRuntimePtyEnvironmentId(tab.ptyId) : null)
-  const activeRuntimeEnvironmentId = state.settings?.activeRuntimeEnvironmentId?.trim() || null
-  const runtimeEnvironmentId = remoteRuntimeOwnerForTransport ?? activeRuntimeEnvironmentId
+  const runtimeEnvironmentId =
+    remoteRuntimeOwnerForTransport ?? getRuntimeEnvironmentIdForWorktree(state, deps.worktreeId)
   const shouldOwnAgentStatusInRenderer = runtimeEnvironmentId !== null
   const shouldDeliverStartupViaTerminalPaste = paneStartup?.delivery === 'terminal-paste'
   let lastTerminalInputAt = Number.NEGATIVE_INFINITY

@@ -1,12 +1,21 @@
 /* eslint-disable max-lines -- Why: the server settings pane keeps active
    server selection, saved server mutation, and confirmation dialogs together so
    the state transitions stay auditable. */
-import { Loader2, Plus, RefreshCw, Share2, Trash2 } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Loader2, Plus, RefreshCw, Share2, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { toast } from 'sonner'
 import { useMountedRef } from '@/hooks/useMountedRef'
 import type { GlobalSettings } from '../../../../shared/types'
 import type { PublicKnownRuntimeEnvironment } from '../../../../shared/runtime-environments'
+import type { RuntimeStatus } from '../../../../shared/runtime-types'
+import {
+  evaluateRuntimeCompat,
+  type RuntimeCompatVerdict
+} from '../../../../shared/protocol-compat'
+import {
+  MIN_COMPATIBLE_RUNTIME_SERVER_VERSION,
+  RUNTIME_PROTOCOL_VERSION
+} from '../../../../shared/protocol-version'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Label } from '../ui/label'
@@ -25,6 +34,7 @@ import {
   getRuntimeEnvironmentsSearchEntry,
   getWebRuntimeEnvironmentsSearchEntry
 } from './runtime-environments-search'
+import { unwrapRuntimeRpcResult } from '@/runtime/runtime-rpc-client'
 import { translate } from '@/i18n/i18n'
 
 const LOCAL_RUNTIME_VALUE = '__local__'
@@ -37,6 +47,41 @@ type RuntimeEnvironmentsPaneProps = {
   allowLocalRuntime?: boolean
 }
 
+export type RuntimeHostDetails = {
+  status: 'loading' | 'ready' | 'error'
+  runtimeStatus: RuntimeStatus | null
+  compatibility: RuntimeCompatVerdict | null
+  error: string | null
+}
+
+export function evaluateHostDetails(status: RuntimeStatus): RuntimeCompatVerdict {
+  return evaluateRuntimeCompat({
+    clientProtocolVersion: RUNTIME_PROTOCOL_VERSION,
+    minCompatibleServerProtocolVersion: MIN_COMPATIBLE_RUNTIME_SERVER_VERSION,
+    serverProtocolVersion: status.runtimeProtocolVersion ?? status.protocolVersion,
+    serverMinCompatibleClientProtocolVersion:
+      status.minCompatibleRuntimeClientVersion ?? status.minCompatibleMobileVersion
+  })
+}
+
+export function getHostDetailsSummary(details: RuntimeHostDetails | undefined): string {
+  if (!details || details.status === 'loading') {
+    return translate('auto.components.settings.RuntimeEnvironmentsPane.5120beaac6', 'Checking…')
+  }
+  if (details.status === 'error') {
+    return translate(
+      'auto.components.settings.RuntimeEnvironmentsPane.c8791efc45',
+      'Status unavailable'
+    )
+  }
+  if (details.compatibility?.kind === 'blocked') {
+    return details.compatibility.reason === 'client-too-old'
+      ? translate('auto.components.settings.RuntimeEnvironmentsPane.62ac182a27', 'Update client')
+      : translate('auto.components.settings.RuntimeEnvironmentsPane.86ed75bec8', 'Update server')
+  }
+  return translate('auto.components.settings.RuntimeEnvironmentsPane.9a91c4a0eb', 'Compatible')
+}
+
 export function RuntimeEnvironmentsPane({
   settings,
   switchRuntimeEnvironment,
@@ -46,6 +91,9 @@ export function RuntimeEnvironmentsPane({
   const [environments, setEnvironments] = useState<PublicKnownRuntimeEnvironment[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
+  const [detailsByEnvironmentId, setDetailsByEnvironmentId] = useState<
+    Record<string, RuntimeHostDetails>
+  >({})
   const [switchingValue, setSwitchingValue] = useState<string | null>(null)
   const [removingId, setRemovingId] = useState<string | null>(null)
   const [pendingSwitchValue, setPendingSwitchValue] = useState<string | null>(null)
@@ -74,7 +122,55 @@ export function RuntimeEnvironmentsPane({
       const nextEnvironments = await window.api.runtimeEnvironments.list()
       if (mountedRef.current) {
         setEnvironments(nextEnvironments)
+        setDetailsByEnvironmentId((current) => {
+          const next: Record<string, RuntimeHostDetails> = {}
+          for (const environment of nextEnvironments) {
+            next[environment.id] = current[environment.id] ?? {
+              status: 'loading',
+              runtimeStatus: null,
+              compatibility: null,
+              error: null
+            }
+          }
+          return next
+        })
       }
+      await Promise.allSettled(
+        nextEnvironments.map(async (environment) => {
+          try {
+            const response = await window.api.runtimeEnvironments.getStatus({
+              selector: environment.id,
+              timeoutMs: 10_000
+            })
+            const runtimeStatus = unwrapRuntimeRpcResult<RuntimeStatus>(response)
+            if (!mountedRef.current) {
+              return
+            }
+            setDetailsByEnvironmentId((current) => ({
+              ...current,
+              [environment.id]: {
+                status: 'ready',
+                runtimeStatus,
+                compatibility: evaluateHostDetails(runtimeStatus),
+                error: null
+              }
+            }))
+          } catch (error) {
+            if (!mountedRef.current) {
+              return
+            }
+            setDetailsByEnvironmentId((current) => ({
+              ...current,
+              [environment.id]: {
+                status: 'error',
+                runtimeStatus: null,
+                compatibility: null,
+                error: error instanceof Error ? error.message : String(error)
+              }
+            }))
+          }
+        })
+      )
     } catch (error) {
       if (mountedRef.current) {
         toast.error(
@@ -518,16 +614,66 @@ export function RuntimeEnvironmentsPane({
               {environments.map((environment) => (
                 <div
                   key={environment.id}
-                  className="flex items-center justify-between gap-3 px-3 py-2"
+                  className="flex items-start justify-between gap-3 px-3 py-2"
                 >
                   <div className="min-w-0">
-                    <div className="truncate text-sm font-medium">{environment.name}</div>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <div className="truncate text-sm font-medium">{environment.name}</div>
+                      {detailsByEnvironmentId[environment.id]?.compatibility?.kind === 'blocked' ? (
+                        <AlertTriangle className="size-3.5 shrink-0 text-destructive" />
+                      ) : detailsByEnvironmentId[environment.id]?.status === 'ready' ? (
+                        <CheckCircle2 className="size-3.5 shrink-0 text-status-success" />
+                      ) : detailsByEnvironmentId[environment.id]?.status === 'loading' ? (
+                        <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                      ) : null}
+                    </div>
                     <div className="truncate font-mono text-xs text-muted-foreground">
                       {environment.endpoints[0]?.endpoint ??
                         translate(
                           'auto.components.settings.RuntimeEnvironmentsPane.6ef71985da',
                           'No endpoint'
                         )}
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
+                      <span>{getHostDetailsSummary(detailsByEnvironmentId[environment.id])}</span>
+                      {detailsByEnvironmentId[environment.id]?.runtimeStatus ? (
+                        <>
+                          <span>
+                            {translate(
+                              'auto.components.settings.RuntimeEnvironmentsPane.0ef838094a',
+                              'Protocol {{value0}}',
+                              {
+                                value0:
+                                  detailsByEnvironmentId[environment.id].runtimeStatus
+                                    ?.runtimeProtocolVersion ??
+                                  detailsByEnvironmentId[environment.id].runtimeStatus
+                                    ?.protocolVersion ??
+                                  0
+                              }
+                            )}
+                          </span>
+                          {detailsByEnvironmentId[environment.id].runtimeStatus?.hostPlatform ? (
+                            <span>
+                              {detailsByEnvironmentId[environment.id].runtimeStatus?.hostPlatform}
+                            </span>
+                          ) : null}
+                          <span>
+                            {translate(
+                              'auto.components.settings.RuntimeEnvironmentsPane.f3a3d6d834',
+                              '{{value0}} capabilities',
+                              {
+                                value0:
+                                  detailsByEnvironmentId[environment.id].runtimeStatus?.capabilities
+                                    ?.length ?? 0
+                              }
+                            )}
+                          </span>
+                        </>
+                      ) : detailsByEnvironmentId[environment.id]?.error ? (
+                        <span className="truncate text-destructive">
+                          {detailsByEnvironmentId[environment.id]?.error}
+                        </span>
+                      ) : null}
                     </div>
                   </div>
                   <Button
@@ -620,7 +766,7 @@ export function RuntimeEnvironmentsPane({
             <DialogDescription>
               {translate(
                 'auto.components.settings.RuntimeEnvironmentsPane.b2290ed203',
-                'Orca will close remote terminals and browser tabs from the current server before loading projects from the next server.'
+                'Orca will focus this host and load its projects. Existing terminals and browser tabs on other hosts stay alive.'
               )}
             </DialogDescription>
           </DialogHeader>
@@ -692,11 +838,11 @@ export function RuntimeEnvironmentsPane({
                 ? allowLocalRuntime
                   ? translate(
                       'auto.components.settings.RuntimeEnvironmentsPane.9f7665a01b',
-                      'Removing the active server first switches Orca back to Local desktop and closes remote terminals and browser tabs for that server.'
+                      'Removing the active server first switches Orca back to Local desktop. Existing host sessions are left alone.'
                     )
                   : translate(
                       'auto.components.settings.RuntimeEnvironmentsPane.b2fda48c39',
-                      'Removing the active server disconnects this browser and closes remote terminals and browser tabs for that server.'
+                      'Removing the active server disconnects this browser from that host. Existing host sessions are left alone.'
                     )
                 : translate(
                     'auto.components.settings.RuntimeEnvironmentsPane.ed3e3f069d',

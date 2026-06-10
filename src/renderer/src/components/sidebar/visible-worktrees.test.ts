@@ -7,6 +7,7 @@ import {
   sidebarHasActiveFilters
 } from './visible-worktrees'
 import type { Repo, TerminalTab, Worktree, WorktreeLineage } from '../../../../shared/types'
+import { LOCAL_EXECUTION_HOST_ID } from '../../../../shared/execution-host'
 
 function makeTab(id: string, worktreeId: string, ptyId: string | null): TerminalTab {
   return {
@@ -81,6 +82,8 @@ function visibleOptions(overrides: Partial<VisibleOptions> = {}): VisibleOptions
     browserTabsByWorktree: {},
     hideDefaultBranchWorkspace: false,
     repoMap,
+    workspaceHostScope: 'all',
+    defaultHostId: LOCAL_EXECUTION_HOST_ID,
     worktreeLineageById: {},
     ...overrides
   }
@@ -204,6 +207,96 @@ describe('computeVisibleWorktreeIds', () => {
     )
 
     expect(result).toEqual([folder.id])
+  })
+
+  it('filters worktrees to a selected SSH host scope', () => {
+    const local = makeWorktree('local', 'repo1')
+    const remote = makeWorktree('remote', 'repo2')
+    const scopedRepoMap = new Map(repoMap)
+    scopedRepoMap.set('repo2', {
+      ...makeRepo('repo2', 'Repo 2', '#111'),
+      connectionId: 'win vm'
+    })
+
+    const result = computeVisibleWorktreeIds(
+      { repo1: [local], repo2: [remote] },
+      [local.id, remote.id],
+      visibleOptions({
+        repoMap: scopedRepoMap,
+        workspaceHostScope: 'ssh:win%20vm'
+      })
+    )
+
+    expect(result).toEqual([remote.id])
+  })
+
+  it('filters non-SSH worktrees to the focused runtime host compatibility scope', () => {
+    const runtime = makeWorktree('runtime', 'repo1')
+    const ssh = makeWorktree('ssh', 'repo2')
+    const scopedRepoMap = new Map(repoMap)
+    scopedRepoMap.set('repo2', {
+      ...makeRepo('repo2', 'Repo 2', '#111'),
+      connectionId: 'ssh-1'
+    })
+
+    const result = computeVisibleWorktreeIds(
+      { repo1: [runtime], repo2: [ssh] },
+      [runtime.id, ssh.id],
+      visibleOptions({
+        repoMap: scopedRepoMap,
+        defaultHostId: 'runtime:env-1',
+        workspaceHostScope: 'runtime:env-1'
+      })
+    )
+
+    expect(result).toEqual([runtime.id])
+  })
+
+  it('filters explicit runtime-owned repos independently of the focused default host', () => {
+    const local = makeWorktree('local', 'repo1')
+    const runtime = makeWorktree('runtime', 'repo2')
+    const scopedRepoMap = new Map(repoMap)
+    scopedRepoMap.set('repo1', {
+      ...makeRepo('repo1', 'Repo 1', '#000'),
+      executionHostId: 'local'
+    })
+    scopedRepoMap.set('repo2', {
+      ...makeRepo('repo2', 'Repo 2', '#111'),
+      executionHostId: 'runtime:env-1'
+    })
+
+    const result = computeVisibleWorktreeIds(
+      { repo1: [local], repo2: [runtime] },
+      [local.id, runtime.id],
+      visibleOptions({
+        repoMap: scopedRepoMap,
+        defaultHostId: 'runtime:env-1',
+        workspaceHostScope: 'local'
+      })
+    )
+
+    expect(result).toEqual([local.id])
+  })
+
+  it('keeps every host visible when workspace host scope is all', () => {
+    const local = makeWorktree('local', 'repo1')
+    const remote = makeWorktree('remote', 'repo2')
+    const scopedRepoMap = new Map(repoMap)
+    scopedRepoMap.set('repo2', {
+      ...makeRepo('repo2', 'Repo 2', '#111'),
+      connectionId: 'ssh-1'
+    })
+
+    const result = computeVisibleWorktreeIds(
+      { repo1: [local], repo2: [remote] },
+      [local.id, remote.id],
+      visibleOptions({
+        repoMap: scopedRepoMap,
+        workspaceHostScope: 'all'
+      })
+    )
+
+    expect(result).toEqual([local.id, remote.id])
   })
 
   it('hides branch-backed mains across every repo in a multi-repo workspace', () => {

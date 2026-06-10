@@ -8,6 +8,7 @@ import type {
   HostedReviewCreationEligibilityArgs,
   HostedReviewInfo
 } from '../../../../shared/hosted-review'
+import type { Repo } from '../../../../shared/types'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import type { AppState } from '../types'
 import {
@@ -16,6 +17,7 @@ import {
   type LinkedReviewHints
 } from './hosted-review-cache-identity'
 import { getGitHubPRCacheKey, getLegacyGitHubPRCacheKey } from './github-cache-key'
+import { getRepoExecutionHostId, parseExecutionHostId } from '../../../../shared/execution-host'
 
 export { getHostedReviewCacheKey, linkedReviewHintKey } from './hosted-review-cache-identity'
 
@@ -118,6 +120,26 @@ function withHostedReviewCacheEntry(
   return pruned
 }
 
+function settingsForHostedReviewRepoOwner(
+  settings: AppState['settings'],
+  repo: Pick<Repo, 'connectionId' | 'executionHostId'> | undefined
+): AppState['settings'] {
+  if (!repo?.executionHostId && !repo?.connectionId) {
+    return settings
+  }
+  const parsed = parseExecutionHostId(getRepoExecutionHostId(repo))
+  if (parsed?.kind === 'runtime') {
+    return settings
+      ? { ...settings, activeRuntimeEnvironmentId: parsed.environmentId }
+      : ({ activeRuntimeEnvironmentId: parsed.environmentId } as AppState['settings'])
+  }
+  // Why: local and SSH-owned reviews are served by the desktop client's local
+  // IPC path, even when the sidebar is focused on a runtime host.
+  return settings
+    ? { ...settings, activeRuntimeEnvironmentId: null }
+    : ({ activeRuntimeEnvironmentId: null } as AppState['settings'])
+}
+
 export type HostedReviewSlice = {
   hostedReviewCache: Record<string, CacheEntry<HostedReviewInfo>>
   getHostedReviewCreationEligibility: (
@@ -171,9 +193,10 @@ export const createHostedReviewSlice: StateCreator<AppState, [], [], HostedRevie
 
   getHostedReviewCreationEligibility: async (args) => {
     const settings = get().settings
-    const target = getActiveRuntimeTarget(settings)
+    const repo = get().repos.find((candidate) => candidate.path === args.repoPath)
+    const ownerSettings = settingsForHostedReviewRepoOwner(settings, repo)
+    const target = getActiveRuntimeTarget(ownerSettings)
     if (target.kind === 'environment') {
-      const repo = get().repos.find((candidate) => candidate.path === args.repoPath)
       const { repoPath: _repoPath, worktreePath, ...runtimeArgs } = args
       void _repoPath
       return callRuntimeRpc<HostedReviewCreationEligibility>(
@@ -187,7 +210,6 @@ export const createHostedReviewSlice: StateCreator<AppState, [], [], HostedRevie
         { timeoutMs: 30_000 }
       )
     }
-    const repo = get().repos.find((candidate) => candidate.path === args.repoPath)
     return window.api.hostedReview.getCreationEligibility({
       ...args,
       connectionId: repo?.connectionId ?? null
@@ -196,9 +218,10 @@ export const createHostedReviewSlice: StateCreator<AppState, [], [], HostedRevie
 
   createHostedReview: async (repoPath, input) => {
     const settings = get().settings
-    const target = getActiveRuntimeTarget(settings)
+    const repo = get().repos.find((candidate) => candidate.path === repoPath)
+    const ownerSettings = settingsForHostedReviewRepoOwner(settings, repo)
+    const target = getActiveRuntimeTarget(ownerSettings)
     if (target.kind === 'environment') {
-      const repo = get().repos.find((candidate) => candidate.path === repoPath)
       const { worktreePath, ...runtimeInput } = input
       return callRuntimeRpc<CreateHostedReviewResult>(
         target,
@@ -211,7 +234,6 @@ export const createHostedReviewSlice: StateCreator<AppState, [], [], HostedRevie
         { timeoutMs: 60_000 }
       )
     }
-    const repo = get().repos.find((candidate) => candidate.path === repoPath)
     return window.api.hostedReview.create({
       repoPath,
       connectionId: repo?.connectionId ?? null,
@@ -225,17 +247,19 @@ export const createHostedReviewSlice: StateCreator<AppState, [], [], HostedRevie
     options
   ): Promise<HostedReviewInfo | null> => {
     const settings = get().settings
-    const target = getActiveRuntimeTarget(settings)
     const repo = get().repos?.find((candidate) =>
       options?.repoId ? candidate.id === options.repoId : candidate.path === repoPath
     )
+    const ownerSettings = settingsForHostedReviewRepoOwner(settings, repo)
+    const target = getActiveRuntimeTarget(ownerSettings)
     const repoId = options?.repoId ?? repo?.id
     const cacheKey = getHostedReviewCacheKey(
       repoPath,
       branch,
-      settings,
+      ownerSettings,
       options?.repoId,
-      repo?.connectionId
+      repo?.connectionId,
+      repo?.executionHostId
     )
     const cached = get().hostedReviewCache[cacheKey]
     const hintKey = linkedReviewHintKey(options)
@@ -273,14 +297,17 @@ export const createHostedReviewSlice: StateCreator<AppState, [], [], HostedRevie
               ? await callRuntimeRpc<HostedReviewInfo | null>(
                   target,
                   'hostedReview.forBranch',
-                  { repo: options?.repoId ?? repoPath, repoPath, ...args },
+                  { repo: repo?.id ?? options?.repoId ?? repoPath, repoPath, ...args },
                   // Why: remote dev boxes can be slower at `git`/`gh` lookups
                   // than local desktop repos, especially on Windows filesystem
                   // paths. The main-process queue caps concurrency, so a longer
                   // timeout no longer risks a background socket stampede.
                   { timeoutMs: 30_000 }
                 )
-              : await window.api.hostedReview.forBranch({ repoPath, ...args })
+              : await window.api.hostedReview.forBranch({
+                  repoPath,
+                  ...args
+                })
           if (requestGenerations.get(cacheKey) === generation) {
             set((state) => {
               if (
@@ -294,7 +321,14 @@ export const createHostedReviewSlice: StateCreator<AppState, [], [], HostedRevie
                 return {}
               }
               const prCacheKeys = [
-                getGitHubPRCacheKey(repoPath, repoId, branch, settings, repo?.connectionId),
+                getGitHubPRCacheKey(
+                  repoPath,
+                  repoId,
+                  branch,
+                  ownerSettings,
+                  repo?.connectionId,
+                  repo?.executionHostId
+                ),
                 getLegacyGitHubPRCacheKey(repoPath, repoId, branch),
                 getLegacyGitHubPRCacheKey(repoPath, undefined, branch)
               ]

@@ -559,6 +559,11 @@ describe('createUISlice hydratePersistedUI', () => {
     expect(store.getState().showSleepingWorkspaces).toBe(true)
   })
 
+  it('defaults workspace host scope to all hosts', () => {
+    expect(getDefaultUIState().workspaceHostScope).toBe('all')
+    expect(createUIStore().getState().workspaceHostScope).toBe('all')
+  })
+
   it('preserves the current right sidebar width when older persisted UI omits it', () => {
     const store = createUIStore()
 
@@ -593,6 +598,37 @@ describe('createUISlice hydratePersistedUI', () => {
     store.getState().hydratePersistedUI(makePersistedUI({ rightSidebarTab: 'checks' }))
 
     expect(store.getState().rightSidebarTab).toBe('checks')
+  })
+
+  it('hydrates a persisted workspace host scope', () => {
+    const store = createUIStore()
+
+    store.getState().hydratePersistedUI(makePersistedUI({ workspaceHostScope: 'ssh:win%20vm' }))
+
+    expect(store.getState().workspaceHostScope).toBe('ssh:win%20vm')
+  })
+
+  it('falls back to all hosts for invalid persisted workspace host scopes', () => {
+    const store = createUIStore()
+
+    store
+      .getState()
+      .hydratePersistedUI(
+        makePersistedUI({ workspaceHostScope: 'bogus' as PersistedUIState['workspaceHostScope'] })
+      )
+
+    expect(store.getState().workspaceHostScope).toBe('all')
+  })
+
+  it('persists workspace host scope changes', () => {
+    const setUI = vi.fn(() => Promise.resolve())
+    vi.stubGlobal('window', { api: { ui: { set: setUI } } })
+    const store = createUIStore()
+
+    store.getState().setWorkspaceHostScope('runtime:env-1')
+
+    expect(store.getState().workspaceHostScope).toBe('runtime:env-1')
+    expect(setUI).toHaveBeenCalledWith({ workspaceHostScope: 'runtime:env-1' })
   })
 
   it('hydrates persisted per-worktree dotfile visibility', () => {

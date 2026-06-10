@@ -20,7 +20,8 @@ import type {
   Repo,
   Worktree,
   GitHubWorkItem,
-  ListWorkItemsResult
+  ListWorkItemsResult,
+  GlobalSettings
 } from '../../../../shared/types'
 import type {
   GetProjectViewTableArgs,
@@ -44,6 +45,13 @@ import { getHostedReviewCacheKey, linkedReviewHintKey } from './hosted-review-ca
 import { getGitHubPRCacheKey, getGitHubRepoCacheKey } from './github-cache-key'
 import { isMacAppDataPath } from '@/lib/passive-macos-app-data-access'
 import { translate } from '@/i18n/i18n'
+import {
+  LOCAL_EXECUTION_HOST_ID,
+  getRepoExecutionHostId,
+  getSettingsFocusedExecutionHostId,
+  normalizeExecutionHostId,
+  parseExecutionHostId
+} from '../../../../shared/execution-host'
 
 // ─── ProjectV2 cache types ────────────────────────────────────────────
 // Why: declared separately from CacheEntry<T> (not a generified E parameter)
@@ -126,8 +134,69 @@ type GitHubWorkItemsListArgs = {
   noCache?: true
 }
 
-function activeRuntimeEnvironmentId(settings: AppState['settings']): string | null {
-  return settings?.activeRuntimeEnvironmentId ?? null
+function settingsForGitHubRepoOwner(
+  settings: AppState['settings'],
+  repo: Pick<Repo, 'connectionId' | 'executionHostId'> | undefined
+): AppState['settings'] {
+  if (!repo?.executionHostId && !repo?.connectionId) {
+    return settings
+  }
+  const parsed = parseExecutionHostId(getRepoExecutionHostId(repo))
+  if (parsed?.kind === 'runtime') {
+    return settings
+      ? { ...settings, activeRuntimeEnvironmentId: parsed.environmentId }
+      : ({ activeRuntimeEnvironmentId: parsed.environmentId } as AppState['settings'])
+  }
+  // Why: local and SSH-owned GitHub lookups are served by the desktop client;
+  // host focus must not redirect them to the currently selected runtime.
+  return settings
+    ? { ...settings, activeRuntimeEnvironmentId: null }
+    : ({ activeRuntimeEnvironmentId: null } as AppState['settings'])
+}
+
+function getRefreshAliasExecutionHostId(alias: GitHubPRRefreshAlias): string {
+  const explicitHostId = normalizeExecutionHostId(alias.executionHostId)
+  if (explicitHostId) {
+    return explicitHostId
+  }
+  const scope = alias.cacheKey.split('::', 1)[0]
+  return normalizeExecutionHostId(scope) ?? LOCAL_EXECUTION_HOST_ID
+}
+
+function findRepoForGitHubOwner(
+  state: Partial<Pick<AppState, 'repos'>>,
+  repoId: string | undefined,
+  repoPath: string
+): Repo | undefined {
+  return (state.repos ?? []).find((candidate) =>
+    repoId ? candidate.id === repoId || candidate.path === repoPath : candidate.path === repoPath
+  )
+}
+
+function getGitHubRepoOwnerHostId(
+  settings: AppState['settings'],
+  repo: Pick<Repo, 'connectionId' | 'executionHostId'> | undefined
+): string {
+  if (repo?.executionHostId || repo?.connectionId) {
+    return getRepoExecutionHostId(repo)
+  }
+  return getSettingsFocusedExecutionHostId(settings)
+}
+
+function getWorkItemsCacheKeyForOwner(
+  state: Partial<Pick<AppState, 'repos' | 'settings'>>,
+  repoId: string,
+  limit: number,
+  query: string,
+  repoPath?: string
+): string {
+  const repo = findRepoForGitHubOwner(state, repoId, repoPath ?? '')
+  return workItemsCacheKey(
+    repoId,
+    limit,
+    query,
+    repo ? getGitHubRepoOwnerHostId(state.settings ?? null, repo) : undefined
+  )
 }
 
 function getGitHubWorkItemRequestContext(
@@ -497,8 +566,15 @@ function releaseWorkItemSlot(): void {
   workItemFetchInFlight -= 1
 }
 
-export function workItemsCacheKey(repoId: string, limit: number, query: string): string {
-  return `${repoId}::${limit}::${query}`
+export function workItemsCacheKey(
+  repoId: string,
+  limit: number,
+  query: string,
+  executionHostId?: string | null
+): string {
+  const hostId = normalizeExecutionHostId(executionHostId)
+  const owner = `${repoId}::${limit}::${query}`
+  return hostId && hostId !== LOCAL_EXECUTION_HOST_ID ? `${hostId}::${owner}` : owner
 }
 
 function workItemsInflightRequestKey(
@@ -510,8 +586,22 @@ function workItemsInflightRequestKey(
   return `${cacheKey}::${targetPart}`
 }
 
-function repoScopedCacheKey(repoPath: string, repoId: string | undefined, suffix: string): string {
-  return `${repoId ?? repoPath}::${suffix}`
+export function issueCacheKey(
+  repoPath: string,
+  repoId: string | undefined,
+  issueNumber: number | string,
+  settings?: Pick<GlobalSettings, 'activeRuntimeEnvironmentId'> | null,
+  connectionId?: string | null,
+  executionHostId?: string | null
+): string {
+  return getGitHubRepoCacheKey(
+    repoPath,
+    repoId,
+    String(issueNumber),
+    settings,
+    connectionId,
+    executionHostId
+  )
 }
 
 function runtimeScopedRepoCacheKey(
@@ -519,9 +609,10 @@ function runtimeScopedRepoCacheKey(
   repoId: string | undefined,
   suffix: string,
   settings?: AppState['settings'],
-  connectionId?: string | null
+  connectionId?: string | null,
+  executionHostId?: string | null
 ): string {
-  return getGitHubRepoCacheKey(repoPath, repoId, suffix, settings, connectionId)
+  return getGitHubRepoCacheKey(repoPath, repoId, suffix, settings, connectionId, executionHostId)
 }
 
 function prCacheKey(
@@ -529,9 +620,10 @@ function prCacheKey(
   repoId: string | undefined,
   branch: string,
   settings?: AppState['settings'],
-  connectionId?: string | null
+  connectionId?: string | null,
+  executionHostId?: string | null
 ): string {
-  return getGitHubPRCacheKey(repoPath, repoId, branch, settings, connectionId)
+  return getGitHubPRCacheKey(repoPath, repoId, branch, settings, connectionId, executionHostId)
 }
 
 function repoCacheKeyPrefixes(repoId: string, repoPath?: string): string[] {
@@ -678,8 +770,9 @@ function buildPRRefreshCandidate(
     repoPath ?? repo.path,
     repo.id,
     branch,
-    state.settings,
-    repo.connectionId
+    settingsForGitHubRepoOwner(state.settings, repo),
+    repo.connectionId,
+    repo.executionHostId
   )
   const cachedPR = state.prCache[cacheKey]?.data ?? null
   const hostedReviewFallbackPRNumber = githubHostedReviewFallbackPRNumber(
@@ -687,7 +780,8 @@ function buildPRRefreshCandidate(
     repoPath ?? repo.path,
     repo.id,
     branch,
-    repo.connectionId
+    repo.connectionId,
+    repo.executionHostId
   )
   const cachedFallbackPRNumber = cachedPR?.number ?? null
   const fallbackPRNumber =
@@ -716,6 +810,7 @@ function buildPRRefreshCandidate(
     isBare: worktree.isBare,
     isArchived: worktree.isArchived,
     connectionId: repo.connectionId ?? null,
+    executionHostId: repo.executionHostId ?? null,
     connectionState: repo.connectionId
       ? sshStatus === 'connected'
         ? 'connected'
@@ -735,14 +830,16 @@ function githubHostedReviewFallbackPRNumber(
   repoPath: string,
   repoId: string | undefined,
   branch: string,
-  connectionId?: string | null
+  connectionId?: string | null,
+  executionHostId?: string | null
 ): number | null {
   const hostedReviewCacheKey = getHostedReviewCacheKey(
     repoPath,
     branch,
     state.settings,
     repoId,
-    connectionId
+    connectionId,
+    executionHostId
   )
   const hostedReview = state.hostedReviewCache[hostedReviewCacheKey]?.data
   return hostedReview?.provider === 'github' ? hostedReview.number : null
@@ -805,6 +902,7 @@ function syncHostedReviewCacheFromGitHubPRResult(args: {
   settings: AppState['settings']
   repoId?: string
   connectionId?: string | null
+  executionHostId?: string | null
   pr: PRInfo | null
   fetchedAt: number
   linkedPRNumber?: number | null
@@ -818,7 +916,8 @@ function syncHostedReviewCacheFromGitHubPRResult(args: {
     args.branch,
     args.settings,
     args.repoId,
-    args.connectionId
+    args.connectionId,
+    args.executionHostId
   )
   if (
     args.requestStartedAt !== undefined &&
@@ -962,16 +1061,6 @@ function setPRRefreshStartedHostedReviewEntry(
   }
 }
 
-function deletePRRefreshStartedEntriesForEvent(
-  event: GitHubPRRefreshEvent,
-  sequences: AppState['prRefreshSequences']
-): void {
-  for (const alias of event.aliases) {
-    deletePRRefreshStartedEntry(event.sequence, alias.cacheKey)
-    deletePRRefreshStartedEntry(sequences[alias.cacheKey], alias.cacheKey)
-  }
-}
-
 function setGitHubPRResultCaches(
   state: AppState,
   args: {
@@ -981,6 +1070,7 @@ function setGitHubPRResultCaches(
     settings: AppState['settings']
     repoId?: string
     connectionId?: string | null
+    executionHostId?: string | null
     pr: PRInfo | null
     fetchedAt: number
     linkedPRNumber?: number | null
@@ -997,6 +1087,7 @@ function setGitHubPRResultCaches(
     settings: args.settings,
     repoId: args.repoId,
     connectionId: args.connectionId,
+    executionHostId: args.executionHostId,
     pr: args.pr,
     fetchedAt: args.fetchedAt,
     linkedPRNumber: args.linkedPRNumber,
@@ -1010,7 +1101,8 @@ function setGitHubPRResultCaches(
     args.branch,
     args.settings,
     args.repoId,
-    args.connectionId
+    args.connectionId,
+    args.executionHostId
   )
   return {
     prCache: applyPRCacheResult(
@@ -1048,6 +1140,7 @@ function applyGitHubPRResultToCaches(args: {
   settings: AppState['settings']
   repoId?: string
   connectionId?: string | null
+  executionHostId?: string | null
   pr: PRInfo | null
   fetchedAt: number
   linkedPRNumber?: number | null
@@ -1066,6 +1159,7 @@ function applyGitHubPRResultToCaches(args: {
     settings: args.settings,
     repoId: args.repoId,
     connectionId: args.connectionId,
+    executionHostId: args.executionHostId,
     pr: args.pr,
     fetchedAt: args.fetchedAt,
     linkedPRNumber: args.linkedPRNumber,
@@ -1079,7 +1173,8 @@ function applyGitHubPRResultToCaches(args: {
     args.branch,
     args.settings,
     args.repoId,
-    args.connectionId
+    args.connectionId,
+    args.executionHostId
   )
   return {
     prCache: applyPRCacheResult(
@@ -1251,7 +1346,12 @@ export type GitHubSlice = {
    * background refresh when stale. Callers can render the cached list while
    * the SWR revalidate hydrates the latest.
    */
-  getCachedWorkItems: (repoId: string, limit: number, query: string) => GitHubWorkItem[] | null
+  getCachedWorkItems: (
+    repoId: string,
+    limit: number,
+    query: string,
+    repoPath?: string
+  ) => GitHubWorkItem[] | null
   /**
    * Why: the Tasks view header reads sources from the cache to render the
    * "Issues from owner/repo" indicator, and the Tasks empty/partial banner
@@ -1263,7 +1363,8 @@ export type GitHubSlice = {
   getWorkItemsSourcesAndError: (
     repoId: string,
     limit: number,
-    query: string
+    query: string,
+    repoPath?: string
   ) => { sources: WorkItemsCacheSources | null; error: WorkItemsCacheError | null }
   /**
    * Why: the dialog renders the "Issue from owner/repo" chip for a single work
@@ -1280,7 +1381,11 @@ export type GitHubSlice = {
    * mutated) on every write, so reference equality is preserved between
    * unchanged entries.
    */
-  getWorkItemsAnySourcesForRepo: (repoId: string, limit: number) => WorkItemsCacheSources | null
+  getWorkItemsAnySourcesForRepo: (
+    repoId: string,
+    limit: number,
+    repoPath?: string
+  ) => WorkItemsCacheSources | null
   fetchWorkItems: (
     repoId: string,
     repoPath: string,
@@ -1297,7 +1402,7 @@ export type GitHubSlice = {
    * the single-repo behavior of quietly serving stale data.
    */
   fetchWorkItemsAcrossRepos: (
-    repos: { repoId: string; path: string }[],
+    repos: { repoId: string; path: string; executionHostId?: string | null }[],
     perRepoLimit: number,
     displayLimit: number,
     query: string,
@@ -1308,7 +1413,7 @@ export type GitHubSlice = {
    * pagination pages are ephemeral and managed by TaskPage state.
    */
   fetchWorkItemsNextPage: (
-    repos: { repoId: string; path: string }[],
+    repos: { repoId: string; path: string; executionHostId?: string | null }[],
     perRepoLimit: number,
     displayLimit: number,
     query: string,
@@ -1319,7 +1424,7 @@ export type GitHubSlice = {
    * Returns the sum of per-repo counts for the given query.
    */
   countWorkItemsAcrossRepos: (
-    repos: { repoId: string; path: string }[],
+    repos: { repoId: string; path: string; executionHostId?: string | null }[],
     query: string
   ) => Promise<number>
   /**
@@ -1878,13 +1983,13 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
     applyRowPatch(set, cacheKey, rowId, nextRow)
   },
 
-  getCachedWorkItems: (repoId, limit, query) => {
-    const key = workItemsCacheKey(repoId, limit, query)
+  getCachedWorkItems: (repoId, limit, query, repoPath) => {
+    const key = getWorkItemsCacheKeyForOwner(get(), repoId, limit, query, repoPath)
     return get().workItemsCache[key]?.data ?? null
   },
 
-  getWorkItemsSourcesAndError: (repoId, limit, query) => {
-    const key = workItemsCacheKey(repoId, limit, query)
+  getWorkItemsSourcesAndError: (repoId, limit, query, repoPath) => {
+    const key = getWorkItemsCacheKeyForOwner(get(), repoId, limit, query, repoPath)
     const entry = get().workItemsCache[key]
     return {
       sources: entry?.sources ?? null,
@@ -1892,14 +1997,14 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
     }
   },
 
-  getWorkItemsAnySourcesForRepo: (repoId, limit) => {
+  getWorkItemsAnySourcesForRepo: (repoId, limit, repoPath) => {
     const cache = get().workItemsCache
-    const primaryKey = workItemsCacheKey(repoId, limit, '')
+    const primaryKey = getWorkItemsCacheKeyForOwner(get(), repoId, limit, '', repoPath)
     const primary = cache[primaryKey]?.sources
     if (primary) {
       return primary
     }
-    const prefix = `${repoId}::`
+    const prefix = primaryKey
     for (const [key, entry] of Object.entries(cache)) {
       if (key.startsWith(prefix) && entry.sources) {
         return entry.sources
@@ -1909,15 +2014,16 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
   },
 
   fetchWorkItems: async (repoId, repoPath, limit, query, options): Promise<GitHubWorkItem[]> => {
-    const key = workItemsCacheKey(repoId, limit, query)
+    const requestState = get()
+    const repo = findRepoForGitHubOwner(requestState, repoId, repoPath)
+    const requestSettings = settingsForGitHubRepoOwner(requestState.settings, repo)
+    const ownerHostId = repo ? getGitHubRepoOwnerHostId(requestState.settings, repo) : undefined
+    const key = workItemsCacheKey(repoId, limit, query, ownerHostId)
     const cached = get().workItemsCache[key]
     if (!options?.force && isFresh(cached, WORK_ITEMS_CACHE_TTL)) {
       return cached.data ?? []
     }
 
-    const requestState = get()
-    const requestSettings = requestState.settings
-    const requestRuntimeEnvironmentId = activeRuntimeEnvironmentId(requestSettings)
     const requestContext = getGitHubWorkItemRequestContext(
       requestState,
       requestSettings,
@@ -1968,9 +2074,13 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
           issuesError && envelope.sources.issues
             ? { ...issuesError, source: envelope.sources.issues }
             : undefined
-        // Why: runtime switches reset server-scoped caches; queued old-runtime
-        // responses can still satisfy callers but must not revive reset entries.
-        if (activeRuntimeEnvironmentId(get().settings) !== requestRuntimeEnvironmentId) {
+        const currentRepo = findRepoForGitHubOwner(get(), repoId, repoPath)
+        const currentHostId = currentRepo
+          ? getGitHubRepoOwnerHostId(get().settings, currentRepo)
+          : undefined
+        // Why: host focus changes are allowed, but repo ownership changes mean
+        // this response belongs to an older execution host bucket.
+        if ((currentHostId ?? null) !== (ownerHostId ?? null)) {
           return items
         }
         set((s) => ({
@@ -2021,7 +2131,7 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
           if (isGitHubWorkItemsSshRemoteRequiredError(err)) {
             return [] as GitHubWorkItem[]
           }
-          const key = workItemsCacheKey(r.repoId, perRepoLimit, query)
+          const key = getWorkItemsCacheKeyForOwner(get(), r.repoId, perRepoLimit, query, r.path)
           const cached = get().workItemsCache[key]?.data
           if (cached) {
             console.warn(`[workItems] ${r.repoId} failed, serving cached:`, err)
@@ -2042,7 +2152,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
     const perProjectResults = await Promise.all(
       repos.map(async (r) => {
         const requestState = get()
-        const requestSettings = requestState.settings
+        const repo = findRepoForGitHubOwner(requestState, r.repoId, r.path)
+        const requestSettings = settingsForGitHubRepoOwner(requestState.settings, repo)
         const requestContext = getGitHubWorkItemRequestContext(
           requestState,
           requestSettings,
@@ -2091,7 +2202,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       repos.map(async (r) => {
         try {
           const requestState = get()
-          const requestSettings = requestState.settings
+          const repo = findRepoForGitHubOwner(requestState, r.repoId, r.path)
+          const requestSettings = settingsForGitHubRepoOwner(requestState.settings, repo)
           const requestContext = getGitHubWorkItemRequestContext(
             requestState,
             requestSettings,
@@ -2108,12 +2220,14 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
   },
 
   prefetchWorkItems: (repoId, repoPath, limit = PER_REPO_FETCH_LIMIT, query = '') => {
-    const key = workItemsCacheKey(repoId, limit, query)
+    const key = getWorkItemsCacheKeyForOwner(get(), repoId, limit, query, repoPath)
     const cached = get().workItemsCache[key]
     const requestState = get()
+    const repo = findRepoForGitHubOwner(requestState, repoId, repoPath)
+    const requestSettings = settingsForGitHubRepoOwner(requestState.settings, repo)
     const requestContext = getGitHubWorkItemRequestContext(
       requestState,
-      requestState.settings,
+      requestSettings,
       repoId,
       repoPath
     )
@@ -2146,15 +2260,23 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       options?.repoId ? candidate.id === options.repoId : candidate.path === repoPath
     )
     const repoId = options?.repoId ?? repo?.id
-    const requestSettings = get().settings
-    const cacheKey = prCacheKey(repoPath, repoId, branch, requestSettings, repo?.connectionId)
+    const requestSettings = settingsForGitHubRepoOwner(get().settings, repo)
+    const cacheKey = prCacheKey(
+      repoPath,
+      repoId,
+      branch,
+      requestSettings,
+      repo?.connectionId,
+      repo?.executionHostId
+    )
     const cached = get().prCache[cacheKey]
     const hostedReviewCacheKey = getHostedReviewCacheKey(
       repoPath,
       branch,
       requestSettings,
       repoId,
-      repo?.connectionId
+      repo?.connectionId,
+      repo?.executionHostId
     )
     // Why: if a prior caller without a linkedPR cached `null` for this branch,
     // the worktree-card lookup (which has a linked PR fallback) would otherwise
@@ -2167,7 +2289,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       repoPath,
       repoId,
       branch,
-      repo?.connectionId
+      repo?.connectionId,
+      repo?.executionHostId
     )
     const fallbackPRNumber =
       linkedPRNumber == null ? (explicitFallbackPRNumber ?? hostedReviewFallbackPRNumber) : null
@@ -2228,6 +2351,7 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
                 fallbackPRNumber,
                 fallbackPRSource,
                 connectionId: repo?.connectionId ?? null,
+                executionHostId: repo?.executionHostId ?? null,
                 cachedFetchedAt: cached?.fetchedAt ?? null,
                 cachedHasPR: cached?.data ? true : cached ? false : null,
                 cachedPRState: cached?.data?.state ?? null,
@@ -2259,6 +2383,7 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
               settings: requestSettings,
               repoId,
               connectionId: repo?.connectionId,
+              executionHostId: repo?.executionHostId,
               pr,
               fetchedAt: outcome.fetchedAt,
               linkedPRNumber,
@@ -2306,8 +2431,17 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
   },
 
   fetchIssue: async (repoPath, number, options) => {
-    const repoId = options?.repoId ?? get().repos?.find((repo) => repo.path === repoPath)?.id
-    const cacheKey = repoScopedCacheKey(repoPath, repoId, String(number))
+    const repo = findRepoForGitHubOwner(get(), options?.repoId, repoPath)
+    const repoId = options?.repoId ?? repo?.id
+    const requestSettings = settingsForGitHubRepoOwner(get().settings, repo)
+    const cacheKey = issueCacheKey(
+      repoPath,
+      repoId,
+      number,
+      requestSettings,
+      repo?.connectionId,
+      repo?.executionHostId
+    )
     const cached = get().issueCache[cacheKey]
     if (isFresh(cached)) {
       return cached.data
@@ -2320,7 +2454,15 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
 
     const request = (async () => {
       try {
-        const issue = await window.api.gh.issue({ repoPath, repoId, number })
+        const runtimeRepo = getRuntimeRepoTarget(get(), repoPath, requestSettings)
+        const issue = runtimeRepo
+          ? await callRuntimeRpc<IssueInfo | null>(
+              runtimeRepo.target,
+              'github.issue',
+              { repo: runtimeRepo.repo.id, number },
+              { timeoutMs: 30_000 }
+            )
+          : await window.api.gh.issue({ repoPath, repoId, number })
         set((s) => ({
           issueCache: withBoundedCacheEntry(s.issueCache, cacheKey, {
             data: issue,
@@ -2360,13 +2502,14 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       options?.repoId ? candidate.id === options.repoId : candidate.path === repoPath
     )
     const repoId = options?.repoId ?? repo?.id
-    const requestSettings = get().settings
+    const requestSettings = settingsForGitHubRepoOwner(get().settings, repo)
     const cacheKey = runtimeScopedRepoCacheKey(
       repoPath,
       repoId,
       prChecksCacheSuffix(prNumber, prRepo, headSha),
       requestSettings,
-      repo?.connectionId
+      repo?.connectionId,
+      repo?.executionHostId
     )
     const legacyCacheKey = headSha
       ? runtimeScopedRepoCacheKey(
@@ -2374,7 +2517,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
           repoId,
           prChecksCacheSuffix(prNumber, prRepo),
           requestSettings,
-          repo?.connectionId
+          repo?.connectionId,
+          repo?.executionHostId
         )
       : cacheKey
     const inflightKey = cacheKey
@@ -2394,7 +2538,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
         cached.headSha,
         prRepo,
         requestSettings,
-        repo?.connectionId
+        repo?.connectionId,
+        repo?.executionHostId
       )
       if (prStatusUpdate) {
         set(prStatusUpdate)
@@ -2450,7 +2595,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
             headSha,
             prRepo,
             requestSettings,
-            repo?.connectionId
+            repo?.connectionId,
+            repo?.executionHostId
           )
           if (prStatusUpdate?.prCache) {
             nextState.prCache = prStatusUpdate.prCache
@@ -2513,13 +2659,14 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       options?.repoId ? candidate.id === options.repoId : candidate.path === repoPath
     )
     const repoId = options?.repoId ?? repo?.id
-    const requestSettings = get().settings
+    const requestSettings = settingsForGitHubRepoOwner(get().settings, repo)
     const cacheKey = runtimeScopedRepoCacheKey(
       repoPath,
       repoId,
       prCommentsCacheSuffix(prNumber, options?.prRepo),
       requestSettings,
-      repo?.connectionId
+      repo?.connectionId,
+      repo?.executionHostId
     )
     const cached = get().commentsCache[cacheKey]
     if (!options?.force && isFresh(cached)) {
@@ -2577,13 +2724,14 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       options?.repoId ? candidate.id === options.repoId : candidate.path === repoPath
     )
     const repoId = options?.repoId ?? repo?.id
-    const requestSettings = get().settings
+    const requestSettings = settingsForGitHubRepoOwner(get().settings, repo)
     const cacheKey = runtimeScopedRepoCacheKey(
       repoPath,
       repoId,
       prCommentsCacheSuffix(prNumber, options?.prRepo),
       requestSettings,
-      repo?.connectionId
+      repo?.connectionId,
+      repo?.executionHostId
     )
     const runtimeRepo = getRuntimeRepoTarget(get(), repoPath, requestSettings)
     let result: GitHubCommentResult
@@ -2641,13 +2789,14 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       options?.repoId ? candidate.id === options.repoId : candidate.path === repoPath
     )
     const repoId = options?.repoId ?? repo?.id
-    const requestSettings = get().settings
+    const requestSettings = settingsForGitHubRepoOwner(get().settings, repo)
     const cacheKey = runtimeScopedRepoCacheKey(
       repoPath,
       repoId,
       prCommentsCacheSuffix(prNumber, options?.prRepo),
       requestSettings,
-      repo?.connectionId
+      repo?.connectionId,
+      repo?.executionHostId
     )
     const runtimeRepo = getRuntimeRepoTarget(get(), repoPath, requestSettings)
     let result: GitHubCommentResult
@@ -2717,13 +2866,14 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       options?.repoId ? candidate.id === options.repoId : candidate.path === repoPath
     )
     const repoId = options?.repoId ?? repo?.id
-    const requestSettings = get().settings
+    const requestSettings = settingsForGitHubRepoOwner(get().settings, repo)
     const cacheKey = runtimeScopedRepoCacheKey(
       repoPath,
       repoId,
       prCommentsCacheSuffix(prNumber, options?.prRepo),
       requestSettings,
-      repo?.connectionId
+      repo?.connectionId,
+      repo?.executionHostId
     )
 
     // Optimistic update: toggle isResolved on all comments in this thread immediately
@@ -2839,12 +2989,6 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
 
   applyGitHubPRRefreshEvent: (event) => {
     set((s) => {
-      // Why: local main-process refresh events are keyed only by repo/branch;
-      // applying them while a runtime is active can leak local PR state into SSH.
-      if (getActiveRuntimeTarget(s.settings).kind === 'environment') {
-        deletePRRefreshStartedEntriesForEvent(event, s.prRefreshSequences)
-        return {}
-      }
       const nextSequences = { ...s.prRefreshSequences }
       const nextStates = { ...s.prRefreshStates }
       let nextPRCache = s.prCache
@@ -2852,6 +2996,7 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       let changed = false
 
       for (const alias of event.aliases) {
+        const aliasExecutionHostId = getRefreshAliasExecutionHostId(alias)
         const previousSequence = nextSequences[alias.cacheKey] ?? 0
         if (
           event.outcome ? event.sequence < previousSequence : event.sequence <= previousSequence
@@ -2893,7 +3038,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
                             alias.repoId,
                             prChecksCacheSuffix(pr.number, pr.prRepo),
                             s.settings,
-                            alias.connectionId
+                            alias.connectionId,
+                            aliasExecutionHostId
                           )
                         ]
                       : []),
@@ -2902,7 +3048,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
                       undefined,
                       prChecksCacheSuffix(pr.number, pr.prRepo),
                       s.settings,
-                      alias.connectionId
+                      alias.connectionId,
+                      aliasExecutionHostId
                     ),
                     `${alias.repoPath}::pr-checks::${pr.number}`
                   ]
@@ -2930,6 +3077,7 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
             settings: s.settings,
             repoId: alias.repoId,
             connectionId: alias.connectionId,
+            executionHostId: aliasExecutionHostId,
             pr: data,
             fetchedAt: event.outcome.fetchedAt,
             linkedPRNumber: alias.linkedPRNumber,
@@ -2953,7 +3101,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
               alias.branch,
               s.settings,
               alias.repoId,
-              alias.connectionId
+              alias.connectionId,
+              aliasExecutionHostId
             )
             setPRRefreshStartedHostedReviewEntry(
               prRefreshStartedEntryKey(event.sequence, alias.cacheKey),
@@ -3028,7 +3177,15 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
 
         const branch = wt.branch.replace(/^refs\/heads\//, '')
         if (shouldRefreshPRs && !wt.isBare && branch) {
-          const prKey = prCacheKey(repo.path, repo.id, branch, state.settings, repo.connectionId)
+          const ownerSettings = settingsForGitHubRepoOwner(state.settings, repo)
+          const prKey = prCacheKey(
+            repo.path,
+            repo.id,
+            branch,
+            ownerSettings,
+            repo.connectionId,
+            repo.executionHostId
+          )
           const prEntry = state.prCache[prKey]
           if (!prEntry || now - prEntry.fetchedAt >= CACHE_TTL) {
             const candidate = buildPRRefreshCandidate(state, wt)
@@ -3043,7 +3200,15 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
           }
         }
         if (shouldRefreshIssues && wt.linkedIssue) {
-          const issueKey = repoScopedCacheKey(repo.path, repo.id, String(wt.linkedIssue))
+          const ownerSettings = settingsForGitHubRepoOwner(state.settings, repo)
+          const issueKey = issueCacheKey(
+            repo.path,
+            repo.id,
+            wt.linkedIssue,
+            ownerSettings,
+            repo.connectionId,
+            repo.executionHostId
+          )
           const issueEntry = state.issueCache[issueKey]
           if (!issueEntry || now - issueEntry.fetchedAt >= CACHE_TTL) {
             void get().fetchIssue(repo.path, wt.linkedIssue, { repoId: repo.id })
@@ -3055,7 +3220,11 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       .sort((a, b) => b.score - a.score)
       .slice(0, isPRStatusGrouping ? stalePRCandidates.length : 5)
     for (const { candidate } of candidatesToRefresh) {
-      if (getRuntimeRepoTarget(state, candidate.repoPath)) {
+      const candidateSettings = settingsForGitHubRepoOwner(
+        state.settings,
+        candidate as Pick<Repo, 'connectionId' | 'executionHostId'>
+      )
+      if (getRuntimeRepoTarget(state, candidate.repoPath, candidateSettings)) {
         void get().fetchPRForBranch(candidate.repoPath, candidate.branch, {
           repoId: candidate.repoId,
           linkedPRNumber: candidate.linkedPRNumber ?? null,
@@ -3088,9 +3257,24 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
 
     // Invalidate this worktree's cache entries
     const branch = worktree.branch.replace(/^refs\/heads\//, '')
-    const prKey = prCacheKey(repo.path, repo.id, branch, state.settings, repo.connectionId)
+    const ownerSettings = settingsForGitHubRepoOwner(state.settings, repo)
+    const prKey = prCacheKey(
+      repo.path,
+      repo.id,
+      branch,
+      ownerSettings,
+      repo.connectionId,
+      repo.executionHostId
+    )
     const issueKey = worktree.linkedIssue
-      ? repoScopedCacheKey(repo.path, repo.id, String(worktree.linkedIssue))
+      ? issueCacheKey(
+          repo.path,
+          repo.id,
+          worktree.linkedIssue,
+          ownerSettings,
+          repo.connectionId,
+          repo.executionHostId
+        )
       : ''
 
     set((s) => {
@@ -3310,7 +3494,15 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
     }
 
     if (shouldRefreshIssueDecorations(state) && worktree.linkedIssue) {
-      const issueKey = repoScopedCacheKey(repo.path, repo.id, String(worktree.linkedIssue))
+      const ownerSettings = settingsForGitHubRepoOwner(state.settings, repo)
+      const issueKey = issueCacheKey(
+        repo.path,
+        repo.id,
+        worktree.linkedIssue,
+        ownerSettings,
+        repo.connectionId,
+        repo.executionHostId
+      )
       const issueEntry = state.issueCache[issueKey]
       if (!issueEntry || now - issueEntry.fetchedAt >= CACHE_TTL) {
         void get().fetchIssue(repo.path, worktree.linkedIssue, { repoId: repo.id })

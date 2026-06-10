@@ -33,6 +33,10 @@ import {
 } from '@/store/slices/worktree-nav-history'
 import { isTuiAgent } from '../../../shared/tui-agent-config'
 import { resumeSleepingAgentSessionsForWorktree } from '@/lib/resume-sleeping-agent-session'
+import {
+  getRuntimeEnvironmentIdForWorktree,
+  type WorktreeRuntimeOwnerState
+} from '@/lib/worktree-runtime-owner'
 
 /** Telemetry payload threaded from the launch site to `pty:spawn`. Main
  *  fires `agent_started` only after the spawn succeeds — see
@@ -56,7 +60,7 @@ export type IssueCommandLaunch =
   | WorktreeSetupLaunch
   | { command: string; env?: Record<string, string> }
 
-type WorktreeActivationStore = {
+type WorktreeActivationStore = Partial<WorktreeRuntimeOwnerState> & {
   tabsByWorktree: Record<string, { id: string }[]>
   defaultTerminalTabsAppliedByWorktreeId: Record<string, true>
   createTab: (
@@ -185,14 +189,16 @@ export function activateAndRevealWorktree(
   // 3. Core activation: sets activeWorktreeId, restores per-worktree state,
   // clears unread, bumps dead PTY generations, triggers GitHub refresh
   state.setActiveWorktree(worktreeId)
-  if (
-    opts?.notifyHostRuntime !== false &&
-    isWebRuntimeSessionActive(useAppStore.getState().settings?.activeRuntimeEnvironmentId)
-  ) {
+  const postActivationState = useAppStore.getState()
+  const ownerRuntimeEnvironmentId = getRuntimeEnvironmentIdForWorktree(postActivationState, wt.id)
+  if (opts?.notifyHostRuntime !== false && isWebRuntimeSessionActive(ownerRuntimeEnvironmentId)) {
     // Why: paired web clients own only local selection state. The desktop host
     // must also activate the worktree so hidden renderer-owned terminal panes
     // mount and publish session surfaces back to the web client.
-    void activateWebRuntimeSessionWorktree({ worktreeId })
+    void activateWebRuntimeSessionWorktree({
+      worktreeId,
+      environmentId: ownerRuntimeEnvironmentId
+    })
   }
 
   // Why: record focus recency for Cmd+J's empty-query ordering BEFORE any
@@ -251,7 +257,11 @@ export function activateAndRevealWorktree(
 
 export function ensureWebRuntimeWorktreeTerminalAfterWake(worktreeId: string): void {
   const state = useAppStore.getState()
-  const runtimeEnvironmentId = state.settings?.activeRuntimeEnvironmentId?.trim()
+  const worktree = state.getKnownWorktreeById(worktreeId)
+  if (!worktree) {
+    return
+  }
+  const runtimeEnvironmentId = getRuntimeEnvironmentIdForWorktree(state, worktree.id)
   if (!runtimeEnvironmentId || !isWebRuntimeSessionActive(runtimeEnvironmentId)) {
     return
   }
@@ -315,9 +325,11 @@ export function ensureWorktreeHasInitialTerminal(
   }
   // Why: remote web clients mirror the runtime server's session tabs. A local
   // activation fallback can spawn a second host terminal before the mirror lands.
-  if (
-    isWebRuntimeSessionActive(useAppStore.getState().settings?.activeRuntimeEnvironmentId ?? null)
-  ) {
+  const ownerState =
+    store.settings !== undefined || store.repos !== undefined || store.worktreesByRepo !== undefined
+      ? store
+      : useAppStore.getState()
+  if (isWebRuntimeSessionActive(getRuntimeEnvironmentIdForWorktree(ownerState, worktreeId))) {
     return null
   }
 

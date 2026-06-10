@@ -631,6 +631,38 @@ describe('fetchWorktrees', () => {
     expect(mockApi.worktrees.listDetected).not.toHaveBeenCalled()
   })
 
+  it('fetches SSH repo worktrees through local IPC even when a runtime is focused', async () => {
+    const store = createTestStore()
+    const sshWorktree = makeWorktree({
+      id: 'repo-ssh::/home/orca/wt1',
+      repoId: 'repo-ssh',
+      path: '/home/orca/wt1',
+      branch: 'refs/heads/ssh'
+    })
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-1' } as never,
+      repos: [
+        {
+          id: 'repo-ssh',
+          path: '/home/orca/repo',
+          displayName: 'SSH Repo',
+          badgeColor: '#000',
+          addedAt: 0,
+          connectionId: 'ssh-1'
+        }
+      ]
+    } as Partial<AppState>)
+    mockApi.worktrees.listDetected.mockResolvedValueOnce(
+      makeDetectedResult('repo-ssh', [sshWorktree], { source: 'git' })
+    )
+
+    await store.getState().fetchWorktrees('repo-ssh')
+
+    expect(mockApi.worktrees.listDetected).toHaveBeenCalledWith({ repoId: 'repo-ssh' })
+    expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
+    expect(store.getState().worktreesByRepo['repo-ssh']).toEqual([sshWorktree])
+  })
+
   it('falls back to legacy remote worktree.list when detectedList is unavailable', async () => {
     const store = createTestStore()
     const remote = makeWorktree({
@@ -2235,6 +2267,40 @@ describe('worktree remote runtime mutations', () => {
     expect(store.getState().worktreesByRepo.repo1).toEqual([])
   })
 
+  it('removes SSH-owned worktrees through local IPC even when a runtime is focused', async () => {
+    const store = createTestStore()
+    const wt = makeWorktree({
+      id: 'repo-ssh::/home/orca/wt1',
+      repoId: 'repo-ssh',
+      path: '/home/orca/wt1'
+    })
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-1' } as never,
+      repos: [
+        {
+          id: 'repo-ssh',
+          path: '/home/orca/repo',
+          displayName: 'SSH Repo',
+          badgeColor: '#000',
+          addedAt: 0,
+          connectionId: 'ssh-1'
+        }
+      ],
+      worktreesByRepo: { 'repo-ssh': [wt] }
+    } as Partial<AppState>)
+
+    const result = await store.getState().removeWorktree(wt.id)
+
+    expect(result).toEqual({ ok: true })
+    expect(mockApi.worktrees.remove).toHaveBeenCalledWith({
+      worktreeId: wt.id,
+      force: undefined,
+      skipArchive: false
+    })
+    expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
+    expect(store.getState().worktreesByRepo['repo-ssh']).toEqual([])
+  })
+
   it('persists worktree metadata through the active remote runtime environment', async () => {
     const store = createTestStore()
     const wt = makeWorktree({ id: 'repo1::/path/wt1', repoId: 'repo1', path: '/path/wt1' })
@@ -2259,6 +2325,38 @@ describe('worktree remote runtime mutations', () => {
     })
     expect(mockApi.worktrees.updateMeta).not.toHaveBeenCalled()
     expect(store.getState().worktreesByRepo.repo1[0]?.comment).toBe('remote note')
+  })
+
+  it('persists SSH-owned worktree metadata through local IPC even when a runtime is focused', async () => {
+    const store = createTestStore()
+    const wt = makeWorktree({
+      id: 'repo-ssh::/home/orca/wt1',
+      repoId: 'repo-ssh',
+      path: '/home/orca/wt1'
+    })
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-1' } as never,
+      repos: [
+        {
+          id: 'repo-ssh',
+          path: '/home/orca/repo',
+          displayName: 'SSH Repo',
+          badgeColor: '#000',
+          addedAt: 0,
+          connectionId: 'ssh-1'
+        }
+      ],
+      worktreesByRepo: { 'repo-ssh': [wt] }
+    } as Partial<AppState>)
+
+    await store.getState().updateWorktreeMeta(wt.id, { comment: 'ssh note' })
+
+    expect(mockApi.worktrees.updateMeta).toHaveBeenCalledWith({
+      worktreeId: wt.id,
+      updates: expect.objectContaining({ comment: 'ssh note' })
+    })
+    expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
+    expect(store.getState().worktreesByRepo['repo-ssh'][0]?.comment).toBe('ssh note')
   })
 
   it('clears pending first-agent rename when the title is updated', async () => {

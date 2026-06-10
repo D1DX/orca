@@ -4,6 +4,13 @@ import { isInactiveWorkspace } from '@/lib/worktree-activity-state'
 import { useAppStore } from '@/store'
 import { getAllWorktreesFromState, getRepoMapFromState } from '@/store/selectors'
 import { DEFAULT_SHOW_SLEEPING_WORKSPACES } from '../../../../shared/constants'
+import {
+  ALL_EXECUTION_HOSTS_SCOPE,
+  getRepoExecutionHostId,
+  getSettingsFocusedExecutionHostId,
+  type ExecutionHostId,
+  type ExecutionHostScope
+} from '../../../../shared/execution-host'
 
 /**
  * Whether a worktree represents the repo's default-branch row that the
@@ -93,6 +100,8 @@ export function computeVisibleWorktreeIds(
     // forgetting to pass it.
     hideDefaultBranchWorkspace: boolean
     repoMap: Map<string, Repo>
+    workspaceHostScope: ExecutionHostScope
+    defaultHostId: ExecutionHostId
     worktreeLineageById: Record<string, WorktreeLineage>
   }
 ): string[] {
@@ -107,6 +116,20 @@ export function computeVisibleWorktreeIds(
 
   if (opts.hideDefaultBranchWorkspace) {
     all = all.filter((w) => !isDefaultBranchWorkspace(w))
+  }
+
+  if (opts.workspaceHostScope !== ALL_EXECUTION_HOSTS_SCOPE) {
+    all = all.filter((w) => {
+      const repo = opts.repoMap.get(w.repoId)
+      if (!repo) {
+        return false
+      }
+      const hostId =
+        repo.connectionId || repo.executionHostId
+          ? getRepoExecutionHostId(repo)
+          : opts.defaultHostId
+      return hostId === opts.workspaceHostScope
+    })
   }
 
   // Filter by repo
@@ -258,6 +281,8 @@ export function getVisibleWorktreeIds(): string[] {
     browserTabsByWorktree: state.browserTabsByWorktree,
     hideDefaultBranchWorkspace: state.hideDefaultBranchWorkspace,
     repoMap,
+    workspaceHostScope: state.workspaceHostScope,
+    defaultHostId: getSettingsFocusedExecutionHostId(state.settings),
     worktreeLineageById: state.worktreeLineageById
   })
 }

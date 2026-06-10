@@ -24,12 +24,22 @@ const remoteRepo: Repo = {
   addedAt: 2
 }
 
+const sshRepo: Repo = {
+  id: 'ssh-repo',
+  path: '/home/orca/project',
+  displayName: 'SSH',
+  badgeColor: '#222',
+  addedAt: 3,
+  connectionId: 'ssh-1'
+}
+
 const reposList = vi.fn()
 const reposAdd = vi.fn()
 const reposPickFolder = vi.fn()
 const reposRemove = vi.fn()
 const reposUpdate = vi.fn()
 const reposReorder = vi.fn()
+const projectGroupsMoveProject = vi.fn()
 const ptyKill = vi.fn()
 const runtimeEnvironmentCall = vi.fn()
 const runtimeEnvironmentTransportCall = vi.fn()
@@ -42,6 +52,7 @@ beforeEach(() => {
   reposRemove.mockReset()
   reposUpdate.mockReset()
   reposReorder.mockReset()
+  projectGroupsMoveProject.mockReset()
   ptyKill.mockReset()
   runtimeEnvironmentCall.mockReset()
   runtimeEnvironmentTransportCall.mockReset()
@@ -58,6 +69,9 @@ beforeEach(() => {
         update: reposUpdate,
         reorder: reposReorder
       },
+      projectGroups: {
+        moveProject: projectGroupsMoveProject
+      },
       pty: { kill: ptyKill },
       runtimeEnvironments: { call: runtimeEnvironmentTransportCall }
     }
@@ -71,7 +85,7 @@ describe('repo slice runtime routing', () => {
 
     await store.getState().fetchRepos()
 
-    expect(store.getState().repos).toEqual([localRepo])
+    expect(store.getState().repos).toEqual([{ ...localRepo, executionHostId: 'local' }])
     expect(reposList).toHaveBeenCalled()
     expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
   })
@@ -92,7 +106,7 @@ describe('repo slice runtime routing', () => {
 
     await store.getState().fetchRepos()
 
-    expect(store.getState().repos).toEqual([remoteRepo])
+    expect(store.getState().repos).toEqual([{ ...remoteRepo, executionHostId: 'runtime:env-1' }])
     expect(store.getState().activeRepoId).toBeNull()
     expect(store.getState().filterRepoIds).toEqual(['remote-repo'])
     expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
@@ -120,6 +134,7 @@ describe('repo slice runtime routing', () => {
     await store.getState().updateRepo(remoteRepo.id, { displayName: 'Renamed' })
 
     expect(store.getState().repos[0]?.displayName).toBe('Renamed')
+    expect(store.getState().repos[0]?.executionHostId).toBe('runtime:env-1')
     expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
       selector: 'env-1',
       method: 'repo.update',
@@ -127,6 +142,24 @@ describe('repo slice runtime routing', () => {
       timeoutMs: 15_000
     })
     expect(reposUpdate).not.toHaveBeenCalled()
+  })
+
+  it('updates SSH-owned repos through local IPC even when a runtime is focused', async () => {
+    reposUpdate.mockResolvedValue({ ...sshRepo, displayName: 'SSH Renamed' })
+    const store = createTestStore()
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-1' } as never,
+      repos: [sshRepo]
+    })
+
+    await store.getState().updateRepo(sshRepo.id, { displayName: 'SSH Renamed' })
+
+    expect(store.getState().repos[0]?.displayName).toBe('SSH Renamed')
+    expect(reposUpdate).toHaveBeenCalledWith({
+      repoId: sshRepo.id,
+      updates: { displayName: 'SSH Renamed' }
+    })
+    expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
   })
 
   it('adds explicit server paths through the active remote runtime environment', async () => {
@@ -141,11 +174,12 @@ describe('repo slice runtime routing', () => {
       settings: { activeRuntimeEnvironmentId: 'env-1' } as never
     })
 
-    await expect(store.getState().addRepoPath('/srv/project', 'folder')).resolves.toEqual(
-      remoteRepo
-    )
+    await expect(store.getState().addRepoPath('/srv/project', 'folder')).resolves.toEqual({
+      ...remoteRepo,
+      executionHostId: 'runtime:env-1'
+    })
 
-    expect(store.getState().repos).toEqual([remoteRepo])
+    expect(store.getState().repos).toEqual([{ ...remoteRepo, executionHostId: 'runtime:env-1' }])
     expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
       selector: 'env-1',
       method: 'repo.add',
@@ -154,6 +188,33 @@ describe('repo slice runtime routing', () => {
     })
     expect(reposAdd).not.toHaveBeenCalled()
     expect(reposPickFolder).not.toHaveBeenCalled()
+  })
+
+  it('keeps runtime ownership when a runtime repo is moved between groups', async () => {
+    runtimeEnvironmentCall.mockResolvedValue({
+      id: 'rpc-move',
+      ok: true,
+      result: { repo: { ...remoteRepo, projectGroupId: 'group-1' } },
+      _meta: { runtimeId: 'runtime-remote' }
+    })
+    const store = createTestStore()
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-1' } as never,
+      repos: [{ ...remoteRepo, executionHostId: 'runtime:env-1' }]
+    })
+
+    await expect(store.getState().moveProjectToGroup(remoteRepo.id, 'group-1')).resolves.toBe(true)
+
+    expect(store.getState().repos).toEqual([
+      { ...remoteRepo, projectGroupId: 'group-1', executionHostId: 'runtime:env-1' }
+    ])
+    expect(runtimeEnvironmentCall).toHaveBeenCalledWith({
+      selector: 'env-1',
+      method: 'projectGroup.moveProject',
+      params: { repo: remoteRepo.id, groupId: 'group-1', order: undefined },
+      timeoutMs: 15_000
+    })
+    expect(projectGroupsMoveProject).not.toHaveBeenCalled()
   })
 
   it('does not open the client folder picker when a remote runtime environment is active', async () => {
@@ -193,6 +254,26 @@ describe('repo slice runtime routing', () => {
       timeoutMs: 15_000
     })
     expect(reposRemove).not.toHaveBeenCalled()
+  })
+
+  it('removes SSH-owned repos through local IPC even when a runtime is focused', async () => {
+    const store = createTestStore()
+    const worktreeId = `${sshRepo.id}::/home/orca/wt`
+    store.setState({
+      settings: { activeRuntimeEnvironmentId: 'env-1' } as never,
+      repos: [sshRepo],
+      activeRepoId: sshRepo.id,
+      worktreesByRepo: {
+        [sshRepo.id]: [makeWorktree({ id: worktreeId, repoId: sshRepo.id })]
+      }
+    })
+
+    await store.getState().removeProject(sshRepo.id)
+
+    expect(store.getState().repos).toEqual([])
+    expect(store.getState().activeRepoId).toBeNull()
+    expect(reposRemove).toHaveBeenCalledWith({ repoId: sshRepo.id })
+    expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
   })
 
   it('evicts GitHub caches for removed repos using repo id and legacy path keys', async () => {

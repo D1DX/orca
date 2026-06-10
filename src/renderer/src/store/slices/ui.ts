@@ -21,7 +21,8 @@ import type {
   WorkspaceStatusDefinition,
   AgentActivityDisplayMode,
   ProjectOrderBy,
-  WorktreeCardProperty
+  WorktreeCardProperty,
+  WorkspaceHostScope
 } from '../../../../shared/types'
 import type { LaunchSource } from '../../../../shared/telemetry-events'
 import { tuiAgentToAgentKind } from '../../../../shared/agent-kind'
@@ -61,6 +62,7 @@ import {
   DEFAULT_BROWSER_PAGE_ZOOM_LEVEL,
   normalizeBrowserPageZoomLevel
 } from '../../../../shared/browser-page-zoom'
+import { normalizeExecutionHostScope } from '../../../../shared/execution-host'
 import {
   WORKSPACE_BOARD_COLUMN_WIDTH_DEFAULT,
   clampWorkspaceBoardColumnWidth,
@@ -744,6 +746,8 @@ export type UISlice = {
   setShowActiveOnly: (v: boolean) => void
   showSleepingWorkspaces: boolean
   setShowSleepingWorkspaces: (v: boolean) => void
+  workspaceHostScope: WorkspaceHostScope
+  setWorkspaceHostScope: (scope: WorkspaceHostScope) => void
   hideDefaultBranchWorkspace: boolean
   setHideDefaultBranchWorkspace: (v: boolean) => void
   showDotfilesByWorktree: Record<string, boolean>
@@ -768,8 +772,10 @@ export type UISlice = {
   statusBarVisible: boolean
   setStatusBarVisible: (v: boolean) => void
   workspacePortScan: { key: string; result: WorkspacePortScanResult } | null
+  workspacePortScansByKey: Record<string, WorkspacePortScanResult>
   workspacePortScanRefreshing: boolean
   setWorkspacePortScan: (scan: { key: string; result: WorkspacePortScanResult } | null) => void
+  setWorkspacePortScanForKey: (key: string, result: WorkspacePortScanResult | null) => void
   setWorkspacePortScanRefreshing: (refreshing: boolean) => void
   /** Whether the experimental pet overlay is currently visible. Persisted
    *  so "Hide pet" from the status-bar menu survives reload. Independent
@@ -1712,6 +1718,13 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
   showSleepingWorkspaces: DEFAULT_SHOW_SLEEPING_WORKSPACES,
   setShowSleepingWorkspaces: (v) => set({ showSleepingWorkspaces: v }),
 
+  workspaceHostScope: 'all',
+  setWorkspaceHostScope: (scope) => {
+    const normalized = normalizeExecutionHostScope(scope)
+    set({ workspaceHostScope: normalized })
+    window.api.ui.set({ workspaceHostScope: normalized }).catch(console.error)
+  },
+
   hideDefaultBranchWorkspace: false,
   setHideDefaultBranchWorkspace: (v) => set({ hideDefaultBranchWorkspace: v }),
 
@@ -1821,8 +1834,36 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
     set({ statusBarVisible: v })
   },
   workspacePortScan: null,
+  workspacePortScansByKey: {},
   workspacePortScanRefreshing: false,
-  setWorkspacePortScan: (scan) => set({ workspacePortScan: scan }),
+  setWorkspacePortScan: (scan) =>
+    set((state) => {
+      if (!scan) {
+        return { workspacePortScan: null, workspacePortScansByKey: {} }
+      }
+      return {
+        workspacePortScan: scan,
+        workspacePortScansByKey: { ...state.workspacePortScansByKey, [scan.key]: scan.result }
+      }
+    }),
+  setWorkspacePortScanForKey: (key, result) =>
+    set((state) => {
+      const nextScansByKey = { ...state.workspacePortScansByKey }
+      if (result) {
+        nextScansByKey[key] = result
+      } else {
+        delete nextScansByKey[key]
+      }
+      return {
+        workspacePortScansByKey: nextScansByKey,
+        workspacePortScan:
+          state.workspacePortScan?.key === key
+            ? result
+              ? { key, result }
+              : null
+            : state.workspacePortScan
+      }
+    }),
   setWorkspacePortScanRefreshing: (refreshing) => set({ workspacePortScanRefreshing: refreshing }),
 
   // Why: default true so a user who enables experimentalPet sees the
@@ -1978,6 +2019,7 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
         // Older positive-form keys are intentionally ignored so old profiles
         // start from the new default: sleeping workspaces visible.
         showSleepingWorkspaces: !(ui.hideSleepingWorkspaces ?? DEFAULT_HIDE_SLEEPING_WORKSPACES),
+        workspaceHostScope: normalizeExecutionHostScope(ui.workspaceHostScope),
         hideDefaultBranchWorkspace: ui.hideDefaultBranchWorkspace ?? false,
         showDotfilesByWorktree: sanitizeShowDotfilesByWorktree(ui.showDotfilesByWorktree),
         filterRepoIds: (ui.filterRepoIds ?? []).filter((repoId) => validRepoIds.has(repoId)),

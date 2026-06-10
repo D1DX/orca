@@ -80,6 +80,7 @@ import {
 } from '@/lib/new-workspace-ssh-gate'
 import { getComposerEligibleRepos, resolveComposerRepoId } from '@/lib/new-workspace-composer-repo'
 import { queueNewWorkspaceTerminalFocus } from '@/lib/new-workspace-terminal-focus'
+import { getSettingsForRepoRuntimeOwner } from '@/lib/repo-runtime-owner'
 import { getSuggestedCreatureName } from '@/components/sidebar/worktree-name-suggestions'
 import type { SmartWorkspaceNameSelection } from '@/components/new-workspace/SmartWorkspaceNameField'
 import { getForkPushWarning } from './fork-push-warning'
@@ -338,6 +339,17 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
   const [projectError, setProjectError] = useState<string | null>(null)
   const repoId = repoIdOverride ?? internalRepoId
   const selectedRepo = eligibleRepos.find((repo) => repo.id === repoId)
+  const selectedRepoSettings = useMemo(() => {
+    if (!settings) {
+      return settings
+    }
+    // Why: composer probes and attachment uploads inspect the selected repo,
+    // even though workspace creation defaults still follow host scope.
+    return getSettingsForRepoRuntimeOwner(
+      { repos: selectedRepo ? [selectedRepo] : [], settings },
+      selectedRepo?.id ?? null
+    )
+  }, [selectedRepo, settings])
   const selectedRepoIsGit = selectedRepo ? isGitRepoKind(selectedRepo) : false
   const selectedRepoConnectionId = selectedRepo?.connectionId ?? null
   const selectedRepoSshState = selectedRepoConnectionId
@@ -553,8 +565,8 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
   const selectedRepoPath = selectedRepo?.path
   const selectedRepoPathRef = useRef<string | undefined>(selectedRepoPath)
   selectedRepoPathRef.current = selectedRepoPath
-  const settingsRef = useRef(settings)
-  settingsRef.current = settings
+  const selectedRepoSettingsRef = useRef(selectedRepoSettings)
+  selectedRepoSettingsRef.current = selectedRepoSettings
 
   const cancelPromptCaretFrame = useCallback((): void => {
     if (promptCaretFrameRef.current === null) {
@@ -580,12 +592,12 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     promise: Promise<HookCheckResult>
   } | null>(null)
   const loadHookCheckForRepo = useCallback((targetRepoId: string): Promise<HookCheckResult> => {
-    const key = `${settingsRef.current?.activeRuntimeEnvironmentId ?? 'local'}:${targetRepoId}`
+    const key = `${selectedRepoSettingsRef.current?.activeRuntimeEnvironmentId ?? 'local'}:${targetRepoId}`
     const existing = hookCheckRef.current
     if (existing?.key === key) {
       return existing.promise
     }
-    const promise = checkRuntimeHooks(settingsRef.current, targetRepoId)
+    const promise = checkRuntimeHooks(selectedRepoSettingsRef.current, targetRepoId)
     hookCheckRef.current = { key, promise }
     return promise
   }, [])
@@ -606,12 +618,20 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       return
     }
     let cancelled = false
-    void (
-      window.api.gh.repoSlug({ repoPath: selectedRepoPath, repoId }) as Promise<{
-        owner: string
-        repo: string
-      } | null>
-    )
+    const target = getActiveRuntimeTarget(selectedRepoSettings)
+    const slugRequest =
+      target.kind === 'environment'
+        ? callRuntimeRpc<{ owner: string; repo: string } | null>(
+            target,
+            'github.repoSlug',
+            { repo: repoId },
+            { timeoutMs: 30_000 }
+          )
+        : (window.api.gh.repoSlug({ repoPath: selectedRepoPath, repoId }) as Promise<{
+            owner: string
+            repo: string
+          } | null>)
+    void slugRequest
       .then((result) => {
         if (cancelled) {
           return
@@ -626,7 +646,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     return () => {
       cancelled = true
     }
-  }, [repoId, selectedRepo, selectedRepoIsGit, selectedRepoPath])
+  }, [repoId, selectedRepo, selectedRepoIsGit, selectedRepoPath, selectedRepoSettings])
   const sparsePresetsForRepo = sparsePresetsByRepo[repoId]
   const sparsePresets = sparsePresetsForRepo ?? EMPTY_SPARSE_PRESETS
   const normalizedSparseDirectories = useMemo(
@@ -926,7 +946,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       }
     }
 
-    void readRuntimeIssueCommand(settings, repoId)
+    void readRuntimeIssueCommand(selectedRepoSettings, repoId)
       .then((result) => {
         if (!cancelled) {
           setIssueCommandTemplate(result.effectiveContent ?? '')
@@ -949,7 +969,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     loadHookCheckForRepo,
     repoId,
     selectedRepoIsGit,
-    settings
+    selectedRepoSettings
   ])
 
   const onConnectSelectedRepo = useCallback(async (): Promise<void> => {
@@ -1385,7 +1405,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
   const uploadComposerPaths = useCallback(
     async (
       sourcePaths: string[],
-      targetSettings = settings,
+      targetSettings = selectedRepoSettings,
       targetConnectionId = connectionId,
       targetRepoPath = selectedRepoPath
     ): Promise<{ filePaths: string[]; folderPaths: string[] } | null> => {
@@ -1437,7 +1457,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       }
       return { filePaths, folderPaths }
     },
-    [connectionId, selectedRepoPath, settings]
+    [connectionId, selectedRepoPath, selectedRepoSettings]
   )
 
   const handleAddAttachment = useCallback(async (): Promise<void> => {
@@ -1515,7 +1535,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       void (async () => {
         const uploaded = await uploadComposerPathsRef.current(
           data.paths,
-          settingsRef.current,
+          selectedRepoSettingsRef.current,
           connectionIdRef.current,
           selectedRepoPathRef.current
         )
@@ -1686,7 +1706,11 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         return
       }
       setPushTarget(undefined)
-      const target = getActiveRuntimeTarget(settings)
+      const itemRepoSettings = getSettingsForRepoRuntimeOwner(
+        { repos: [repoForItem], settings },
+        repoForItem.id
+      )
+      const target = getActiveRuntimeTarget(itemRepoSettings)
       const resolvePrBase =
         target.kind === 'local'
           ? window.api.worktrees.resolvePrBase({

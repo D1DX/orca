@@ -6,7 +6,9 @@ import {
 } from '@tanstack/react-virtual'
 import type { Range } from '@tanstack/react-virtual'
 import {
+  AlertTriangle,
   ChevronDown,
+  Circle,
   CircleX,
   Ellipsis,
   Eye,
@@ -14,6 +16,7 @@ import {
   FolderPlus,
   Loader2,
   Plus,
+  Server,
   Shapes,
   SlidersHorizontal,
   Trash2,
@@ -178,6 +181,7 @@ import {
 } from './worktree-multi-selection'
 import { branchDisplayName } from './WorktreeCardHelpers'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
+import { getSettingsFocusedExecutionHostId } from '../../../../shared/execution-host'
 import { getRepoHeaderCreateState } from './repo-header-create-state'
 import type { PendingSidebarWorktreeReveal } from '@/store/slices/ui'
 import { getRepositoryIconSectionId } from '@/components/settings/repository-settings-targets'
@@ -204,6 +208,8 @@ import {
   getProjectGroupHeaderPaddingLeft,
   getWorktreeCardContentIndent
 } from './worktree-list-indentation'
+import { addHostSectionRows, type HostHeaderRow, type HostSectionRow } from './host-section-rows'
+import { buildSidebarHostOptions } from './sidebar-host-options'
 import { translate } from '@/i18n/i18n'
 
 export {
@@ -368,7 +374,7 @@ const LINEAGE_INDENT = 14
 const SIDEBAR_POINTER_DRAG_THRESHOLD_PX = 4
 
 type VirtualizedWorktreeViewportProps = {
-  rows: Row[]
+  rows: HostSectionRow[]
   activeWorktreeId: string | null
   currentWorktreeId: string | null
   groupBy: WorktreeGroupBy
@@ -447,7 +453,7 @@ type VirtualizedWorktreeViewportProps = {
   scrollAnchorRef: React.MutableRefObject<VirtualizedScrollAnchor>
 }
 
-type WorktreeItemRow = Extract<Row, { type: 'item' }>
+type WorktreeItemRow = Extract<HostSectionRow, { type: 'item' }>
 
 function formatSectionActivityLabel(count: number, label: string): string {
   return `${count} ${label}${count === 1 ? '' : 's'}`
@@ -472,6 +478,45 @@ function SectionMetricsBadge({ count }: { count: number }): React.JSX.Element {
         </TooltipContent>
       </Tooltip>
     </span>
+  )
+}
+
+function HostHeaderHealthIcon({ health }: { health: HostHeaderRow['health'] }): React.JSX.Element {
+  if (health === 'connecting') {
+    return <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+  }
+  if (health === 'blocked' || health === 'error') {
+    return <AlertTriangle className="size-3.5 shrink-0 text-destructive" />
+  }
+  return (
+    <Circle
+      className={cn(
+        'size-2.5 shrink-0 fill-current',
+        health === 'available' || health === 'local'
+          ? 'text-status-success'
+          : 'text-muted-foreground/55'
+      )}
+    />
+  )
+}
+
+function HostSectionHeader({ row }: { row: HostHeaderRow }): React.JSX.Element {
+  return (
+    <div className="px-2 pt-1">
+      <div className="flex h-7 items-center gap-2 rounded-md border border-worktree-sidebar-border bg-worktree-sidebar-accent/70 px-2 text-left">
+        <Server className="size-3.5 shrink-0 text-muted-foreground" />
+        <HostHeaderHealthIcon health={row.health} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate text-[12px] font-semibold leading-none text-foreground">
+            {row.label}
+          </div>
+          <div className="mt-0.5 truncate text-[10px] leading-none text-muted-foreground">
+            {row.detail}
+          </div>
+        </div>
+        <SectionMetricsBadge count={row.count} />
+      </div>
+    </div>
   )
 }
 
@@ -596,7 +641,7 @@ function shouldPreferSidebarStatusDropTarget(args: {
   return sourceStatus !== null && args.target.status !== sourceStatus
 }
 
-function isWorktreeItemRow(row: Row): row is WorktreeItemRow {
+function isWorktreeItemRow(row: HostSectionRow): row is WorktreeItemRow {
   return row.type === 'item'
 }
 
@@ -610,7 +655,7 @@ export function renderRowContainsWorktree(row: RenderRow, worktreeId: string | n
   return row.type === 'item' && row.worktree.id === worktreeId
 }
 
-function buildRenderableRows(rows: Row[]): RenderRow[] {
+function buildRenderableRows(rows: HostSectionRow[]): RenderRow[] {
   const renderRows: RenderRow[] = []
   for (let index = 0; index < rows.length; index++) {
     const row = rows[index]
@@ -646,6 +691,9 @@ function buildRenderableRows(rows: Row[]): RenderRow[] {
 }
 
 export function getRenderRowKey(row: RenderRow): string {
+  if (row.type === 'host-header') {
+    return `host:${row.hostId}`
+  }
   if (row.type === 'header') {
     return `hdr:${row.key}`
   }
@@ -661,7 +709,7 @@ export function getRenderRowKey(row: RenderRow): string {
   return `wt:${row.worktree.id}`
 }
 
-export function getWorktreeDragGroups(rows: Row[]): WorktreeDragGroup[] {
+export function getWorktreeDragGroups(rows: HostSectionRow[]): WorktreeDragGroup[] {
   const groups: WorktreeDragGroup[] = []
   let current: { key: string; ids: string[] } | null = null
 
@@ -671,7 +719,11 @@ export function getWorktreeDragGroups(rows: Row[]): WorktreeDragGroup[] {
       groups.push({ key: current.key, worktreeIds: current.ids })
       continue
     }
-    if (row.type === 'imported-worktrees-card' || row.type === 'pending-creation') {
+    if (
+      row.type === 'host-header' ||
+      row.type === 'imported-worktrees-card' ||
+      row.type === 'pending-creation'
+    ) {
       continue
     }
     if (!current) {
@@ -1001,7 +1053,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
   )
   const renderRows = useMemo(() => buildRenderableRows(rows), [rows])
   const firstHeaderIndex = useMemo(
-    () => renderRows.findIndex((row) => row.type === 'header'),
+    () => renderRows.findIndex((row) => row.type === 'header' || row.type === 'host-header'),
     [renderRows]
   )
   const firstHeaderIndexRef = useRef(firstHeaderIndex)
@@ -1102,7 +1154,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
         )
       }
       const index = getVirtualRowIndex(element)
-      if (index !== null && renderRowsRef.current[index]?.type === 'header') {
+      if (
+        index !== null &&
+        (renderRowsRef.current[index]?.type === 'header' ||
+          renderRowsRef.current[index]?.type === 'host-header')
+      ) {
         return estimateRenderRowSize(
           renderRowsRef.current,
           index,
@@ -2503,7 +2559,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
     const visibleRows = virtualItems
       .filter((item) => item.start < viewportBottom && item.end > viewportTop)
       .map((item) => renderRows[item.index])
-      .filter((row): row is Extract<Row, { type: 'item' }> => row?.type === 'item')
+      .filter((row): row is WorktreeItemRow => row?.type === 'item')
       .filter((row) => row.repo?.kind === 'git' && !row.worktree.isBare && row.worktree.branch)
     const visibleWorktreeIds = new Set(visibleRows.map((row) => row.worktree.id))
     if (
@@ -2753,7 +2809,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
         data-worktree-sidebar
         tabIndex={0}
         role="listbox"
-        aria-label={translate("auto.components.sidebar.WorktreeList.bfbedc547b", "Worktrees")}
+        aria-label={translate('auto.components.sidebar.WorktreeList.bfbedc547b', 'Worktrees')}
         aria-orientation="vertical"
         aria-multiselectable="true"
         aria-activedescendant={activeDescendantId}
@@ -2821,6 +2877,41 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
             const row = renderRows[vItem.index]
             if (!row) {
               return null
+            }
+
+            if (row.type === 'host-header') {
+              const isActiveStickyHeader = activeStickyHeaderIndexRef.current === vItem.index
+              const hasHeaderTopSpacing = shouldUseHeaderTopSpacing({
+                rows: renderRows,
+                index: vItem.index,
+                firstHeaderIndex
+              })
+              return (
+                <div
+                  key={vItem.key}
+                  role="presentation"
+                  data-worktree-virtual-row
+                  data-worktree-virtual-row-key={String(vItem.key)}
+                  data-worktree-sticky-header=""
+                  data-worktree-sticky-header-active={isActiveStickyHeader ? '' : undefined}
+                  data-index={vItem.index}
+                  ref={measureVirtualRowElement}
+                  className={cn(
+                    'left-0 right-0',
+                    hasHeaderTopSpacing && !isActiveStickyHeader && 'pt-1',
+                    isActiveStickyHeader
+                      ? 'sticky -top-px z-20 bg-worktree-sidebar'
+                      : 'absolute top-0'
+                  )}
+                  style={
+                    isActiveStickyHeader
+                      ? undefined
+                      : { transform: getVirtualRowTransform(vItem.start) }
+                  }
+                >
+                  <HostSectionHeader row={row} />
+                </div>
+              )
             }
 
             if (row.type === 'header') {
@@ -3006,7 +3097,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                             size="icon-xs"
                             data-repo-header-action=""
                             className="size-5 shrink-0 rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent/70 hover:text-foreground focus:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
-                            aria-label={translate("auto.components.sidebar.WorktreeList.79465e9034", "Group actions for {{value0}}", { value0: row.label })}
+                            aria-label={translate(
+                              'auto.components.sidebar.WorktreeList.79465e9034',
+                              'Group actions for {{value0}}',
+                              { value0: row.label }
+                            )}
                             onClick={(event) => event.stopPropagation()}
                             onKeyDown={stopRepoHeaderKeyboardToggle}
                             onPointerDown={handleRepoHeaderActionPointerDown}
@@ -3035,7 +3130,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                               }
                             }}
                           >
-                            {translate("auto.components.sidebar.WorktreeList.4d7b73658c", "Rename group")}</DropdownMenuItem>
+                            {translate(
+                              'auto.components.sidebar.WorktreeList.4d7b73658c',
+                              'Rename group'
+                            )}
+                          </DropdownMenuItem>
                           <DropdownMenuItem
                             variant="destructive"
                             onSelect={() => {
@@ -3044,12 +3143,16 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                               }
                             }}
                           >
-                            {translate("auto.components.sidebar.WorktreeList.902115cdbe", "Delete group")}</DropdownMenuItem>
+                            {translate(
+                              'auto.components.sidebar.WorktreeList.902115cdbe',
+                              'Delete group'
+                            )}
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     ) : null}
 
-                    {row.repo && groupBy === "repo" ? (
+                    {row.repo && groupBy === 'repo' ? (
                       <DropdownMenu modal={false}>
                         <Tooltip>
                           <TooltipTrigger asChild>
@@ -3060,7 +3163,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                                 size="icon-xs"
                                 data-repo-header-action=""
                                 className="size-5 shrink-0 rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent/70 hover:text-foreground focus:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
-                                aria-label={translate("auto.components.sidebar.WorktreeList.609633a9e6", "Project actions for {{value0}}", { value0: row.label })}
+                                aria-label={translate(
+                                  'auto.components.sidebar.WorktreeList.609633a9e6',
+                                  'Project actions for {{value0}}',
+                                  { value0: row.label }
+                                )}
                                 onClick={(event) => event.stopPropagation()}
                                 onKeyDown={stopRepoHeaderKeyboardToggle}
                                 onPointerDown={handleRepoHeaderActionPointerDown}
@@ -3070,7 +3177,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                             </DropdownMenuTrigger>
                           </TooltipTrigger>
                           <TooltipContent side="bottom" sideOffset={6}>
-                            {translate("auto.components.sidebar.WorktreeList.2ef41bf9a7", "Project actions")}</TooltipContent>
+                            {translate(
+                              'auto.components.sidebar.WorktreeList.2ef41bf9a7',
+                              'Project actions'
+                            )}
+                          </TooltipContent>
                         </Tooltip>
                         <DropdownMenuContent
                           align="end"
@@ -3094,7 +3205,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                             }}
                           >
                             <SlidersHorizontal className="size-3.5" />
-                            {translate("auto.components.sidebar.WorktreeList.2cdffbc728", "Project Settings")}</DropdownMenuItem>
+                            {translate(
+                              'auto.components.sidebar.WorktreeList.2cdffbc728',
+                              'Project Settings'
+                            )}
+                          </DropdownMenuItem>
                           <DropdownMenuItem
                             onSelect={() => {
                               if (row.repo) {
@@ -3106,7 +3221,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                             }}
                           >
                             <Shapes className="size-3.5" />
-                            {translate("auto.components.sidebar.WorktreeList.e82d3589a1", "Change Project Icon")}</DropdownMenuItem>
+                            {translate(
+                              'auto.components.sidebar.WorktreeList.e82d3589a1',
+                              'Change Project Icon'
+                            )}
+                          </DropdownMenuItem>
                           {row.repo && isGitRepoKind(row.repo) ? (
                             <DropdownMenuItem
                               onSelect={() => {
@@ -3127,12 +3246,20 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                             }}
                           >
                             <FolderPlus className="size-3.5" />
-                            {translate("auto.components.sidebar.WorktreeList.cbfd565f83", "New group from project")}</DropdownMenuItem>
+                            {translate(
+                              'auto.components.sidebar.WorktreeList.cbfd565f83',
+                              'New group from project'
+                            )}
+                          </DropdownMenuItem>
                           {projectGroups.length > 0 ? (
                             <DropdownMenuSub>
                               <DropdownMenuSubTrigger>
                                 <FolderInput className="size-3.5" />
-                                {translate("auto.components.sidebar.WorktreeList.4a08fb55f2", "Move to group")}</DropdownMenuSubTrigger>
+                                {translate(
+                                  'auto.components.sidebar.WorktreeList.4a08fb55f2',
+                                  'Move to group'
+                                )}
+                              </DropdownMenuSubTrigger>
                               <DropdownMenuSubContent>
                                 {projectGroups.map((group) => (
                                   <DropdownMenuItem
@@ -3159,7 +3286,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                               }}
                             >
                               <CircleX className="size-3.5" />
-                              {translate("auto.components.sidebar.WorktreeList.64e55f7f01", "Remove from group")}</DropdownMenuItem>
+                              {translate(
+                                'auto.components.sidebar.WorktreeList.64e55f7f01',
+                                'Remove from group'
+                              )}
+                            </DropdownMenuItem>
                           ) : null}
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
@@ -3171,12 +3302,16 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                             }}
                           >
                             <Trash2 className="size-3.5" />
-                            {translate("auto.components.sidebar.WorktreeList.c83968f87f", "Remove Project")}</DropdownMenuItem>
+                            {translate(
+                              'auto.components.sidebar.WorktreeList.c83968f87f',
+                              'Remove Project'
+                            )}
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     ) : null}
 
-                    {row.repo && groupBy === "repo" ? (
+                    {row.repo && groupBy === 'repo' ? (
                       <Tooltip>
                         <TooltipTrigger asChild>
                           {createState?.disabled ? (
@@ -3208,7 +3343,12 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                               data-repo-header-action=""
                               className="size-5 shrink-0 rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-accent/70 hover:text-foreground focus:opacity-100 group-hover:opacity-100"
                               aria-label={
-                                createState?.ariaLabel ?? translate("auto.components.sidebar.WorktreeList.bb85cd86ba", "Create workspace for {{value0}}", { value0: row.label })
+                                createState?.ariaLabel ??
+                                translate(
+                                  'auto.components.sidebar.WorktreeList.bb85cd86ba',
+                                  'Create workspace for {{value0}}',
+                                  { value0: row.label }
+                                )
                               }
                               onKeyDown={stopRepoHeaderKeyboardToggle}
                               onClick={(event) => {
@@ -3224,7 +3364,12 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                           )}
                         </TooltipTrigger>
                         <TooltipContent side="bottom" sideOffset={6}>
-                          {createState?.tooltip ?? translate("auto.components.sidebar.WorktreeList.bb85cd86ba", "Create workspace for {{value0}}", { value0: row.label })}
+                          {createState?.tooltip ??
+                            translate(
+                              'auto.components.sidebar.WorktreeList.bb85cd86ba',
+                              'Create workspace for {{value0}}',
+                              { value0: row.label }
+                            )}
                         </TooltipContent>
                       </Tooltip>
                     ) : null}
@@ -3414,7 +3559,11 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                         <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-background/50 backdrop-blur-[1px]">
                           <div className="inline-flex items-center gap-1.5 rounded-full border border-border/50 bg-background px-3 py-1 text-[11px] font-medium text-foreground shadow-sm">
                             <Loader2 className="size-3.5 animate-spin text-muted-foreground" />
-                            {translate("auto.components.sidebar.WorktreeList.5fc9d1891b", "Deleting…")}</div>
+                            {translate(
+                              'auto.components.sidebar.WorktreeList.5fc9d1891b',
+                              'Deleting…'
+                            )}
+                          </div>
                         </div>
                       )}
                       <div
@@ -3447,7 +3596,7 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                             onBeginEditingConsumed={() => setRenamingWorktreeId(null)}
                           />
                           <div className="mt-1 flex min-w-0 items-center gap-1.5">
-                            {child.repo && groupBy !== "repo" ? (
+                            {child.repo && groupBy !== 'repo' ? (
                               <span className="flex h-[16px] shrink-0 items-center gap-1.5 rounded-[4px] border border-border bg-accent px-1.5 text-[10px] font-semibold leading-none text-foreground dark:bg-accent/50 dark:border-border/60">
                                 <RepoBadgeMark color={child.repo.badgeColor} />
                                 <span className="max-w-[6rem] truncate lowercase">
@@ -3488,7 +3637,16 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                                     variant="ghost"
                                     size="xs"
                                     className="h-[18px] max-w-[8rem] gap-1 rounded-md border border-worktree-sidebar-border bg-worktree-sidebar px-1.5 text-[10px] font-medium leading-none text-muted-foreground shadow-none hover:bg-worktree-sidebar-accent hover:text-foreground focus-visible:ring-1 focus-visible:ring-worktree-sidebar-ring"
-                                    aria-label={translate("auto.components.sidebar.WorktreeList.0c6ee14f23", "{{value0}} {{value1}} child {{value2}}", { value0: child.lineageCollapsed ? 'Show' : 'Hide', value1: child.lineageChildCount, value2: child.lineageChildCount === 1 ? 'workspace' : 'workspaces' })}
+                                    aria-label={translate(
+                                      'auto.components.sidebar.WorktreeList.0c6ee14f23',
+                                      '{{value0}} {{value1}} child {{value2}}',
+                                      {
+                                        value0: child.lineageCollapsed ? 'Show' : 'Hide',
+                                        value1: child.lineageChildCount,
+                                        value2:
+                                          child.lineageChildCount === 1 ? 'workspace' : 'workspaces'
+                                      }
+                                    )}
                                     aria-expanded={!child.lineageCollapsed}
                                     onClick={(event) => {
                                       event.preventDefault()
@@ -3499,7 +3657,15 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                                     <Workflow className="size-2.5" />
                                     <span className="truncate">
                                       {child.lineageChildCount}{' '}
-                                      {child.lineageChildCount === 1 ? translate("auto.components.sidebar.WorktreeList.0c6ee14f23", "child") : translate("auto.components.sidebar.WorktreeList.045a8aed48", "children")}
+                                      {child.lineageChildCount === 1
+                                        ? translate(
+                                            'auto.components.sidebar.WorktreeList.0c6ee14f23',
+                                            'child'
+                                          )
+                                        : translate(
+                                            'auto.components.sidebar.WorktreeList.045a8aed48',
+                                            'children'
+                                          )}
                                     </span>
                                     <ChevronDown
                                       className={cn(
@@ -3511,8 +3677,14 @@ const VirtualizedWorktreeViewport = React.memo(function VirtualizedWorktreeViewp
                                 </TooltipTrigger>
                                 <TooltipContent side="right" sideOffset={8}>
                                   {child.lineageCollapsed
-                                    ? translate("auto.components.sidebar.WorktreeList.84a2238242", "Show child workspaces")
-                                    : translate("auto.components.sidebar.WorktreeList.ebc5c7dcef", "Hide child workspaces")}
+                                    ? translate(
+                                        'auto.components.sidebar.WorktreeList.84a2238242',
+                                        'Show child workspaces'
+                                      )
+                                    : translate(
+                                        'auto.components.sidebar.WorktreeList.ebc5c7dcef',
+                                        'Hide child workspaces'
+                                      )}
                                 </TooltipContent>
                               </Tooltip>
                             </div>
@@ -3686,6 +3858,7 @@ const WorktreeList = React.memo(function WorktreeList({
   const activeWorktreeId = useAppStore((s) => s.activeWorktreeId)
   const currentSidebarWorktreeId = activeWorktreeId
   const groupBy = useAppStore((s) => s.groupBy)
+  const workspaceHostScope = useAppStore((s) => s.workspaceHostScope)
   const workspaceStatuses = useAppStore((s) => s.workspaceStatuses)
   const sortBy = useAppStore((s) => s.sortBy)
   const setSortBy = useAppStore((s) => s.setSortBy)
@@ -3765,6 +3938,8 @@ const WorktreeList = React.memo(function WorktreeList({
     groupBy === 'pr-status' || cardProps.includes('pr') ? s.prCache : null
   )
   const settings = useAppStore((s) => s.settings)
+  const sshTargetLabels = useAppStore((s) => s.sshTargetLabels)
+  const sshConnectionStates = useAppStore((s) => s.sshConnectionStates)
 
   const sortEpoch = useAppStore((s) => s.sortEpoch)
 
@@ -4016,6 +4191,8 @@ const WorktreeList = React.memo(function WorktreeList({
       browserTabsByWorktree,
       hideDefaultBranchWorkspace,
       repoMap,
+      workspaceHostScope,
+      defaultHostId: getSettingsFocusedExecutionHostId(settings),
       worktreeLineageById
     })
     if (
@@ -4034,6 +4211,8 @@ const WorktreeList = React.memo(function WorktreeList({
     filterRepoIds,
     showSleepingWorkspaces,
     hideDefaultBranchWorkspace,
+    workspaceHostScope,
+    settings,
     repoMap,
     tabsByWorktree,
     ptyIdsByTabId,
@@ -4193,9 +4372,24 @@ const WorktreeList = React.memo(function WorktreeList({
       pendingCreations
     ]
   )
+  const defaultHostId = getSettingsFocusedExecutionHostId(settings)
+  const hostOptions = useMemo(
+    () => buildSidebarHostOptions({ repos, sshTargetLabels, sshConnectionStates, settings }),
+    [repos, sshTargetLabels, sshConnectionStates, settings]
+  )
+  const sectionRows = useMemo(
+    () =>
+      addHostSectionRows({
+        rows,
+        hostOptions,
+        workspaceHostScope,
+        defaultHostId
+      }),
+    [defaultHostId, hostOptions, rows, workspaceHostScope]
+  )
   // Why: status headers change during wake (inactive -> active). Key only on
   // the grouping mode so row identity survives those ordinary status moves.
-  const viewportResetKey = `group:${groupBy}:lineage`
+  const viewportResetKey = `group:${groupBy}:host:${workspaceHostScope}:lineage`
 
   // Why: derive the rendered item order from the post-buildRows() row list,
   // not the flat `worktrees` array, because grouping (groupBy: 'repo' or
@@ -4204,10 +4398,10 @@ const WorktreeList = React.memo(function WorktreeList({
   // positions when grouping is active.
   const renderedWorktrees = useMemo(
     () =>
-      rows
-        .filter((r): r is Extract<Row, { type: 'item' }> => r.type === 'item')
+      sectionRows
+        .filter((r): r is Extract<HostSectionRow, { type: 'item' }> => r.type === 'item')
         .map((r) => r.worktree),
-    [rows]
+    [sectionRows]
   )
   const renderedWorktreeIds = useMemo(
     () => renderedWorktrees.map((worktree) => worktree.id),
@@ -4711,14 +4905,17 @@ const WorktreeList = React.memo(function WorktreeList({
       >
         <div className="worktree-sidebar-scrollbar flex h-full flex-col overflow-y-scroll overflow-x-hidden pl-1 scrollbar-sleek pt-px">
           <div className="flex flex-col items-center gap-2 px-4 py-6 text-center text-[11px] text-muted-foreground">
-            <span>{translate("auto.components.sidebar.WorktreeList.b7acbf038b", "No workspaces found")}</span>
+            <span>
+              {translate('auto.components.sidebar.WorktreeList.b7acbf038b', 'No workspaces found')}
+            </span>
             {hasFilters && (
               <button
                 onClick={clearFilters}
                 className="inline-flex items-center gap-1.5 bg-secondary/70 border border-border/80 text-foreground font-medium text-[11px] px-2.5 py-1 rounded-md cursor-pointer hover:bg-accent transition-colors"
               >
                 <CircleX className="size-3.5" />
-                {translate("auto.components.sidebar.WorktreeList.370c6a55dd", "Clear Filters")}</button>
+                {translate('auto.components.sidebar.WorktreeList.370c6a55dd', 'Clear Filters')}
+              </button>
             )}
           </div>
         </div>
@@ -4731,12 +4928,20 @@ const WorktreeList = React.memo(function WorktreeList({
       <ProjectGroupNameDialog
         open={projectGroupNameDialog !== null}
         title={
-          projectGroupNameDialog?.type === 'rename' ? translate("auto.components.sidebar.WorktreeList.f9dc6cc5d3", "Rename Project Group") : translate("auto.components.sidebar.WorktreeList.13757c053c", "New Project Group")
+          projectGroupNameDialog?.type === 'rename'
+            ? translate('auto.components.sidebar.WorktreeList.f9dc6cc5d3', 'Rename Project Group')
+            : translate('auto.components.sidebar.WorktreeList.13757c053c', 'New Project Group')
         }
         description={
           projectGroupNameDialog?.type === 'rename'
-            ? translate("auto.components.sidebar.WorktreeList.bc1460beb3", "Update the group name shown in the sidebar.")
-            : translate("auto.components.sidebar.WorktreeList.d880ea0744", "Create a group and move this project into it.")
+            ? translate(
+                'auto.components.sidebar.WorktreeList.bc1460beb3',
+                'Update the group name shown in the sidebar.'
+              )
+            : translate(
+                'auto.components.sidebar.WorktreeList.d880ea0744',
+                'Create a group and move this project into it.'
+              )
         }
         initialName={
           projectGroupNameDialog?.type === 'rename'
@@ -4765,7 +4970,7 @@ const WorktreeList = React.memo(function WorktreeList({
       />
       <VirtualizedWorktreeViewport
         key={viewportResetKey}
-        rows={rows}
+        rows={sectionRows}
         activeWorktreeId={selectedSidebarWorktreeId}
         currentWorktreeId={currentSidebarWorktreeId}
         groupBy={groupBy}

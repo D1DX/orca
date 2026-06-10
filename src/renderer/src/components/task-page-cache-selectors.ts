@@ -11,6 +11,7 @@ import type { GitHubWorkItem, LinearCollectionResult, LinearIssue } from '../../
 export type TaskPageRepoCacheInput = {
   id: string
   path: string
+  executionHostId?: string | null
 }
 
 export type TaskPageDialogWorkItemKey = {
@@ -51,7 +52,9 @@ export function selectTaskPageWorkItemsCacheEntries(
   limit: number,
   query: string
 ): (CacheEntry<GitHubWorkItem[]> | undefined)[] {
-  return repos.map((repo) => workItemsCache[workItemsCacheKey(repo.id, limit, query)])
+  return repos.map(
+    (repo) => workItemsCache[workItemsCacheKey(repo.id, limit, query, repo.executionHostId)]
+  )
 }
 
 export function buildTaskPageRepoSourceState(

@@ -1,15 +1,18 @@
 import { defaultRangeExtractor } from '@tanstack/react-virtual'
 import type { Range, VirtualItem } from '@tanstack/react-virtual'
-import type { Row } from './worktree-list-groups'
+import type { HostSectionRow } from './host-section-rows'
 import { PINNED_GROUP_KEY } from './worktree-list-groups'
 
 export const GROUP_HEADER_ROW_HEIGHT = 28
+export const HOST_HEADER_ROW_HEIGHT = 32
 const SECONDARY_GROUP_HEADER_TOP_MARGIN = 4
 const IMPORTED_WORKTREES_LINE_ROW_HEIGHT = 36
 const PENDING_CREATION_ROW_HEIGHT = 56
 
-type WorktreeItemRow = Extract<Row, { type: 'item' }>
-export type RenderRow = Row | { type: 'lineage-group'; key: string; rows: WorktreeItemRow[] }
+type WorktreeItemRow = Extract<HostSectionRow, { type: 'item' }>
+export type RenderRow =
+  | HostSectionRow
+  | { type: 'lineage-group'; key: string; rows: WorktreeItemRow[] }
 
 export function shouldUseHeaderTopSpacing(args: {
   rows: readonly RenderRow[]
@@ -29,6 +32,18 @@ export function estimateRenderRowSize(
   _activeStickyHeaderIndex: number | null
 ): number {
   const row = rows[index]
+  if (row?.type === 'host-header') {
+    return (
+      HOST_HEADER_ROW_HEIGHT +
+      (shouldUseHeaderTopSpacing({
+        rows,
+        index,
+        firstHeaderIndex
+      })
+        ? SECONDARY_GROUP_HEADER_TOP_MARGIN
+        : 0)
+    )
+  }
   if (row?.type === 'header') {
     return (
       GROUP_HEADER_ROW_HEIGHT +
@@ -62,7 +77,10 @@ export function getStickyHeaderIndexes(rows: readonly RenderRow[]): number[] {
   rows.forEach((row, index) => {
     // Why: project groups are the top-level repo sidebar context; nested repo
     // headers should not replace their containing group as the pinned header.
-    if (row.type === 'header' && (row.projectGroupDepth ?? 0) === 0) {
+    if (
+      row.type === 'host-header' ||
+      (row.type === 'header' && (row.projectGroupDepth ?? 0) === 0)
+    ) {
       indexes.push(index)
     }
   })
