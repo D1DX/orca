@@ -303,10 +303,12 @@ export function CreateStep({
                         disabled={isCreating}
                         data-kind={kind}
                         className={cn(
-                          'inline-flex min-w-0 items-center justify-center gap-1.5 rounded-sm px-2.5 py-2 text-xs font-medium outline-none transition-colors',
+                          'inline-flex min-w-0 items-center justify-center gap-1.5 rounded-sm border px-2.5 py-2 text-xs font-medium outline-none transition-colors',
+                          // Why: the segment sits on a muted card, so bg-background alone
+                          // is too subtle; the border makes the selected state legible.
                           selected
-                            ? 'bg-background text-foreground shadow-xs'
-                            : 'text-muted-foreground hover:text-foreground',
+                            ? 'border-border bg-background text-foreground shadow-xs'
+                            : 'border-transparent text-muted-foreground hover:text-foreground',
                           'focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-60'
                         )}
                       >
