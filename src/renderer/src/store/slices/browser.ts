@@ -574,6 +574,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
         url: defaultUrl,
         targetGroupId: groupId
       })
+      get().recordFeatureInteraction('browser-tab-created')
       return
     }
     get().createBrowserTab(worktreeId, defaultUrl, {
@@ -581,6 +582,7 @@ export const createBrowserSlice: StateCreator<AppState, [], [], BrowserSlice> = 
       focusAddressBar: true,
       targetGroupId: groupId
     })
+    get().recordFeatureInteraction('browser-tab-created')
   },
 
   closeBrowserTab: (tabId) => {

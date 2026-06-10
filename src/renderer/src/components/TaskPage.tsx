@@ -489,7 +489,9 @@ function LinearStateCell({
               result.error ??
                 translate('auto.components.TaskPage.6775c05483', 'Failed to update Linear state')
             )
+            return
           }
+          useAppStore.getState().recordFeatureInteraction('linear-tasks')
         })
         .catch(() => {
           if (reqId !== reqRef.current) {
@@ -906,7 +908,9 @@ function GHStatusCell({
               typed.error ??
                 translate('auto.components.TaskPage.1c893195ac', 'Failed to update state')
             )
+            return
           }
+          useAppStore.getState().recordFeatureInteraction('github-tasks')
         })
         .catch(() => {
           if (reqId !== reqRef.current) {
@@ -1351,6 +1355,7 @@ function GHAssigneesCell({
         } else {
           throw new Error('No GitHub repository context available for this issue.')
         }
+        useAppStore.getState().recordFeatureInteraction('github-tasks')
       } catch (err) {
         patchWorkItem(item.id, { assignees: previousAssignees }, item.repoId)
         toast.error(
@@ -1817,6 +1822,7 @@ function PRReviewCell({
         setLocalReviewRequests(nextReviewRequests)
         patchWorkItem(item.id, { reviewRequests: nextReviewRequests }, item.repoId)
         setReviewerInput('')
+        useAppStore.getState().recordFeatureInteraction('github-tasks')
       } else {
         toast.error(result.error)
       }
@@ -2203,6 +2209,7 @@ function PRMergeCell({
         prRepo: item.prRepo ?? null
       })
       if (result.ok) {
+        useAppStore.getState().recordFeatureInteraction('github-tasks')
         toast.success(translate('auto.components.TaskPage.a161925adc', 'Pull request merged'))
         onRefresh()
       } else {
@@ -2230,6 +2237,7 @@ function PRMergeCell({
         prRepo: item.prRepo ?? null
       })
       if (result.ok) {
+        useAppStore.getState().recordFeatureInteraction('github-tasks')
         toast.success(
           enabled
             ? translate('auto.components.TaskPage.fed317634c', 'Auto-merge enabled')
@@ -2853,12 +2861,15 @@ export default function TaskPage(): React.JSX.Element {
 
   const openGitHubDetailPage = useCallback(
     (item: GitHubWorkItem, initialTab: ItemDialogTab = 'conversation') => {
-      openTaskPage({
-        taskSource: 'github',
-        preselectedRepoId: item.repoId,
-        openGitHubWorkItem: item,
-        openGitHubInitialTab: initialTab
-      })
+      openTaskPage(
+        {
+          taskSource: 'github',
+          preselectedRepoId: item.repoId,
+          openGitHubWorkItem: item,
+          openGitHubInitialTab: initialTab
+        },
+        { recordTasksInteraction: false }
+      )
     },
     [openTaskPage]
   )
@@ -3085,7 +3096,10 @@ export default function TaskPage(): React.JSX.Element {
 
   const openLinearDetailPage = useCallback(
     (issue: LinearIssue) => {
-      openTaskPage({ taskSource: 'linear', openLinearIssue: issue })
+      openTaskPage(
+        { taskSource: 'linear', openLinearIssue: issue },
+        { recordTasksInteraction: false }
+      )
     },
     [openTaskPage]
   )
@@ -4202,7 +4216,9 @@ export default function TaskPage(): React.JSX.Element {
             result.error ??
               translate('auto.components.TaskPage.6775c05483', 'Failed to update Linear state')
           )
+          return
         }
+        useAppStore.getState().recordFeatureInteraction('linear-tasks')
       } catch {
         patchLinearIssue(issue.id, { state: previousState })
         patchScopedLinearIssue(issue.id, { state: previousState })
@@ -5251,6 +5267,7 @@ export default function TaskPage(): React.JSX.Element {
       // the worktree appeared in the sidebar before the user had a chance
       // to review it. The composer already owns the prefill flow. Telemetry
       // attribution flows via `openComposerForItem` (sets telemetrySource).
+      useAppStore.getState().recordFeatureInteraction('github-tasks')
       openComposerForItem(item)
     },
     [openComposerForItem]
@@ -5282,7 +5299,9 @@ export default function TaskPage(): React.JSX.Element {
                 'Unable to open the workspace attached to this issue.'
               )
         )
+        return
       }
+      useAppStore.getState().recordFeatureInteraction('github-tasks')
     },
     [handleUseWorkItem]
   )
@@ -5307,6 +5326,7 @@ export default function TaskPage(): React.JSX.Element {
 
   const handleUseGitLabItem = useCallback(
     (item: GitLabWorkItem): void => {
+      useAppStore.getState().recordFeatureInteraction('gitlab-tasks')
       openComposerForGitLabItem(item)
     },
     [openComposerForGitLabItem]
@@ -5579,13 +5599,14 @@ export default function TaskPage(): React.JSX.Element {
       setNewLinearIssueProjectId(null)
       setNewLinearIssueLabelIds([])
       setLinearRefreshNonce((n) => n + 1)
+      useAppStore.getState().recordFeatureInteraction('linear-tasks')
 
       // Why: auto-select the new issue in the inline workspace so the user
       // sees exactly what was filed, mirroring the GitHub create-issue flow.
       void linearGetIssue(settings, result.id, newLinearIssueTargetTeam.workspaceId)
         .then((full) => {
           if (full) {
-            openLinearDetailPage(full)
+            setSelectedLinearIssue(full, { allowOutsideList: true })
           }
         })
         .catch(() => {})
@@ -5602,8 +5623,8 @@ export default function TaskPage(): React.JSX.Element {
     newLinearIssueAssigneeId,
     newLinearIssueProjectId,
     newLinearIssueLabelIds,
-    openLinearDetailPage,
     selectedLinearProject,
+    setSelectedLinearIssue,
     settings
   ])
 
@@ -6336,6 +6357,7 @@ export default function TaskPage(): React.JSX.Element {
       // dialog pre-filled rather than yolo-creating the worktree, so the
       // user can confirm name / agent / setup before the worktree lands in
       // the sidebar. Telemetry attribution flows via openComposerForLinearItem.
+      useAppStore.getState().recordFeatureInteraction('linear-tasks')
       openComposerForLinearItem(issue, renderedText)
     },
     [openComposerForLinearItem]
@@ -6525,7 +6547,10 @@ export default function TaskPage(): React.JSX.Element {
                               disabled={source.disabled}
                               onClick={() => {
                                 taskSourceManuallyChangedRef.current = true
-                                openTaskPage({ taskSource: source.id })
+                                openTaskPage(
+                                  { taskSource: source.id },
+                                  { recordTasksInteraction: false }
+                                )
                                 void updateSettings({ defaultTaskSource: source.id }).catch(() => {
                                   toast.error(
                                     translate(
@@ -8227,10 +8252,14 @@ export default function TaskPage(): React.JSX.Element {
                       role="button"
                       tabIndex={0}
                       key={item.id}
-                      onClick={() => setGitlabDialogItem(item)}
+                      onClick={() => {
+                        useAppStore.getState().recordFeatureInteraction('gitlab-tasks')
+                        setGitlabDialogItem(item)
+                      }}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter' || e.key === ' ') {
                           e.preventDefault()
+                          useAppStore.getState().recordFeatureInteraction('gitlab-tasks')
                           setGitlabDialogItem(item)
                         }
                       }}
