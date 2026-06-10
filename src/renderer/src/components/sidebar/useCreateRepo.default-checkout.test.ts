@@ -92,6 +92,7 @@ describe('useCreateRepo default-checkout handoff', () => {
     mocks.stateValues = ['created', '/projects', 'git', null, false]
     mocks.storeState.repos = []
     mocks.storeState.worktreesByRepo = {}
+    mocks.storeState.settings.activeRuntimeEnvironmentId = null
     vi.stubGlobal('window', {
       api: {
         repos: {
@@ -120,6 +121,28 @@ describe('useCreateRepo default-checkout handoff', () => {
       requireAuthoritative: true
     })
     expect(mocks.onGitRepoReady).toHaveBeenCalledWith(repo.id)
+  })
+
+  it('returns the selected parent directory after the local picker applies it', async () => {
+    const pickedDir = '/Users/alice/custom-projects'
+    vi.mocked(window.api.repos.pickDirectory).mockResolvedValue(pickedDir)
+    const { useCreateRepo } = await import('./useCreateRepo')
+
+    const result = useCreateRepo(mocks.fetchWorktrees, vi.fn(), mocks.onGitRepoReady)
+    await expect(result.handlePickParent()).resolves.toBe(pickedDir)
+
+    expect(mocks.stateSetters[1]).toHaveBeenCalledWith(pickedDir)
+  })
+
+  it('does not return a parent path when the runtime target blocks the local picker', async () => {
+    mocks.storeState.settings.activeRuntimeEnvironmentId = 'env-1'
+    const { useCreateRepo } = await import('./useCreateRepo')
+
+    const result = useCreateRepo(mocks.fetchWorktrees, vi.fn(), mocks.onGitRepoReady)
+    await expect(result.handlePickParent()).resolves.toBeNull()
+
+    expect(window.api.repos.pickDirectory).not.toHaveBeenCalled()
+    expect(mocks.stateSetters[1]).not.toHaveBeenCalled()
   })
 
   it('continues to completion when refresh is not authoritative after create', async () => {

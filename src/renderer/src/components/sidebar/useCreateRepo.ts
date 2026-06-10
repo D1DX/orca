@@ -41,7 +41,7 @@ export function useCreateRepo(
     setIsCreating(false)
   }, [])
 
-  const handlePickParent = useCallback(async () => {
+  const handlePickParent = useCallback(async (): Promise<string | null> => {
     if (useAppStore.getState().settings?.activeRuntimeEnvironmentId?.trim()) {
       // Why: the native folder picker returns a client-local path. Runtime
       // project creation needs an explicit server parent path.
@@ -51,14 +51,16 @@ export function useCreateRepo(
           'Enter a server parent path.'
         )
       )
-      return
+      return null
     }
     const gen = createGenRef.current
     const dir = await window.api.repos.pickDirectory()
     if (dir && gen === createGenRef.current && mountedRef.current) {
       setCreateParent(dir)
       setCreateError(null)
+      return dir
     }
+    return null
   }, [mountedRef])
 
   const handleCreate = useCallback(async () => {

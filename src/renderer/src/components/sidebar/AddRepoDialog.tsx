@@ -396,8 +396,11 @@ const AddRepoDialog = React.memo(function AddRepoDialog() {
             setCreateError(null)
           }}
           onPickCreateParent={() => {
-            markCreateParentTouched()
-            void handlePickParent()
+            void handlePickParent().then((dir) => {
+              if (dir) {
+                markCreateParentTouched(dir)
+              }
+            })
           }}
           onCreate={handleCreate}
         />
