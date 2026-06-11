@@ -1,8 +1,9 @@
 # Terminal Hidden View Parking
 
-Status: Phase 1 of the terminal model/view architecture. See
+Status: Shipped — Phase 1 of the terminal model/view architecture, kill switch
+`terminalHiddenViewParking` (default on). See
 [`terminal-model-view-contract.md`](./terminal-model-view-contract.md) for the
-invariants this design extends.
+invariants this design extends and the full phase list.
 
 ## Problem
 
@@ -32,8 +33,7 @@ A pure policy module decides which hidden terminal tabs may park:
 - Eligibility excludes: visible panes, hidden-measuring startup probes,
   activity-portal panes, tabs with pending startup commands or pending
   activation spawns, floating-panel tabs, and any tab whose PTY is not
-  snapshot-backed (remote-runtime `remote:` PTYs and SSH PTYs are excluded in
-  this phase).
+  snapshot-backed (remote-runtime `remote:` PTYs and SSH PTYs are excluded).
 - Kill switch: `settings.terminalHiddenViewParking === false` disables parking
   entirely.
 
@@ -45,30 +45,41 @@ already exercise: transports detach but the PTY session, daemon model, and tab
 state all survive. The xterm instance, its buffers, DOM, and WebGL/addon
 resources are released.
 
-### Parked byte watcher (the piece the reverted attempt lacked)
+### Parked watcher (the piece the reverted attempt lacked)
 
-While a tab is parked, a pane-less watcher subscribes to its PTYs through the
-dispatcher sidecar mechanism (the same mechanism background agent launches
-use). The watcher runs the transport-level byte parsers with no xterm:
+While a tab is parked, a pane-less watcher
+(`parked-terminal-byte-watcher.ts`) keeps the pane's side effects alive. Its
+consumption mode is decided once at watcher start:
 
-- OSC 0/1/2 titles → tab/pane title store updates (all-titles ordering, same
-  normalization as the live transport path).
-- Title-transition agent tracker → agent-became-idle completion notification
-  and prompt-cache timer, agent-became-working cancellation.
-- BEL detection (OSC-aware stateful detector) → worktree/tab unread plus the
-  delayed terminal-bell OS notification.
-- DECSET 2031 subscribe scan → out-of-band color-scheme reply via
-  `transport.sendInput`, so TUIs that subscribe while parked still learn the
-  theme.
-- GitHub PR link scan → worktree linked-PR detection keeps working for agents
-  that print PR URLs while parked.
+- **Main side-effect authority on (default):** the watcher is purely
+  fact-driven — it registers exactly one `pty:sideEffect` fact consumer and
+  parses no bytes. Titles, agent working/idle/exited transitions, BEL
+  attention, and PR links arrive as main-tracker facts and drive the same
+  policy callbacks a mounted pane uses. With the hidden-delivery gate also on,
+  the watcher marks the PTY hidden so main stops renderer byte delivery
+  entirely; the DECSET 2031 color-scheme subscribe arrives as main's
+  `2031-subscribe` fact and the watcher replies out-of-band via
+  `transport.sendInput`.
+- **Kill switch off:** the watcher subscribes to raw bytes through the
+  dispatcher sidecar mechanism (the same mechanism background agent launches
+  use) and runs the transport-level byte parsers with no xterm — OSC 0/1/2
+  titles (all-titles ordering, live-path normalization), the title-transition
+  agent tracker (completion notification, prompt-cache timer), the OSC-aware
+  stateful BEL detector, the GitHub PR link scan, and a dedicated DECSET 2031
+  byte responder (`parked-terminal-mode2031-responder.ts`, whose
+  `subscribeToPtyData` registration doubles as the delivery-interest signal).
 
-Main's synthetic agent-title/permission frames ride the same `pty:data`
-channel, so they flow through the watcher unchanged.
+The two modes drive one shared policy-callback block, so flipping the kill
+switch never changes notification semantics. Main's synthetic
+agent-title/permission frames feed the main tracker directly and arrive as
+facts; the legacy synthetic `pty:data` copy exists only in kill-switch-off
+mode.
 
-Out of scope while parked (documented behavior, unchanged from the hidden
-skip-latch status quo): terminal query auto-replies other than mode 2031,
-OSC 52 clipboard writes, Command Code output scraping.
+Out of scope while parked: OSC 52 clipboard writes. Terminal queries inside
+hidden-dropped chunks are answered by main's model responder
+([`terminal-query-authority.md`](./terminal-query-authority.md)); in
+kill-switch-off byte mode only the 2031 reply is answered and Command Code
+output is not scraped, matching the pre-gate status quo.
 
 ### Reveal
 
@@ -91,10 +102,14 @@ disposed before the pane handlers re-register.
 5. Memory: parked tabs hold no xterm buffers; renderer memory scales with
    visible panes.
 
-## Cut-offs
+## Relation to later phases (all shipped)
 
-This phase is independently mergeable. Later phases (side-effect authority to
-main, gating hidden delivery in main, model query authority) replace the
-watcher's byte parsing for local/SSH PTYs and stop hidden delivery entirely;
-the watcher remains the parser for remote-runtime PTYs, which never transit
-local main.
+Side-effect authority in main (Phase 3) replaced the watcher's byte parsing
+with the `pty:sideEffect` fact consumer; the hidden-delivery gate (Phase 4)
+stops hidden byte delivery in main, moving the parked 2031 reply from the
+byte sidecar to the `2031-subscribe` fact; the model query responder
+(Phase 5) answers queries in hidden-dropped chunks. The watcher's byte-parser
+mode survives only behind the kill switches. Parking still excludes
+remote-runtime and SSH PTYs (no local snapshot to restore from); the watcher
+would return as a byte parser only if remote-runtime tabs — whose bytes never
+transit local main — ever became parkable.

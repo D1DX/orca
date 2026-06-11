@@ -1,6 +1,7 @@
 # Terminal Query Authority
 
-Status: Phase 5 of the terminal model/view architecture. Builds on
+Status: Shipped — Phase 5 of the terminal model/view architecture, kill
+switch `terminalModelQueryAuthority` (default on). Builds on
 [`terminal-model-view-contract.md`](./terminal-model-view-contract.md) (this
 phase **amends invariant 6**),
 [`terminal-side-effect-authority.md`](./terminal-side-effect-authority.md)
@@ -10,7 +11,7 @@ phase **amends invariant 6**),
 ## Problem
 
 Phase 4 drops renderer-bound bytes for hidden-gated PTYs after model ingestion
-(`src/main/ipc/pty.ts:1417,1506`, `src/main/ssh/ssh-relay-session.ts:931`).
+(`src/main/ipc/pty.ts:1426,1515`, `src/main/ssh/ssh-relay-session.ts:931`).
 Queries embedded in dropped bytes get no reply: DA1 (ConPTY 1.22+ blocks
 waiting for it — `terminal-conpty-device-attributes.ts:22`), CPR probes hang
 TUIs, OSC 10/11 leaves `claude /theme` blind while hidden. The pre-Phase-4
@@ -21,7 +22,7 @@ this phase closes.
 Contract invariant 6 ("the model must never answer queries") was written
 against a real bug: the daemon emulator replying ahead of the renderer with
 default-xterm values (the OSC-11 default-black-background race,
-`headless-emulator.ts:82-93`, pinned by `session.test.ts:163-187`). The danger
+`headless-emulator.ts:86-97`, pinned by `session.test.ts:163-190`). The danger
 was never "the model answers" — it was **two answerers for the same bytes**,
 one of them with wrong values. Phase 5 keeps the singularity and fixes the
 values.
@@ -59,7 +60,7 @@ Rejected alternatives:
 
 ## Mechanism: forwarded emulator onData, not a new grammar
 
-`HeadlessEmulator` gains `onData` wiring behind a per-write capture flag.
+`HeadlessEmulator` has `onData` wiring behind a per-write capture flag.
 For static and model-state queries, xterm core **is** the query grammar: the
 runtime emulator runs the same xterm version with equivalent options as the
 renderer pane, so main's reply set equals the visible renderer's by
@@ -108,13 +109,13 @@ triggered by option mutations).
 | View-attribute | OSC 4/10/11/12 `;?` queries, DSR ?996n | responder parser handlers + renderer attribute push (below); **silent until first push** |
 | View-attribute (via options) | DECRQSS DECSCUSR, DECRQM 12 | xterm core, from pushed `cursorStyle`/`cursorBlink` emulator options |
 | Silent | XTWINOPS, XTGETTCAP, ?15n/?25n/?26n/?53n | nobody, visible or hidden |
-| Mode 2031 | DECSET 2031 subscribe | unchanged in Phase 5: main emits the `2031-subscribe` fact, the renderer replies (`pty-connection.ts:1627`, parked watcher fact callback). Emulator-native 2031/997 output is suppressed by the forwarding guard |
+| Mode 2031 | DECSET 2031 subscribe | unchanged in Phase 5: main emits the `2031-subscribe` fact, the renderer replies (`handleHiddenMode2031SubscribeFact`, `pty-connection.ts`; parked watcher fact callback). Emulator-native 2031/997 output is suppressed by the forwarding guard |
 
 ### View-attribute bridge
 
-New renderer→main push, `pty:terminalViewAttributes` — one global snapshot,
+Renderer→main push, `pty:terminalViewAttributes` — one global snapshot,
 not per-PTY: the composed terminal `ITheme` (from
-`applyTerminalAppearanceToPanes`, `terminal-appearance.ts:211-232`),
+`applyTerminalAppearance`, `terminal-appearance.ts`),
 `terminalCursorStyle`, `terminalCursorBlink`, and the resolved color-scheme
 mode (`resolveTerminalColorSchemeMode` — the same source as the existing
 hidden 2031 reply). Pushed on renderer startup and on every theme/settings
@@ -141,8 +142,8 @@ documented hidden status quo.
 
 ### Kitty keyboard flags
 
-Enable `vtExtensions.kittyKeyboard: true` in `HeadlessEmulator`, matching
-`buildDefaultTerminalOptions` (`pane-terminal-options.ts:49`). Risk is low:
+`vtExtensions.kittyKeyboard: true` is enabled in `HeadlessEmulator`, matching
+`buildDefaultTerminalOptions` (`pane-terminal-options.ts:50`). Risk is low:
 for the write-only daemon use, keyboard state never alters serialization; the
 change only makes the emulator parse `CSI =/>/< u` pushes instead of ignoring
 them, and lets the responder answer `CSI ? u` with the flags the hidden app
@@ -161,7 +162,7 @@ pushed. Paths without a snapshot (cold restore spawns a fresh shell) answer
 ### ConPTY DA1 variant
 
 The provider kind is known main-side: mirror `isLocalNativeWindowsPty`
-(`windows-pty-compatibility.ts:48`) from the spawn record (local/daemon
+(`windows-pty-compatibility.ts:59`) from the spawn record (local/daemon
 provider, `win32`, not WSL). For such PTYs register a CSI `c` override on the
 emulator parser (the main-side twin of
 `installConptyDeviceAttributesHandler`) replying `CSI ?61;4c`, still gated by
@@ -182,7 +183,7 @@ closed by the slice-3 `initiallyHidden` spawn flag (races section).
 - Kill switches off — no marks exist, and `terminalModelQueryAuthority` is an
   independent off switch for the responder alone.
 - The **daemon** emulator: never, under any setting. The responder lives in
-  main's runtime only; `session.test.ts:163-187` stays pinned verbatim.
+  main's runtime only; `session.test.ts:163-190` stays pinned verbatim.
 
 ## Transition races
 
@@ -266,14 +267,14 @@ otherwise untouched in this phase.
   xterm (onData capture) and through the responder; assert byte-identical
   replies for static + model-state classes, and for view-attribute classes
   after an attribute push.
-- `session.test.ts:163-187`: assertions stay; the comment is updated to name
+- `session.test.ts:163-190`: assertions stay; the comment is updated to name
   the main responder (not "the renderer") as the hidden answerer.
 - E2E: hidden `claude /theme` reports the configured theme; hidden TUI
   blocked on CPR/DA unblocks while gated; reveal shows no stray reply
   fragments (`?1;2c`, `rgb:` …) on the prompt; Windows ConPTY golden and
   `terminal-hidden-view-parking.spec.ts` stay green.
 
-## Cut-offs (stacked, independently mergeable)
+## Cut-offs (shipped as three stacked slices)
 
 1. **Responder core.** Emulator onData wiring + per-write capture + main
    replay guard; kitty flag enable (+ `TerminalModes.kittyKeyboardFlags`);
@@ -287,7 +288,7 @@ otherwise untouched in this phase.
    bullet split, `session.test.ts` comment, side-effect matrix pointer, and
    the Phase 6 prerequisites below recorded as accepted.
 
-## What Phase 6 (delete skip grammar + startup window) requires from this design
+## Phase 6 (delete skip grammar + startup window): prerequisites from this design
 
 Phase 6 is shipped: the renderer hidden-skip eligibility grammar and the 10s
 codex startup renderer-query window are deleted. Kill-switch-off hidden panes
@@ -311,9 +312,10 @@ Accepted and shipped in slice 3 (except where noted):
 - **Daemon shell-ready write gating** (verified): responder replies through
   `ptyController.write` → daemon `Session.write` are QUEUED pre-ready, never
   dropped, and the queue flushes at the shell-ready marker or the 15s
-  `SHELL_READY_TIMEOUT_MS` bound (`session.ts`). Spawn-time replies on
-  Windows daemon PTYs still need explicit e2e validation before the codex
-  window is removed.
+  `SHELL_READY_TIMEOUT_MS` bound (`session.ts`). The codex window was removed
+  with hosted ConPTY golden coverage, unit DA1 parity, and the kill switches
+  as the safety net; explicit spawn-time e2e on Windows daemon PTYs remains
+  worth adding.
 - With the skip grammar deleted, every chunk is either written to a live
   xterm or dropped — the delivered-but-skipped no-reply gap disappears and
   the only remaining loss window is the mark IPC race.

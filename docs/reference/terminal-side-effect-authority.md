@@ -1,24 +1,26 @@
 # Terminal Side-Effect Authority
 
-Status: Phase 3 of the terminal model/view architecture. Builds on
+Status: Shipped — Phase 3 of the terminal model/view architecture, kill switch
+`terminalMainSideEffectAuthority` (default on). Builds on
 [`terminal-model-view-contract.md`](./terminal-model-view-contract.md) and
 [`terminal-hidden-view-parking.md`](./terminal-hidden-view-parking.md) (Phase 1).
 
 ## Problem
 
-Main already parses every local/daemon/SSH PTY byte before renderer delivery
-(`OrcaRuntimeService.onPtyData`, `src/main/runtime/orca-runtime.ts:3256`:
-OSC 9999 agent status, last-OSC-title, headless emulator, tails, URL watchers;
-SSH feeds the same path at `src/main/ssh/ssh-relay-session.ts:915`). Yet the
-side effects users see — bell unread/notifications, title transitions,
-agent-complete notifications, command lifecycle, PR links — are derived a
-second time by renderer byte parsers (`pty-transport.ts`'s
-`createPtyOutputProcessor`, `pty-connection.ts`, the parked byte watcher).
-That duplication forces Phase 1's watcher to exist, forces main to fabricate
-synthetic OSC title frames over `pty:data` (`src/main/index.ts:975-990,
-1033-1112`) just so renderer parsers can see them, and blocks Phase 4 from
-ever stopping hidden byte delivery. Phase 3 makes main the side-effect parser
-for every PTY whose bytes transit local main.
+Main parses every local/daemon/SSH PTY byte before renderer delivery
+(`OrcaRuntimeService.onPtyData` in `src/main/runtime/orca-runtime.ts`:
+side-effect tracker, OSC 9999 agent status, headless emulator, tails, URL
+watchers; SSH feeds the same path from `wireUpPtyEvents` in
+`src/main/ssh/ssh-relay-session.ts`). Before this phase, the side effects
+users see — bell unread/notifications, title transitions, agent-complete
+notifications, command lifecycle, PR links — were derived a second time by
+renderer byte parsers. That duplication forced Phase 1's watcher to parse
+bytes, forced main to fabricate synthetic OSC title frames over `pty:data`
+just so renderer parsers could see them, and blocked Phase 4 from ever
+stopping hidden byte delivery. Phase 3 made main the side-effect parser for
+every PTY whose bytes transit local main; the renderer byte parsers
+(`createPtyOutputProcessor` in `pty-transport.ts`, the parked watcher's byte
+mode) survive only for remote-runtime PTYs and the kill-switch-off fallback.
 
 ## Authority Matrix
 
@@ -28,45 +30,46 @@ Remote-runtime PTYs (`remote:`) never transit local main; the renderer
 
 | Side effect | local-daemon | SSH | remote-runtime |
 | --- | --- | --- | --- |
-| OSC 9999 agent status | main (shipped: `orca-runtime.ts:3259` → `agentStatus:set`) | main (shipped) | renderer (`pty-connection.ts:1490-1541`) |
+| OSC 9999 agent status | main (parsed in `onPtyData`, emitted as `agentStatus:set`) | main | renderer (`shouldOwnAgentStatusInRenderer`, `pty-connection.ts`) |
 | OSC 0/1/2 titles + working/idle/exited tracker + 3s stale-title timer | main | main | renderer |
 | BEL attention (OSC-aware stateful detector) | main | main | renderer |
 | OSC 133;D command-finished exit code | main | main | renderer |
 | GitHub PR-link scan | main | main | renderer |
-| Command Code output scrape | main (shipped: per-PTY detector beside the tracker → `command-code-working`/`command-code-done` facts; the renderer pane keeps the done settle timer — it must consult the live status row) | main (shipped) | renderer |
+| Command Code output scrape | main (per-PTY detector beside the tracker → `command-code-working`/`command-code-done` facts; the renderer pane keeps the done settle timer — it must consult the live status row) | main | renderer |
 | DECSET 2031 color-scheme reply | renderer view/watcher — the 2031 fact reply path is untouched by Phase 5; general query authority is now per-chunk structural ownership, see [`terminal-query-authority.md`](./terminal-query-authority.md) (contract invariant 6 as amended) | same | renderer |
 | DECSET 2004 paste readiness (`agent-paste-draft.ts`) | renderer — input pacing, not a model side effect | renderer | renderer |
 
 ## Main-Side Tracker
 
-- Lift the side-effect core of `createPtyOutputProcessor`
-  (`pty-transport.ts:87-428`) into a shared module
-  (`src/shared/terminal-output-side-effects.ts`): all-titles ordering via
+- The side-effect core shared with the renderer processor lives in
+  `src/shared/terminal-output-side-effects.ts`: all-titles ordering via
   `extractAllOscTitles` (coalesced working→idle transitions are why last-title
   is insufficient — issue #1083), `normalizeTerminalTitle`, the literal
-  `cursor agent` title drop (`pty-transport.ts:145-166`), the
-  `createAgentStatusTracker` transitions, the stale-working-title 3s timer
-  (`pty-transport.ts:51,363-379`), and the stateful BEL detector
-  (`bell-detector.ts`).
+  `cursor agent` title drop (`CURSOR_NATIVE_TITLE_LOWER`,
+  `src/shared/agent-detection.ts`), the `createAgentStatusTracker`
+  transitions, the stale-working-title 3s timer
+  (`STALE_WORKING_TITLE_TIMEOUT_MS`), and the stateful BEL detector
+  (`src/shared/terminal-bell-detector.ts`).
 - One tracker per PTY on `OrcaRuntimeService`, lazily created like
-  `agentStatusOscProcessorsByPtyId` (`orca-runtime.ts:3420-3427`); disposed in
-  `onPtyExit` (cancels the stale-title timer).
-- It replaces `extractLastOscTitle` at `orca-runtime.ts:3286`: titles feed in
-  byte order, so `lastOscTitle`/`lastAgentStatus`, tui-idle waiters, and
-  pending-message delivery see intermediate transitions instead of only the
-  chunk's last title. PTY/leaf records keep the **raw** last title (worktree
-  `ps` and mobile tab titles at `orca-runtime.ts:13209` expect raw); emitted
-  facts carry `(normalizedTitle, rawTitle)` like `onTitleChange` today.
+  `agentStatusOscProcessorsByPtyId`; disposed in `onPtyExit` (cancels the
+  stale-title timer).
+- It replaced the chunk-level last-title extraction in `onPtyData`: titles
+  feed in byte order, so `lastOscTitle`/`lastAgentStatus`, tui-idle waiters,
+  and pending-message delivery see intermediate transitions instead of only
+  the chunk's last title. PTY/leaf records keep the **raw** last title
+  (worktree `ps` and mobile tab titles expect raw); emitted facts carry
+  `(normalizedTitle, rawTitle)` like `onTitleChange`.
 - No deferred drain in main — the renderer's setTimeout(0) batching
-  (`pty-transport.ts:175-182,319-339`) protects xterm paint, which does not
-  exist in main. Apply synchronously, batch the IPC per flush.
+  (`sideEffectDrainTimer`, `pty-transport.ts`) protects xterm paint, which
+  does not exist in main. Main applies synchronously and batches the IPC per
+  flush.
 - The stats `AgentDetector` (`src/main/stats/agent-detector.ts`) keeps its own
   last-title scan, untouched: synthetic titles must never reach it.
 
 ## Event Transport: `pty:sideEffect`
 
-One new batched main→renderer channel (preload pattern of `agentStatus:set`,
-`src/preload/index.ts:3586`). It is **not** routed through the pty dispatcher:
+One batched main→renderer channel (`window.api.pty.onSideEffect`,
+`src/preload/index.ts`). It is **not** routed through the pty dispatcher:
 the renderer fact-consumer registry
 (`terminal-side-effect-facts-handler.ts`) subscribes directly via
 `window.api.pty.onSideEffect` — one channel subscription per renderer, with
@@ -74,8 +77,8 @@ exactly one registered fact consumer per PTY. Events are **facts, not
 decisions**: `title`, `bell`, `agent-working`, `agent-idle` (with title),
 `agent-exited`, `command-finished` (exit code), `pr-link`. Each carries
 `ptyId`, main-known attribution (worktreeId/tabId/paneKey from runtime leaf
-records, same resolution as `emitTerminalAgentStatusEvents`,
-`orca-runtime.ts:3429-3460`), and the PTY `outputSequence`.
+records, same resolution as `emitTerminalAgentStatusEvents`), and the PTY
+`outputSequence`.
 
 Ordering rules:
 
@@ -88,64 +91,70 @@ Ordering rules:
    state, and today's renderer drain already decouples by many batches under
    timer throttling.
 3. No attention replay: facts emitted while no renderer is subscribed are
-   dropped. On transport attach/park-handoff the renderer requests (or main
-   re-emits) a `title`+status snapshot marked `replay: true` — this reproduces
+   dropped. On transport attach/park-handoff the renderer pulls a title-only
+   snapshot (`pty:sideEffectSnapshot`) marked `replay: true` — this reproduces
    the eager-buffer behavior where replay restores titles but is barred from
-   bells/completions (`pty-transport.ts:656-714` `suppressAttentionEvents`).
-   The store handler ignores a replay title older (by `outputSequence`) than
-   the last live title fact it applied.
+   bells/completions (`suppressAttentionEvents`, `pty-transport.ts`). The
+   store handler ignores a replay title older (by `outputSequence`) than the
+   last live title fact it applied.
 
 ## Renderer Store Handler (policy stays in the renderer)
 
-Verified current notification semantics, all preserved:
+Notification semantics, all preserved across the authority flip:
 
 - BEL marks worktree+tab unread unconditionally — including the focused pane
-  (`pty-connection.ts:1232-1250`); pane unread only behind
+  (`onBell`, `pty-connection.ts`); pane unread only behind
   `experimentalTerminalAttention`; keydown clears unread
-  (`pty-connection.ts:959-999`).
+  (`onTerminalKeyDown`, `pty-connection.ts`).
 - BEL's OS notification is delayed 250 ms and yields to a pending
-  agent-task-complete (`pty-connection.ts:1259-1275`).
+  agent-task-complete (`scheduleTerminalBellNotification`,
+  `pty-connection.ts`).
 - working→idle starts the Claude cache timer (null settings = not hydrated,
-  treat enabled, `pty-connection.ts:1409-1430`) and schedules completion with
-  250 ms grace + 1500 ms max wait + detail-wait store subscription
-  (`pty-connection.ts:1328-1390`).
+  treat enabled) and schedules completion with 250 ms grace + 1500 ms max
+  wait + detail-wait store subscription
+  (`AGENT_TASK_COMPLETE_NOTIFICATION_GRACE_MS` /
+  `AGENT_TASK_COMPLETE_NOTIFICATION_MAX_WAIT_MS`,
+  `agent-task-complete-policy.ts`).
 - Completion unread is suppressed only for the exact visible foreground pane
-  (`use-notification-dispatch.ts:280-298`); BEL unread has no such check.
-- Dispatch-time liveness/staleness guards (`use-notification-dispatch.ts:
-  229-277`) and main's 5 s per-worktree cooldown (`src/main/ipc/
-  notifications.ts:286-296`) remain the final gates.
+  (`isVisibleForegroundPaneKey`, `use-notification-dispatch.ts`); BEL unread
+  has no such check.
+- Dispatch-time liveness/staleness guards
+  (`dispatchTerminalNotification`, `use-notification-dispatch.ts`) and main's
+  5 s per-worktree cooldown (`NOTIFICATION_COOLDOWN_MS`,
+  `src/main/ipc/notifications.ts`) remain the final gates.
 
 These need live renderer store state (PTY/layout maps, pane visibility,
 settings, `agentStatusByPaneKey`, repo labels), so they stay in the renderer:
-a pane-independent per-paneKey handler module consumes `pty:sideEffect` and
+the pane-independent per-paneKey handler module
+(`terminal-side-effect-facts-handler.ts`) consumes `pty:sideEffect` and
 subsumes both `pty-connection.ts`'s callbacks and the parked watcher's
-callback block (`parked-terminal-byte-watcher.ts:96-213`) — one policy path
-whether the tab is mounted, hidden, or parked. Main holds **no** notification
-timers; only the stale-title timer (parser state) moves to main.
+callback block (`sideEffectCallbacks`, `parked-terminal-byte-watcher.ts`) —
+one policy path whether the tab is mounted, hidden, or parked. Main holds
+**no** notification timers; only the stale-title timer (parser state) lives
+in main.
 
 ## Synthetic Frame Reroute
 
-`driveSyntheticTitleFromHook` and the spinner tick (`src/main/index.ts:
-1033-1112`) currently fabricate OSC title/BEL frames onto `pty:data`
-(`sendSyntheticTitle`, `index.ts:975-990`) solely for renderer parsers.
-Replace with `runtime.ingestSyntheticTitleFrame(ptyId, label, { bell })`
-feeding the per-PTY tracker directly — **not** `onPtyData`, so emulator
-state, tails, transcripts, and stats stay clean (today they never see these
-frames either). Keep the decorative-frame visibility gating
-(`shouldSendSyntheticTitleFrame`). Verified renderer dependencies on those
-bytes: the visible xterm renders nothing from titles, but
+`driveSyntheticTitleFromHook` and the spinner tick (`sendSyntheticTitle`,
+`src/main/index.ts`) feed `runtime.ingestSyntheticTitleFrame(ptyId, data)`,
+so synthetic agent-title/BEL frames enter the per-PTY tracker directly —
+**not** `onPtyData`, so emulator state, tails, transcripts, and stats never
+see them. The decorative-frame visibility gating
+(`shouldSendSyntheticTitleFrame`) stands. The legacy synthetic `pty:data`
+copy survives only in kill-switch-off mode, where renderer parsers still
+need the bytes. The visible xterm renders nothing from titles, but
 `pane.terminal.onTitleChange` feeds `registerPtyTitleSource`
-(`pty-connection.ts:1797-1799`) → renderer serialize-snapshot `lastTitle`
-(mobile parity). After the reroute main must prefer its own tracker title
-over renderer snapshot `lastTitle`. Side benefit: synthetic frames stop
-producing phantom ACKs for bytes main never metered
-(`pty-dispatcher.ts:124-129`).
+(`pty-connection.ts`) → renderer serialize-snapshot `lastTitle` (mobile
+parity); main prefers its own tracked title over renderer snapshot
+`lastTitle` in both serialize paths. Under main authority synthetic frames
+no longer produce phantom ACKs for bytes main never metered (`ackPtyData`,
+`pty-dispatcher.ts`).
 
 ## Migration Switch and Double-Fire Prevention
 
 Authority is structural per PTY kind — the predicate is "bytes transit local
-main", exactly the shipped `shouldOwnAgentStatusInRenderer` split
-(`pty-connection.ts:1484-1545`). One renderer-consulted kill switch
+main", exactly the `shouldOwnAgentStatusInRenderer` split
+(`pty-connection.ts`). One renderer-consulted kill switch
 (`settings.terminalMainSideEffectAuthority`, default on, mirroring
 `terminalHiddenViewParking`): when on, IPC transports and the parked watcher
 do not register byte parsers for local/SSH and the store handler consumes
@@ -162,17 +171,19 @@ Keep renderer byte access (input pacing / raw-output consumers, not side
 effects): `agent-paste-draft.ts` (DECSET 2004 readiness),
 `launch-agent-background-session.ts` (startup-injection pacing, onData
 passthrough), `automation-session-observer.ts` (onData passthrough), and
-`parked-terminal-mode2031-responder.ts` (DECSET 2031 theme replies while
-parked). Their duplicated local OSC 9999 store writes are gated off under
-main authority (shipped — the `onAgentStatus` automation callbacks still
-fire; only the racing `setAgentStatus` store writes drop). Phase 4's
-hidden-delivery gate must exempt PTYs with an active `subscribeToPtyData`
-sidecar: that registration becomes an explicit delivery-interest signal
-surfaced to main. With main authoritative, the parked watcher is purely
-fact-driven: byte parsing exists only in kill-switch-off mode, and the 2031
-reply lives in the dedicated responder sidecar. The watcher file is deleted
-outright only when the kill switch retires — it returns as a byte parser
-only if remote-runtime tabs ever become parkable.
+`parked-terminal-mode2031-responder.ts` (DECSET 2031 theme replies for
+parked tabs while the delivery gate is off). Their duplicated local OSC 9999
+store writes are gated off under main authority (the `onAgentStatus`
+automation callbacks still fire; only the racing `setAgentStatus` store
+writes drop). The Phase-4 hidden-delivery gate exempts PTYs with an active
+`subscribeToPtyData` sidecar: registration is auto-surfaced to main as a
+ref-counted delivery-interest signal (`pty-delivery-interest.ts`). With main
+authoritative, the parked watcher is purely fact-driven: byte parsing exists
+only in kill-switch-off mode, and the 2031 reply comes from the
+`2031-subscribe` fact when the gate is on (the byte responder sidecar only
+when it is off). The watcher file is deleted outright only when the kill
+switch retires — it returns as a byte parser only if remote-runtime tabs
+ever become parkable.
 
 ## Invariants
 
@@ -183,17 +194,18 @@ only if remote-runtime tabs ever become parkable.
 3. Notification policy (grace timers, yielding, suppression, dispatch guards)
    lives with the renderer store; main emits facts with ordering metadata.
 4. Side-effect facts keep flowing while renderer byte delivery is
-   backpressured, parked, or (Phase 4) stopped.
+   backpressured, parked, or stopped by the hidden-delivery gate.
 5. Synthetic agent frames feed the model tracker, never the emulator, tails,
    transcripts, or stats.
 
 ## Test Strategy
 
-- Parity harness: shared byte fixtures (agent title cycles incl. coalesced
-  chunks, BEL inside/spanning OSC, CAN/SUB cancellation, cursor-agent literal,
-  stale-title timeout under fake timers, OSC 133;D, split PR URLs) run through
-  the renderer `createPtyOutputProcessor` and the main tracker; assert
-  identical ordered fact sequences.
+- Parity harness (`terminal-title-tracker-parity.test.ts`): shared byte
+  fixtures (agent title cycles incl. coalesced chunks, BEL inside/spanning
+  OSC, CAN/SUB cancellation, cursor-agent literal, stale-title timeout under
+  fake timers, OSC 133;D, split PR URLs) run through the renderer
+  `createPtyOutputProcessor` and the main tracker; assert identical ordered
+  fact sequences.
 - Unit: main tracker tests beside `orca-runtime.test.ts` (lastOscTitle
   parity, tui-idle waiter transitions, synthetic ingestion); store-handler
   tests reusing `parked-terminal-byte-watcher.test.ts` scenarios.
@@ -206,7 +218,7 @@ only if remote-runtime tabs ever become parkable.
   (parked tab, focused-pane suppression, kill switch off). SSH parity is
   exercised manually per the SSH test procedure before each slice ships.
 
-## Cut-Offs (stacked, independently mergeable)
+## Cut-Offs (shipped as four stacked slices)
 
 1. **Shared tracker in main.** Extract the processor core to shared, run the
    per-PTY tracker in `onPtyData` replacing `extractLastOscTitle`, parity
@@ -217,16 +229,12 @@ only if remote-runtime tabs ever become parkable.
 3. **Inversion unwind.** Synthetic frames into the tracker, off `pty:data`;
    OSC 133;D and PR-link facts; mobile `lastTitle` source preference.
 4. **Long tail.** Command Code scrape to main, sidecar OSC 9999 dedup, parked
-   watcher deletion, Phase 4 delivery-interest registration documented in the
-   gate design.
+   watcher shrunk to fact-driven mode (deletion waits on kill-switch
+   retirement), Phase 4 delivery-interest registration documented in the gate
+   design.
 
-## Open Items (carried into Phase 4)
+## Open Items
 
-- **Delivery-interest registration.** Every remaining `subscribeToPtyData`
-  sidecar (`parked-terminal-mode2031-responder.ts`, `agent-paste-draft.ts`,
-  `launch-agent-background-session.ts`, `automation-session-observer.ts`)
-  must surface its registration to main as an explicit delivery-interest
-  signal before the hidden-delivery gate can stop byte delivery.
 - **Daemon checkpoint `lastTitle` is write-only.** The daemon sleep/periodic
   checkpoint (`daemon-pty-adapter.checkpointSessions` → daemon
   `Session.getSnapshot`) persists the daemon emulator's `lastTitle`, which is

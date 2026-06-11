@@ -55,6 +55,13 @@ already reaches `OrcaRuntimeService.onPtyData` before renderer delivery for
 local, daemon, and SSH PTYs. That path keeps a headless xterm emulator updated
 and can serialize it.
 
+Since the hidden-delivery gate shipped (`terminalHiddenDeliveryGate`, default
+on — see the contract's Architecture Status), main drops hidden renderer-bound
+bytes after model ingestion and emits an out-of-band restore marker, so a
+gated hidden pane accumulates no renderer backlog at all. The overflow path
+below is the fallback for kill-switch-off mode and for hidden PTYs with an
+active delivery-interest sidecar.
+
 The renderer scheduler keeps its 2 MB background cap. When the cap is exceeded:
 
 1. The scheduler replaces the queued backlog with a small warning fallback.
