@@ -8,11 +8,16 @@ import {
 import { TUI_AGENT_CONFIG } from '../../../shared/tui-agent-config'
 import { isTuiAgentEnabled, pickTuiAgent } from '../../../shared/tui-agent-selection'
 import { activateAndRevealWorktree } from '@/lib/worktree-activation'
-import { getWorkspaceIntentName, getWorkspaceSeedName, isGitLabIssueUrl } from '@/lib/new-workspace'
+import { getWorkspaceIntentName, getWorkspaceSeedName } from '@/lib/new-workspace'
+import { getLaunchableWorkItemDraftContent } from '@/lib/linked-work-item-context'
+import { isOrcaCliAvailableForLaunch } from '@/lib/orca-cli-launch-availability'
 import {
-  getLaunchableWorkItemDraftContent,
-  type LinkedWorkItemContext
-} from '@/lib/linked-work-item-context'
+  agentLaunchCommandErrorMessage,
+  gitLabIssueNumber,
+  resolvePrHeadErrorMessage,
+  unavailableAgentErrorMessage,
+  workspaceActivationErrorMessage
+} from '@/lib/launch-work-item-direct-messages'
 import { ensureHooksConfirmed } from '@/lib/ensure-hooks-confirmed'
 import { getConnectionId } from '@/lib/connection-context'
 import type {
@@ -32,7 +37,6 @@ import {
   resolveDirectSetupDecision
 } from '@/lib/launch-work-item-direct-preflight'
 import { resolveSourceControlLaunchPlatform } from '@/lib/source-control-launch-platform'
-import { translate } from '@/i18n/i18n'
 
 export type LaunchableWorkItem = {
   title: string
@@ -48,12 +52,9 @@ export type LaunchableWorkItem = {
    *  `type: 'issue'` / `number: null` to reuse the GitHub draft-paste flow,
    *  so this field is the only signal that the worktree is Linear-linked. */
   linearIdentifier?: string
-  linkedContext?: LinkedWorkItemContext
+  linearWorkspaceId?: string
+  linearOrganizationUrlKey?: string
 }
-
-// Why: bracketed paste markers and ready-wait grace timing live in
-// agent-paste-draft.ts so the new-workspace and "Use" flows share one
-// definition of "type into the agent's input as a non-submitted draft".
 
 export type LaunchWorkItemDirectArgs = {
   item: LaunchableWorkItem
@@ -88,22 +89,26 @@ export type LaunchWorkItemDirectArgs = {
   launchPlatform?: NodeJS.Platform
 }
 
-function getDirectDraftContent(item: LaunchableWorkItem): string {
-  return getLaunchableWorkItemDraftContent(item)
+async function getDirectDraftContent(
+  item: LaunchableWorkItem,
+  repoConnectionId: string | null
+): Promise<string> {
+  const cliAvailable = item.linearIdentifier
+    ? await isOrcaCliAvailableForLaunch({ remote: repoConnectionId !== null })
+    : false
+  return getLaunchableWorkItemDraftContent({ ...item, cliAvailable })
 }
 
 /**
  * "Use" flow: create the workspace, activate it, launch the default agent,
  * and paste the work item context into the agent. Most callers leave it as a draft;
  * fix-check launches can opt into submitting the prompt after the TUI is ready.
- *
  * Falls back to `openModalFallback()` when:
  *   - the repo's `setupRunPolicy` is `'ask'` (the user must pick per-workspace)
  *   - the repo can't be resolved from `repoId`
  *   - no compatible agent is detected on PATH
  *
- * Best-effort: after the workspace is created and activated, failures during
- * the agent-readiness or paste steps only toast a notice — the user still
+ * Best-effort: after workspace activation, paste failures only toast a notice — the user still
  * has a usable workspace and can paste the work item context themselves.
  */
 export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Promise<boolean> {
@@ -188,7 +193,7 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
       resolvedPushTarget = result.pushTarget
       resolvedBranchNameOverride = result.branchNameOverride
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : translate("auto.lib.launch.work.item.direct.8bc45efdbc", "Failed to resolve PR head."))
+      toast.error(error instanceof Error ? error.message : resolvePrHeadErrorMessage())
       openModalFallback()
       return false
     }
@@ -199,7 +204,7 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
   let startupPlan: ReturnType<typeof buildAgentStartupPlan> = null
   let effectiveAgent: TuiAgent | null = null
   let draftLaunchedNatively = false
-  const draftContent = getDirectDraftContent(item)
+  const draftContent = await getDirectDraftContent(item, repoConnectionId)
   let startupPlanFailed = false
   try {
     const result = await store.createWorktree(
@@ -218,7 +223,12 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
       resolvedBranchNameOverride,
       undefined,
       item.type === 'mr' && item.number ? item.number : undefined,
-      item.type === 'issue' && item.number && isGitLabIssueUrl(item.url) ? item.number : undefined
+      gitLabIssueNumber(item),
+      undefined,
+      undefined,
+      undefined,
+      item.linearWorkspaceId,
+      item.linearOrganizationUrlKey
     )
     worktreeId = result.worktree.id
     const worktreePath = result.worktree.path
@@ -247,7 +257,7 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
           sidebarRevealBehavior: 'auto',
           setup: result.setup
         })
-        toast.error(translate("auto.lib.launch.work.item.direct.19c7683acf", "Selected agent is not available in the created workspace."))
+        toast.error(unavailableAgentErrorMessage())
         return false
       }
       effectiveAgent = agentOverride
@@ -339,7 +349,7 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
     if (!activation) {
       // Worktree vanished between create and activate — extremely unlikely but
       // worth handling explicitly rather than silently dropping the draft.
-      toast.error(translate("auto.lib.launch.work.item.direct.67e103dd60", "Workspace created but could not be activated."))
+      toast.error(workspaceActivationErrorMessage())
       return false
     }
     primaryTabId = activation.primaryTabId
@@ -352,7 +362,7 @@ export async function launchWorkItemDirect(args: LaunchWorkItemDirectArgs): Prom
   store.setSidebarOpen(true)
 
   if (startupPlanFailed) {
-    toast.error(translate("auto.lib.launch.work.item.direct.3de6371df3", "Could not build the agent launch command."))
+    toast.error(agentLaunchCommandErrorMessage())
     return false
   }
 

@@ -867,9 +867,10 @@
         "e5b7296d9d": "git no está instalado",
         "cd21242762": "Agregue un proyecto para comenzar.",
         "9c00bd4adf": "Seleccione un espacio de trabajo de la barra lateral para comenzar.",
-        "16e9e3df89": "sembrado de estrellas",
-        "0d0ace8861": "Estrella en GitHub",
-        "ec43b38ba7": "Destacado en GitHub"
+        "16e9e3df89": "con estrella",
+        "0d0ace8861": "Dar estrella en GitHub",
+        "ec43b38ba7": "Con estrella en GitHub",
+        "157bb5ecbb": "Abrir GitHub"
       },
       "LinearIssueMarkdownDescriptionEditor": {
         "d9c47069ef": "Markdown",
@@ -1200,8 +1201,14 @@
         "30c36231c1": "Si Orca te ha ahorrado tiempo, una estrella de GitHub es de gran ayuda. Ayuda a otros desarrolladores a descubrir el proyecto y mantiene al equipo motivado para implementar mejoras.",
         "b5e685e4d9": "Despedir",
         "5f6df21046": "¿Disfrutando de Orca?",
-        "2d67b6c849": "Estrella en GitHub",
-        "af3c9bbb37": "Protagonizada…"
+        "2d67b6c849": "Dar estrella en GitHub",
+        "af3c9bbb37": "Dando estrella...",
+        "68a41bc3aa": "No se pudo dar estrella con",
+        "996bf76e46": "Abre GitHub para terminar en tu navegador.",
+        "d32015fec7": "Abriendo...",
+        "157bb5ecbb": "Abrir GitHub",
+        "8c967b4d15": "Ahora no",
+        "73dfd4eb8d": "No volver a preguntar"
       },
       "TaskPage": {
         "513cddfa7a": "Verificando…",
@@ -3207,7 +3214,15 @@
           "9be10d49ea": "y desagrupar sus proyectos.",
           "69f5cb97d0": "Borrar",
           "591f330288": "Eliminar grupo de proyectos",
-          "2c14ce677a": "Eliminando..."
+          "2c14ce677a": "Eliminando...",
+          "0e0e6764af": "Proyectos contenidos",
+          "ad407c2d55": "más",
+          "removeContainedProjectSingular": "Quitar 1 proyecto contenido",
+          "removeContainedProjectPlural": "Quitar {{value0}} proyectos contenidos",
+          "eeabb8e8e4": "Quitar {{value0}} {{value1}} contenidos de Orca",
+          "55f75628c0": "Las carpetas de los proyectos en el disco no se eliminan.",
+          "897e5d3d4c": "Eliminar grupo y quitar proyectos",
+          "fec7e9c8ae": "Eliminar grupo"
         },
         "ProjectGroupNameDialog": {
           "d99a034073": "Cancelar",
@@ -3344,7 +3359,10 @@
           "2991a0106c": "Ayuda",
           "4e8f5710d3": "No se pudo reiniciar Orca.",
           "5161eef55d": "Reiniciando Orca...",
-          "d396773ef0": "de cheques"
+          "d396773ef0": "de cheques",
+          "f8a2c91d4e": "Hitos",
+          "b7e4d2a19c": "Introducción",
+          "c4f8e1b72a": "X"
         },
         "SidebarToolbar": {
           "19e32d0e5f": "Abra el selector de carpetas para agregar un proyecto",
@@ -3555,7 +3573,11 @@
           "20bebf9c7f": "Mostrar {{value0}} espacio de trabajo secundario",
           "c1f4a31623": "Mostrar {{value0}} espacios de trabajo secundarios",
           "e97297cb75": "Ocultar {{value0}} espacio de trabajo secundario",
-          "0cd15956d4": "Ocultar {{value0}} espacios de trabajo secundarios"
+          "0cd15956d4": "Ocultar {{value0}} espacios de trabajo secundarios",
+          "b667b59632": "Some projects could not be removed from Orca",
+          "f94466bc39": "{{value0}} of {{value1}} contained project{{value2}} remained after deleting the group.",
+          "groupDeleteFailed": "Failed to delete group",
+          "groupDeleteFailedDesc": "Something went wrong while deleting the group. No projects were removed."
         },
         "WorktreeMetaDialog": {
           "3db0a2a593": "Cancelar",
@@ -4362,14 +4384,16 @@
           "6922c1fa2b": "Orca estrella en GitHub",
           "511782265b": "Apoye el proyecto con una estrella de GitHub a través de la CLI de gh.",
           "55a87e5fd1": "Apoya a la Orca",
-          "964acc6bb4": "Estrella",
+          "964acc6bb4": "Dar estrella",
           "73b327e793": "Intentar otra vez",
           "c9f96d4234": "error",
-          "397719bee5": "Protagonizada...",
-          "1e29570462": "protagonizada",
-          "9d181300e3": "sembrado de estrellas",
+          "397719bee5": "Dando estrella...",
+          "1e29570462": "dando estrella",
+          "9d181300e3": "con estrella",
           "5c49f02662": "oculto",
-          "b3f0584f5d": "cargando"
+          "b3f0584f5d": "cargando",
+          "cb65c75b11": "Abriendo...",
+          "f2d4f877b2": "Abrir GitHub"
         },
         "GeneralUpdateSettingsSection": {
           "8a52ca1d02": "Notas de la versión",

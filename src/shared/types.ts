@@ -248,6 +248,8 @@ export type Worktree = {
   linkedIssue: number | null
   linkedPR: number | null
   linkedLinearIssue: string | null
+  linkedLinearIssueWorkspaceId?: string | null
+  linkedLinearIssueOrganizationUrlKey?: string | null
   // Why: parallel slots for GitLab work-item references. Kept as separate
   // fields (rather than reusing linkedIssue / linkedPR with a provider
   // discriminator) so the persistence layer is unambiguous when a user
@@ -322,6 +324,8 @@ export type WorktreeMeta = {
   linkedIssue: number | null
   linkedPR: number | null
   linkedLinearIssue: string | null
+  linkedLinearIssueWorkspaceId?: string | null
+  linkedLinearIssueOrganizationUrlKey?: string | null
   /** Optional for backward compatibility — see Worktree.linkedGitLabMR. */
   linkedGitLabMR?: number | null
   /** Optional for backward compatibility — see Worktree.linkedGitLabIssue. */
@@ -1630,6 +1634,8 @@ export type CreateWorktreeArgs = {
   linkedIssue?: number
   linkedPR?: number
   linkedLinearIssue?: string
+  linkedLinearIssueWorkspaceId?: string | null
+  linkedLinearIssueOrganizationUrlKey?: string | null
   linkedGitLabIssue?: number
   linkedGitLabMR?: number
   pushTarget?: GitPushTarget
@@ -2737,7 +2743,7 @@ export type PersistedUIState = {
    *  spawn — effectively restarting the nag countdown after each update. */
   starNagAppVersion?: string | null
   /** Next threshold (agents spawned since baseline) at which the star-nag
-   *  notification should fire. Starts at 50 and doubles each time the user
+   *  notification should fire. Starts at 35 and doubles each time the user
    *  dismisses the notification without starring. */
   starNagNextThreshold?: number
   /** Once the user has starred Orca (from any entry point) we permanently

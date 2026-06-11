@@ -70,13 +70,7 @@ import { normalizeHostedReviewHeadRef } from '../../../../shared/hosted-review-r
 import { getHostedReviewCacheKey, refreshHostedReviewCard } from '@/store/slices/hosted-review'
 import { toast } from 'sonner'
 import { useConfirmationDialog } from '@/components/confirmation-dialog'
-import {
-  classifyHostedReview,
-  type HostedReviewClassificationOptions
-} from '../../../../shared/hosted-review-queue'
-import { hostedReviewSummaryFromGitHubPRInfo } from '../../../../shared/hosted-review-github'
 import { type ChecksPanelReview, gitHubPRToChecksPanelReview } from './checks-panel-review'
-import { hostedReviewSummaryFromGitLabInfo } from '../../../../shared/hosted-review-gitlab'
 import {
   checksPanelAsyncResultKey,
   checksPanelHostedReviewAsyncResultKey,
@@ -373,7 +367,6 @@ export default function ChecksPanel(): React.JSX.Element {
   const [checksLoading, setChecksLoading] = useState(false)
   const [comments, setComments] = useState<PRComment[]>([])
   const [commentsLoading, setCommentsLoading] = useState(false)
-  const [gitLabDetailsFetchedAt, setGitLabDetailsFetchedAt] = useState<number | null>(null)
   const [emptyRefreshing, setEmptyRefreshing] = useState(false)
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [conflictDetailsRefreshing, setConflictDetailsRefreshing] = useState(false)
@@ -499,7 +492,6 @@ export default function ChecksPanel(): React.JSX.Element {
     setChecksLoading(false)
     setComments([])
     setCommentsLoading(false)
-    setGitLabDetailsFetchedAt(null)
     setIsRefreshing(false)
     setEmptyRefreshing(false)
     setConflictDetailsRefreshing(false)
@@ -1160,7 +1152,6 @@ export default function ChecksPanel(): React.JSX.Element {
         const result = gitLabPipelineJobsToPRChecks(details?.pipelineJobs ?? [])
         setChecks(result)
         setComments(gitLabMRCommentsToPRComments(details?.comments))
-        setGitLabDetailsFetchedAt(Date.now())
         const signature = JSON.stringify(result.map((c) => `${c.name}:${c.status}:${c.conclusion}`))
         pollIntervalRef.current =
           signature === prevChecksRef.current
@@ -1174,7 +1165,6 @@ export default function ChecksPanel(): React.JSX.Element {
         console.warn('Failed to fetch GitLab MR checks:', err)
         setChecks([])
         setComments([])
-        setGitLabDetailsFetchedAt(null)
       } finally {
         if (isCurrentAsyncResult(requestKey)) {
           setChecksLoading(false)
@@ -2579,82 +2569,6 @@ export default function ChecksPanel(): React.JSX.Element {
     repo
   ])
 
-  const activeReviewClassification = React.useMemo(() => {
-    if (!repo) {
-      return null
-    }
-    const options: HostedReviewClassificationOptions = {
-      agentAuthorLogins: [],
-      viewer: null
-    }
-    if (activeGitLabReview) {
-      const commentsForClassification =
-        gitLabDetailsFetchedAt !== null && !commentsLoading ? comments : undefined
-      const summary = hostedReviewSummaryFromGitLabInfo({
-        review: activeGitLabReview,
-        comments: commentsForClassification,
-        checks
-      })
-      return classifyHostedReview(summary, options)
-    }
-    if (!pr) {
-      return null
-    }
-    let host = 'github.com'
-    let owner = 'unknown'
-    let repoName = 'unknown'
-    try {
-      const parsed = new URL(pr.url)
-      host = parsed.host || host
-      const segments = parsed.pathname.split('/').filter(Boolean)
-      if (segments.length >= 2) {
-        owner = segments[0]
-        repoName = segments[1]
-      }
-    } catch {
-      // Why: malformed URLs should not block queue-state classification.
-    }
-
-    // Why: unresolved thread data is paginated and fetched separately. Until
-    // comments have loaded for this PR, do not let queue badges imply a clean review.
-    const commentsForClassification =
-      commentsFetchedAt !== undefined && !commentsLoading ? comments : undefined
-    const summary = hostedReviewSummaryFromGitHubPRInfo({
-      pr,
-      owner,
-      repo: repoName,
-      host,
-      comments: commentsForClassification,
-      checks
-    })
-    return classifyHostedReview(summary, options)
-  }, [
-    activeGitLabReview,
-    repo,
-    gitLabDetailsFetchedAt,
-    commentsLoading,
-    comments,
-    checks,
-    pr,
-    commentsFetchedAt
-  ])
-
-  const queueBadges = React.useMemo(() => {
-    if (!activeReviewClassification) {
-      return [] as string[]
-    }
-    const badges: string[] = []
-    if (activeReviewClassification.needsResponse) {
-      badges.push('Needs response')
-    }
-    // Why: viewer/author/requestedReviewer signals are not wired into the
-    // ChecksPanel call site yet, so `state` and `requested` would mis-classify
-    // every PR (collapsing to 'teammate'). Suppress those badges until the
-    // inputs are available; needs-response works from PR metadata alone and
-    // remains accurate.
-    return badges
-  }, [activeReviewClassification])
-
   // ── Empty state ──
   if (!activeWorktree) {
     return (
@@ -2894,19 +2808,6 @@ export default function ChecksPanel(): React.JSX.Element {
             {new Date(activeReview.updatedAt).toLocaleString()}
           </div>
         )}
-        {queueBadges.length > 0 ? (
-          <div className="flex flex-wrap gap-1">
-            {queueBadges.map((badge) => (
-              <span
-                key={badge}
-                className="rounded-full border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
-              >
-                {badge}
-              </span>
-            ))}
-          </div>
-        ) : null}
-
         {/* Merge / Delete Workspace actions */}
         {activeReview && activeWorktree && repo && (
           <HostedReviewActions

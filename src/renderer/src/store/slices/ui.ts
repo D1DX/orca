@@ -617,11 +617,6 @@ export type UISlice = {
       title: string
       url: string
       linearIdentifier?: string
-      linkedContext?: {
-        provider: TaskProvider
-        version: 1
-        renderedText: string
-      }
     } | null
     agent: TuiAgent
     linkedIssue: string
