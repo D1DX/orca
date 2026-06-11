@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useAppStore } from '@/store'
 
+const WORKSPACE_BOARD_ESCAPE_BLOCKING_OVERLAY_SELECTOR = [
+  '[data-slot="dropdown-menu-content"][data-state="open"]',
+  '[data-slot="context-menu-content"][data-state="open"]',
+  '[data-slot="popover-content"][data-state="open"]',
+  '[role="dialog"][data-state="open"]:not([data-workspace-board-sheet])',
+  '[role="alertdialog"][data-state="open"]',
+  '[role="menu"][data-state="open"]',
+  '[role="listbox"][data-state="open"]'
+].join(', ')
+
 export type WorkspaceBoardPanelState = {
   workspaceBoardOpen: boolean
   workspaceBoardMenuOpen: boolean
@@ -65,14 +75,9 @@ export function useWorkspaceBoardPanel(): WorkspaceBoardPanelState {
       if (workspaceBoardMenuOpen) {
         return
       }
-      // Why: Escape must dismiss any nested overlay (Radix dropdown, popover,
-      // tooltip, dialog, context menu) ahead of collapsing this non-modal
-      // companion panel.
-      if (
-        document.querySelector(
-          '[data-radix-popper-content-wrapper], [role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [role="menu"][data-state="open"], [role="listbox"][data-state="open"]'
-        )
-      ) {
+      // Why: Escape should dismiss interactive nested overlays before this
+      // companion panel, but non-interactive tooltips should not trap it.
+      if (document.querySelector(WORKSPACE_BOARD_ESCAPE_BLOCKING_OVERLAY_SELECTOR)) {
         return
       }
       event.preventDefault()

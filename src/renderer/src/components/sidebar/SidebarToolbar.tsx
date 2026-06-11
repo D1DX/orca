@@ -5,6 +5,8 @@ import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip
 import { ScrollToCurrentWorkspaceToolbarButton } from './ScrollToCurrentWorkspaceToolbarButton'
 import { SidebarSettingsHelpMenu } from './SidebarSettingsHelpMenu'
 import { translate } from '@/i18n/i18n'
+import { useAppStore } from '@/store'
+import { hasFeatureInteraction } from '../../../../shared/feature-interactions'
 
 const WORKSPACE_BOARD_MOVED_HINT_STORAGE_KEY = 'orca.workspaceBoardMovedHintSeen.v1'
 const WORKSPACE_BOARD_MOVED_HINT_DURATION_MS = 12000
@@ -19,8 +21,24 @@ const SidebarToolbar = React.memo(function SidebarToolbar({
   onWorkspaceBoardToggle
 }: SidebarToolbarProps) {
   const [workspaceBoardMovedHintOpen, setWorkspaceBoardMovedHintOpen] = React.useState(false)
+  const movedHintEligibleRef = React.useRef<boolean | null>(null)
+  const persistedUIReady = useAppStore((state) => state.persistedUIReady)
+  const hasUsedWorkspaceBoard = useAppStore((state) =>
+    hasFeatureInteraction(state.featureInteractions, 'workspace-board')
+  )
 
   React.useEffect(() => {
+    if (!persistedUIReady) {
+      return
+    }
+    // Why: only users who had already opened the old board location should
+    // see the relocation hint; first-time users should not become eligible.
+    if (movedHintEligibleRef.current === null) {
+      movedHintEligibleRef.current = hasUsedWorkspaceBoard
+    }
+    if (!movedHintEligibleRef.current) {
+      return
+    }
     try {
       if (window.localStorage.getItem(WORKSPACE_BOARD_MOVED_HINT_STORAGE_KEY) === 'true') {
         return
@@ -35,7 +53,7 @@ const SidebarToolbar = React.memo(function SidebarToolbar({
       setWorkspaceBoardMovedHintOpen(false)
     }, WORKSPACE_BOARD_MOVED_HINT_DURATION_MS)
     return () => window.clearTimeout(timeoutId)
-  }, [])
+  }, [hasUsedWorkspaceBoard, persistedUIReady])
 
   const handleWorkspaceBoardClick = (): void => {
     setWorkspaceBoardMovedHintOpen(false)
