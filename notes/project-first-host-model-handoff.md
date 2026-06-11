@@ -415,12 +415,15 @@ Already partially landed:
 - repo-backed setup method metadata for imported/cloned project-host setups
 - project-host setup runtime capability advertisement, read fallback, and
   remote mutation gating for older runtime servers
+- persistence merge that preserves independently persisted project/setup rows
+  across load, repo updates, and repo reorders while refreshing repo-backed
+  compatibility rows from repos
 
 Still needed:
 
 - finish SSH clone streamed-progress parity and provisioning flows
-- independent project-host setup persistence beyond the repo-backed
-  compatibility records
+- first-class independent project-host setup creation/update/delete APIs beyond
+  the current repo-backed import/clone compatibility paths
 - bulk setup flows and setup for newly added hosts
 - project settings split into global and host-specific ownership
 - host settings/capability UI aligned with project setup

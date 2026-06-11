@@ -16,7 +16,9 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import type {
   PersistedState,
+  Project,
   ProjectGroup,
+  ProjectHostSetup,
   Repo,
   TerminalPaneLayoutNode,
   TerminalTab,
@@ -27,6 +29,7 @@ import { isTerminalLeafId, makePaneKey } from '../shared/stable-pane-id'
 import { TERMINAL_SCROLLBACK_REPLAY_BYTE_LIMIT } from '../shared/terminal-scrollback-limits'
 import { MAX_BROWSER_HISTORY_ENTRIES } from '../shared/workspace-session-browser-history'
 import {
+  getDefaultPersistedState,
   getDefaultWorkspaceSession,
   ONBOARDING_FINAL_STEP,
   ONBOARDING_FLOW_VERSION
@@ -158,6 +161,30 @@ const makeRepo = (overrides: Partial<Repo> = {}): Repo => ({
   displayName: 'test',
   badgeColor: '#fff',
   addedAt: 1,
+  ...overrides
+})
+
+const makeProject = (overrides: Partial<Project> = {}): Project => ({
+  id: 'project-1',
+  displayName: 'Project',
+  badgeColor: '#737373',
+  sourceRepoIds: [],
+  createdAt: 1,
+  updatedAt: 1,
+  ...overrides
+})
+
+const makeProjectHostSetup = (overrides: Partial<ProjectHostSetup> = {}): ProjectHostSetup => ({
+  id: 'setup-1',
+  projectId: 'project-1',
+  hostId: 'local',
+  repoId: '',
+  path: '/repo',
+  displayName: 'Project',
+  setupState: 'ready',
+  setupMethod: 'imported-existing-folder',
+  createdAt: 1,
+  updatedAt: 1,
   ...overrides
 })
 
@@ -317,6 +344,38 @@ describe('Store', () => {
     const persisted = readDataFile() as PersistedState
     expect(persisted.projects).toEqual(store.getProjects())
     expect(persisted.projectHostSetups).toEqual(store.getProjectHostSetups())
+  })
+
+  it('preserves independent project host setup records on load', async () => {
+    const independentProject = makeProject({
+      id: 'cloud-project',
+      displayName: 'Cloud Project'
+    })
+    const independentSetup = makeProjectHostSetup({
+      id: 'cloud-project::gpu-vm',
+      projectId: independentProject.id,
+      hostId: 'runtime:gpu-vm',
+      repoId: '',
+      path: '/srv/cloud-project',
+      displayName: 'GPU VM'
+    })
+    writeDataFile({
+      ...getDefaultPersistedState(testState.dir),
+      repos: [makeRepo({ id: 'r1', path: '/repo', displayName: 'Repo' })],
+      projects: [independentProject],
+      projectHostSetups: [independentSetup]
+    })
+
+    const store = await createStore()
+
+    expect(store.getProjects().map((project) => project.id)).toEqual(['repo:r1', 'cloud-project'])
+    expect(store.getProjectHostSetups().map((setup) => setup.id)).toEqual([
+      'r1',
+      'cloud-project::gpu-vm'
+    ])
+    store.flush()
+    const persisted = readDataFile() as PersistedState
+    expect(persisted.projectHostSetups).toContainEqual(independentSetup)
   })
 
   it('returns default settings when no data file exists', async () => {
@@ -2326,6 +2385,37 @@ describe('Store', () => {
         displayName: 'renamed',
         worktreeBasePath: '../new-worktrees'
       })
+    ])
+  })
+
+  it('repo mutations preserve independent project host setup records', async () => {
+    const independentProject = makeProject({
+      id: 'cloud-project',
+      displayName: 'Cloud Project'
+    })
+    const independentSetup = makeProjectHostSetup({
+      id: 'cloud-project::gpu-vm',
+      projectId: independentProject.id,
+      hostId: 'runtime:gpu-vm',
+      repoId: '',
+      path: '/srv/cloud-project',
+      displayName: 'GPU VM'
+    })
+    writeDataFile({
+      ...getDefaultPersistedState(testState.dir),
+      repos: [makeRepo({ id: 'r1' })],
+      projects: [independentProject],
+      projectHostSetups: [independentSetup]
+    })
+    const store = await createStore()
+
+    store.updateRepo('r1', { displayName: 'renamed' })
+    store.reorderRepos(['r1'])
+
+    expect(store.getProjects().map((project) => project.id)).toEqual(['repo:r1', 'cloud-project'])
+    expect(store.getProjectHostSetups()).toEqual([
+      expect.objectContaining({ id: 'r1', displayName: 'renamed' }),
+      independentSetup
     ])
   })
 

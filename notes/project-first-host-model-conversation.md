@@ -497,11 +497,14 @@ Already partially landed:
   compatibility projection and persistence sync
 - project-host setup runtime capability advertisement, read fallback, and
   remote mutation gating for older runtime servers
+- persistence merge that preserves independently persisted project/setup rows
+  across load, repo updates, and repo reorders while refreshing repo-backed
+  compatibility rows from repos
 
 Not complete yet:
 
-- independent project-host setup persistence beyond repo-backed compatibility
-  records
+- first-class independent project-host setup creation/update/delete APIs beyond
+  the current repo-backed import/clone compatibility paths
 - bulk setup flows and setup for hosts that are not already known to the client
 - SSH streamed clone progress parity
 - full project settings split into global and host-specific ownership
@@ -531,7 +534,7 @@ tests, and version-skew handling.
 
 The largest remaining areas are:
 
-1. independent `ProjectHostSetup` persistence
+1. independent `ProjectHostSetup` creation/update/delete APIs
 2. project-first creation/setup UI completion
 3. project and host settings ownership split
 4. cache/request ownership audit

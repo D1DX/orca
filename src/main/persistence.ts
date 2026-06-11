@@ -1590,21 +1590,50 @@ function migrationUnsupportedEntriesEqual(
 
 function projectHostSetupCompatibilityStateEqual(
   state: Pick<PersistedState, 'projects' | 'projectHostSetups'>,
-  projection: Pick<PersistedState, 'projects' | 'projectHostSetups'>
+  nextState: Pick<PersistedState, 'projects' | 'projectHostSetups'>
 ): boolean {
   return (
-    JSON.stringify(state.projects ?? []) === JSON.stringify(projection.projects) &&
-    JSON.stringify(state.projectHostSetups ?? []) === JSON.stringify(projection.projectHostSetups)
+    JSON.stringify(state.projects ?? []) === JSON.stringify(nextState.projects) &&
+    JSON.stringify(state.projectHostSetups ?? []) === JSON.stringify(nextState.projectHostSetups)
   )
 }
 
-function buildProjectHostSetupCompatibilityState(
+function isRepoBackedProjectHostSetup(
+  setup: ProjectHostSetup,
+  currentRepoIds: ReadonlySet<string>
+): boolean {
+  const repoId = typeof setup.repoId === 'string' ? setup.repoId : ''
+  return repoId.length > 0 && (currentRepoIds.has(repoId) || setup.id === repoId)
+}
+
+function mergeProjectHostSetupCompatibilityState(
+  state: Pick<PersistedState, 'projects' | 'projectHostSetups'>,
   repos: readonly Repo[]
 ): Pick<PersistedState, 'projects' | 'projectHostSetups'> {
   const projection = projectHostSetupProjectionFromRepos(repos)
+  const currentRepoIds = new Set(repos.map((repo) => repo.id))
+  const projectedProjectIds = new Set(projection.projects.map((project) => project.id))
+  const projectedSetupIds = new Set(projection.setups.map((setup) => setup.id))
+  // Why: legacy/repo-backed setup rows use the repo id as the setup id. Keep
+  // only independent setup rows here so repo deletion does not leave ghosts.
+  const independentSetups = (state.projectHostSetups ?? []).filter((setup) => {
+    if (projectedSetupIds.has(setup.id)) {
+      return false
+    }
+    return !isRepoBackedProjectHostSetup(setup, currentRepoIds)
+  })
+  const independentProjectIds = new Set(independentSetups.map((setup) => setup.projectId))
+  const independentProjects = (state.projects ?? [])
+    .filter(
+      (project) => independentProjectIds.has(project.id) && !projectedProjectIds.has(project.id)
+    )
+    .map((project) => ({
+      ...project,
+      sourceRepoIds: project.sourceRepoIds.filter((repoId) => currentRepoIds.has(repoId))
+    }))
   return {
-    projects: projection.projects,
-    projectHostSetups: projection.setups
+    projects: [...projection.projects, ...independentProjects],
+    projectHostSetups: [...projection.setups, ...independentSetups]
   }
 }
 
@@ -2300,7 +2329,7 @@ export class Store {
     }
 
     const repos = clearMissingProjectGroupMemberships(result.repos, result.projectGroups ?? [])
-    const projectHostSetupCompatibility = buildProjectHostSetupCompatibilityState(repos)
+    const projectHostSetupCompatibility = mergeProjectHostSetupCompatibilityState(result, repos)
     if (!projectHostSetupCompatibilityStateEqual(result, projectHostSetupCompatibility)) {
       this.loadNeedsSave = true
     }
@@ -2791,7 +2820,7 @@ export class Store {
   }
 
   private syncProjectHostSetupCompatibilityState(): void {
-    const compatibilityState = buildProjectHostSetupCompatibilityState(this.state.repos)
+    const compatibilityState = mergeProjectHostSetupCompatibilityState(this.state, this.state.repos)
     this.state.projects = compatibilityState.projects
     this.state.projectHostSetups = compatibilityState.projectHostSetups
   }
