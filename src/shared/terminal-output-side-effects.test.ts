@@ -17,6 +17,7 @@ type RecordedEvent =
   | ['bell']
   | ['finished', number | null]
   | ['pr', string, number]
+  | ['2031-subscribe']
 
 function createRecordingTracker(overrides: TerminalTitleTrackerCallbacks = {}): {
   events: RecordedEvent[]
@@ -28,6 +29,7 @@ function createRecordingTracker(overrides: TerminalTitleTrackerCallbacks = {}): 
     onBell: () => events.push(['bell']),
     onCommandFinished: (exitCode) => events.push(['finished', exitCode]),
     onPrLink: (link) => events.push(['pr', link.url, link.number]),
+    onMode2031Subscribe: () => events.push(['2031-subscribe']),
     ...overrides
   })
   return { events, tracker }
@@ -111,6 +113,41 @@ describe('createTerminalTitleTracker pr-link facts', () => {
     tracker.handleChunk(`${ESC}]133;D;0${BEL}https://github.com/acme/orca/pull/42\r\n`)
 
     expect(titles).toEqual([])
+  })
+})
+
+describe('createTerminalTitleTracker 2031-subscribe facts', () => {
+  it('emits a fact per chunk containing a DECSET 2031 subscribe, before the bell', () => {
+    const { events, tracker } = createRecordingTracker()
+
+    tracker.handleChunk(`${ESC}[?2031hready${BEL}`)
+
+    expect(events).toEqual([['2031-subscribe'], ['bell']])
+  })
+
+  it('detects a subscribe split across chunk boundaries', () => {
+    const { events, tracker } = createRecordingTracker()
+
+    tracker.handleChunk(`${ESC}[?20`)
+    tracker.handleChunk('31h')
+
+    expect(events).toEqual([['2031-subscribe']])
+  })
+
+  it('ignores DECSET 2031 unsubscribes', () => {
+    const { events, tracker } = createRecordingTracker()
+
+    tracker.handleChunk(`${ESC}[?2031l`)
+
+    expect(events).toEqual([])
+  })
+
+  it('skips the 2031 scan entirely when no consumer is registered', () => {
+    const { events, tracker } = createRecordingTracker({ onMode2031Subscribe: undefined })
+
+    tracker.handleChunk(`${ESC}[?2031h`)
+
+    expect(events).toEqual([])
   })
 })
 

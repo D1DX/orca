@@ -51,7 +51,6 @@ type HiddenPressureDeps<TMeasurement, TDebug, TScheduler, TMainPressure, TAckGat
   readTerminalPtyOutputDebug: (page: Page) => Promise<TDebug | null>
   releaseTerminalAckGate: (page: Page) => Promise<void>
   resetTerminalPtyOutputDebug: (page: Page) => Promise<void>
-  waitForMainPtyPressureBacklog: (page: Page) => Promise<TMainPressure>
   writeInteractivePromptScript: (scriptPath: string, runId: string) => void
 }
 
@@ -70,6 +69,13 @@ type HiddenPressureMainSnapshot = {
   peakPendingChars: number
   peakRendererInFlightChars: number
   ackGatedFlushSkipCount: number
+  hiddenDeliveryDroppedChars: number
+  hiddenDeliveryGatedPtyCount: number
+}
+
+type HiddenPressureSchedulerSnapshot = {
+  peakQueuedChars: number
+  droppedBacklogCount: number
 }
 
 type HiddenPressureAckGate = {
@@ -79,6 +85,9 @@ type HiddenPressureAckGate = {
 // Why: restore still has to finish promptly, but parallel Electron workers on
 // Linux CI can overshoot the 1s product target without a responsiveness regression.
 const MAX_HIDDEN_RESTORE_LATENCY_MS = 1_500
+// Why: Phase-4 hidden-delivery gate contract — hidden PTY bytes are dropped in
+// main after model ingestion, so renderer-delivery pressure must stay FAR
+// below the old 2 MB ACK-backpressure target instead of reaching it.
 const MAIN_RENDERER_PRESSURE_TARGET_CHARS = 2 * 1024 * 1024
 
 export async function runHiddenRealPtyPressureScenario<
@@ -86,7 +95,7 @@ export async function runHiddenRealPtyPressureScenario<
   TDebug extends HiddenPressureDebug,
   TMainPressure extends HiddenPressureMainSnapshot,
   TAckGate extends HiddenPressureAckGate,
-  TScheduler
+  TScheduler extends HiddenPressureSchedulerSnapshot
 >({
   deps,
   annotationSuffix,
@@ -150,7 +159,11 @@ export async function runHiddenRealPtyPressureScenario<
     await switchToTypingWorkspace(orcaPage, firstWorktreeId)
     const typingPtyId = await waitForActivePanePtyId(orcaPage)
 
-    const pressureBeforeTyping = await deps.waitForMainPtyPressureBacklog(orcaPage)
+    // Why: under the Phase-4 hidden-delivery gate the hidden panes' bytes are
+    // dropped in main after model ingestion, so renderer-delivery pressure
+    // never builds. Wait for the gate to drop at least one pane's worth of
+    // output instead of the old 2 MB ACK-backpressure target.
+    await waitForMainHiddenDeliveryDrops(orcaPage, deps, pressureOutputChars)
     const measurement = await deps.measureTypingDuringLoad(
       orcaPage,
       typingScriptPath,
@@ -158,6 +171,7 @@ export async function runHiddenRealPtyPressureScenario<
       runId
     )
     const debug = await deps.readTerminalPtyOutputDebug(orcaPage)
+    const scheduler = await deps.readTerminalOutputSchedulerDebug(orcaPage)
     const mainPressure = await deps.readMainPtyPressureDebug(orcaPage)
     const ackGate = await deps.readTerminalAckGateDebug(orcaPage)
     deps.annotateTypingMeasurement(
@@ -166,33 +180,26 @@ export async function runHiddenRealPtyPressureScenario<
       hiddenPanes.length + 1,
       measurement,
       debug,
-      await deps.readTerminalOutputSchedulerDebug(orcaPage),
+      scheduler,
       mainPressure,
       ackGate
     )
 
-    if (
-      pressureOutputMode === 'plain' ||
-      pressureOutputMode === 'latin' ||
-      pressureOutputMode === 'title' ||
-      pressureOutputMode === 'rich-model' ||
-      pressureOutputMode === 'tui'
-    ) {
-      expect(debug?.hiddenRendererSkipCount ?? 0).toBeGreaterThan(0)
-      expect(debug?.hiddenRendererSkippedChars ?? 0).toBeGreaterThan(0)
-    } else {
-      expect(debug?.hiddenRendererSkipCount ?? 0).toBe(0)
-      expect(debug?.hiddenRendererSkippedChars ?? 0).toBe(0)
-    }
-    if (pressureOutputMode === 'rich-model') {
-      expect(debug?.hiddenRendererSkippedChars ?? 0).toBeGreaterThan(pressureOutputChars)
-    }
-    expect(pressureBeforeTyping.peakPendingChars).toBeGreaterThan(0)
-    expect(pressureBeforeTyping.ackGatedFlushSkipCount).toBeGreaterThan(0)
-    expect(mainPressure?.peakRendererInFlightChars ?? 0).toBeGreaterThanOrEqual(
+    // New hidden-delivery contract (all pressure modes): bytes never reach the
+    // renderer, so hidden skips may legitimately be zero — at most a pre-latch
+    // trickle below one pane's output — and main's renderer-delivery pressure
+    // must stay clearly below the old 2 MB backpressure target.
+    expect(debug?.hiddenRendererSkippedChars ?? 0).toBeLessThan(pressureOutputChars)
+    expect(mainPressure?.hiddenDeliveryDroppedChars ?? 0).toBeGreaterThanOrEqual(
+      pressureOutputChars
+    )
+    expect(mainPressure?.peakRendererInFlightChars ?? 0).toBeLessThan(
       MAIN_RENDERER_PRESSURE_TARGET_CHARS
     )
-    expect(ackGate?.heldAckChars ?? 0).toBeGreaterThan(0)
+    // Why: the renderer scheduler queue must stay ~empty (no hidden bytes to
+    // queue) and must never drop a backlog — strict, per the gate contract.
+    expect(scheduler?.peakQueuedChars ?? 0).toBeLessThan(pressureOutputChars)
+    expect(scheduler?.droppedBacklogCount ?? Number.POSITIVE_INFINITY).toBe(0)
     expect(measurement.medianLatencyMs).toBeLessThan(75)
     expect(measurement.worstLatencyMs).toBeLessThan(300)
     expect(measurement.maxTimerDriftMs).toBeLessThan(150)
@@ -207,9 +214,11 @@ export async function runHiddenRealPtyPressureScenario<
       type: `opencode-hidden-real-pty-restore${annotationSuffix ?? ''}`,
       description: `panes=${hiddenPanes.length + 1} restore=${restoreLatencyMs.toFixed(
         1
-      )}ms hiddenSkippedChars=${debug?.hiddenRendererSkippedChars ?? 0} mainPeakInFlightChars=${
-        mainPressure?.peakRendererInFlightChars ?? 0
-      } heldAckChars=${ackGate?.heldAckChars ?? 0}`
+      )}ms hiddenSkippedChars=${debug?.hiddenRendererSkippedChars ?? 0} hiddenDeliveryDroppedChars=${
+        mainPressure?.hiddenDeliveryDroppedChars ?? 0
+      } mainPeakInFlightChars=${mainPressure?.peakRendererInFlightChars ?? 0} heldAckChars=${
+        ackGate?.heldAckChars ?? 0
+      }`
     })
     expect(restoreLatencyMs).toBeLessThan(MAX_HIDDEN_RESTORE_LATENCY_MS)
   } finally {
@@ -223,6 +232,23 @@ export async function runHiddenRealPtyPressureScenario<
       typingScriptPath
     })
   }
+}
+
+// Why: replaces the old waitForMainPtyPressureBacklog premise — the Phase-4
+// gate drops hidden bytes in main, so renderer-delivery pressure never builds;
+// readiness is the gate reporting one pane's worth of dropped output. The 30s
+// timeout covers the rich-model 11s startup-window delay.
+async function waitForMainHiddenDeliveryDrops<TMainPressure extends HiddenPressureMainSnapshot>(
+  orcaPage: Page,
+  deps: { readMainPtyPressureDebug: (page: Page) => Promise<TMainPressure | null> },
+  pressureOutputChars: number
+): Promise<void> {
+  await expect
+    .poll(
+      async () => (await deps.readMainPtyPressureDebug(orcaPage))?.hiddenDeliveryDroppedChars ?? 0,
+      { timeout: 30_000, message: 'Main hidden-delivery gate did not drop hidden PTY output' }
+    )
+    .toBeGreaterThanOrEqual(pressureOutputChars)
 }
 
 async function measureHiddenOutputRestoreLatency(

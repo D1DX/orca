@@ -2202,6 +2202,11 @@ export type GlobalSettings = {
    *  for those PTYs; `false` restores renderer byte parsing.
    *  See docs/reference/terminal-side-effect-authority.md. */
   terminalMainSideEffectAuthority?: boolean
+  /** Kill switch for main's hidden-delivery gate (Phase 4): when true
+   *  (default) AND terminalMainSideEffectAuthority is on, main drops PTY byte
+   *  delivery to hidden renderer views after model ingestion; reveal restores
+   *  from the model snapshot. `false` restores hidden byte delivery. */
+  terminalHiddenDeliveryGate?: boolean
   /** Which agent to pre-select in the new-workspace composer.
    *  - null: auto (first detected agent)
    *  - 'blank': blank terminal (no agent launched)

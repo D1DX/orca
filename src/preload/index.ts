@@ -44,6 +44,7 @@ import type {
   WorktreeDefaultTabsLaunch,
   WorktreeRemoteBranchConflictEvent
 } from '../shared/types'
+import type { PtyModelRestoreNeededEvent } from '../shared/pty-model-restore-marker'
 import type { GitHistoryOptions, GitHistoryResult } from '../shared/git-history'
 import type { ShellOpenLocalPathResult } from '../shared/shell-open-types'
 import type { SkillDiscoveryResult, SkillDiscoveryTarget } from '../shared/skills'
@@ -704,6 +705,18 @@ const api = {
     setActiveRendererPty: (id: string, active: boolean): void => {
       ipcRenderer.send('pty:setActiveRendererPty', { id, active })
     },
+    /** Hidden-delivery gate (Phase 4): hidden=true lets main DROP renderer
+     *  byte delivery after model ingestion; reveal restores from the model
+     *  snapshot. Fire-and-forget like setActiveRendererPty. */
+    setHiddenRendererPty: (id: string, hidden: boolean): void => {
+      ipcRenderer.send('pty:setHiddenRendererPty', { id, hidden })
+    },
+    /** Delivery-interest signal: any renderer party that needs raw bytes
+     *  (dispatcher sidecars, eager pre-mount buffers) suppresses the
+     *  hidden-delivery gate for that PTY while registered. */
+    setPtyDeliveryInterest: (id: string, interested: boolean): void => {
+      ipcRenderer.send('pty:setPtyDeliveryInterest', { id, interested })
+    },
 
     kill: (id: string, opts?: { keepHistory?: boolean }): Promise<void> =>
       ipcRenderer.invoke('pty:kill', { id, keepHistory: opts?.keepHistory ?? false }),
@@ -720,6 +733,7 @@ const api = {
       rows: number
       cwd?: string | null
       seq?: number
+      pendingDeliveryStartSeq?: number
       source?: 'headless' | 'renderer'
     } | null> => ipcRenderer.invoke('pty:getMainBufferSnapshot', { id, opts }),
 
@@ -737,6 +751,11 @@ const api = {
       peakRendererInFlightChars: number
       peakMaxRendererInFlightCharsByPty: number
       ackGatedFlushSkipCount: number
+      hiddenDeliveryGatedPtyCount: number
+      deliveryInterestPtyCount: number
+      hiddenDeliveryDroppedChars: number
+      hiddenDeliveryDroppedChunks: number
+      pendingDroppedChars: number
     }> => ipcRenderer.invoke('pty:getRendererDeliveryDebugSnapshot'),
 
     resetRendererDeliveryDebug: (): Promise<void> =>
@@ -771,6 +790,17 @@ const api = {
         callback(data)
       ipcRenderer.on('pty:replay', listener)
       return () => ipcRenderer.removeListener('pty:replay', listener)
+    },
+
+    /** Out-of-band signal that main dropped renderer-bound bytes for a PTY
+     *  (hidden-delivery gate / pending cap) — the pane must restore from the
+     *  model snapshot. Deliberately NOT on pty:data: an in-band marker is
+     *  ambiguous with chunks fully stripped by OSC-9999 cleaning. */
+    onModelRestoreNeeded: (callback: (event: PtyModelRestoreNeededEvent) => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, event: PtyModelRestoreNeededEvent) =>
+        callback(event)
+      ipcRenderer.on('pty:modelRestoreNeeded', listener)
+      return () => ipcRenderer.removeListener('pty:modelRestoreNeeded', listener)
     },
 
     /** Batched derived side-effect facts (title/bell/agent transitions) for

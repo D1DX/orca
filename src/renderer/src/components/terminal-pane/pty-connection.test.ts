@@ -59,6 +59,7 @@ type StoreState = {
     activeRuntimeEnvironmentId?: string | null
     experimentalTerminalAttention?: boolean
     terminalMainSideEffectAuthority?: boolean
+    terminalHiddenDeliveryGate?: boolean
     notifications?: {
       enabled?: boolean
       agentTaskComplete?: boolean
@@ -494,6 +495,8 @@ describe('connectPanePty', () => {
           getMainBufferSnapshot: vi.fn().mockResolvedValue(null),
           getForegroundProcess: vi.fn().mockResolvedValue(null),
           hasChildProcesses: vi.fn().mockResolvedValue(false),
+          setHiddenRendererPty: vi.fn(),
+          setPtyDeliveryInterest: vi.fn(),
           ackColdRestore: vi.fn(),
           onClearBufferRequest: vi.fn(() => vi.fn()),
           onSerializeBufferRequest: vi.fn(() => vi.fn()),
@@ -3078,6 +3081,567 @@ describe('connectPanePty', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  describe('hidden-delivery gate', () => {
+    function enableMainAuthority(): void {
+      mockStoreState.settings = {
+        ...mockStoreState.settings,
+        terminalMainSideEffectAuthority: true
+      } as StoreState['settings']
+    }
+
+    function getSetHiddenRendererPtyMock(): ReturnType<typeof vi.fn> {
+      return window.api.pty.setHiddenRendererPty as unknown as ReturnType<typeof vi.fn>
+    }
+
+    async function connectHiddenPane(deps: ReturnType<typeof createDeps>): Promise<{
+      transport: MockTransport
+      pane: ReturnType<typeof createPane>
+      dataCallback: (data: string, meta?: { seq?: number; rawLength?: number }) => void
+      binding: { syncProcessTracking: () => void; dispose: () => void }
+    }> {
+      const { connectPanePty } = await import('./pty-connection')
+      const transport = createMockTransport('pty-id')
+      const capturedDataCallback: {
+        current: ((data: string, meta?: { seq?: number; rawLength?: number }) => void) | null
+      } = { current: null }
+      transport.connect.mockImplementation(
+        async ({ callbacks }: { callbacks: ConnectCallbacks }) => {
+          capturedDataCallback.current = callbacks.onData ?? null
+          return 'pty-id'
+        }
+      )
+      transportFactoryQueue.push(transport)
+      const pane = createPane(1)
+      const manager = createManager(1)
+      const binding = connectPanePty(pane as never, manager as never, deps as never) as {
+        syncProcessTracking: () => void
+        dispose: () => void
+      }
+      await flushAsyncTicks(6)
+      expect(capturedDataCallback.current).not.toBeNull()
+      return { transport, pane, dataCallback: capturedDataCallback.current!, binding }
+    }
+
+    it('marks the PTY hidden on hidden output and clears it before requesting restore on reveal', async () => {
+      enableMainAuthority()
+      const deps = createDeps({ isVisibleRef: { current: false } })
+      const { pane, dataCallback } = await connectHiddenPane(deps)
+      const setHiddenRendererPty = getSetHiddenRendererPtyMock()
+      const getMainBufferSnapshot = window.api.pty.getMainBufferSnapshot as unknown as ReturnType<
+        typeof vi.fn
+      >
+      getMainBufferSnapshot.mockResolvedValue({
+        data: 'model snapshot\r\n',
+        cols: 100,
+        rows: 30,
+        seq: 64
+      })
+
+      dataCallback('hidden output\r\n', { seq: 16, rawLength: 16 })
+      expect(setHiddenRendererPty).toHaveBeenCalledWith('pty-id', true)
+
+      // Reveal rides the visible-resume backlog recovery hook.
+      ;(deps.isVisibleRef as { current: boolean }).current = true
+      const { requestTerminalBacklogRecovery } =
+        await import('@/lib/pane-manager/pane-terminal-output-scheduler')
+      requestTerminalBacklogRecovery(pane.terminal as never)
+      await flushAsyncTicks(20)
+
+      expect(setHiddenRendererPty).toHaveBeenLastCalledWith('pty-id', false)
+      expect(getMainBufferSnapshot).toHaveBeenCalledWith('pty-id', { scrollbackRows: 5000 })
+      // The unhide IPC must precede the snapshot request (seq-guard contract).
+      const unhideOrder = setHiddenRendererPty.mock.invocationCallOrder.at(-1)!
+      const snapshotOrder = getMainBufferSnapshot.mock.invocationCallOrder[0]!
+      expect(unhideOrder).toBeLessThan(snapshotOrder)
+      expect(pane.terminal.write).toHaveBeenCalledWith(
+        expect.stringContaining('model snapshot'),
+        expect.any(Function)
+      )
+    })
+
+    it('clears the hidden bit on visibility flips through syncProcessTracking', async () => {
+      enableMainAuthority()
+      const deps = createDeps({ isVisibleRef: { current: false } })
+      const { dataCallback, binding } = await connectHiddenPane(deps)
+      const setHiddenRendererPty = getSetHiddenRendererPtyMock()
+
+      dataCallback('hidden output\r\n')
+      expect(setHiddenRendererPty).toHaveBeenLastCalledWith('pty-id', true)
+      ;(deps.isVisibleRef as { current: boolean }).current = true
+      binding.syncProcessTracking()
+      expect(setHiddenRendererPty).toHaveBeenLastCalledWith('pty-id', false)
+
+      // Hiding again re-marks through the same lifecycle hook.
+      ;(deps.isVisibleRef as { current: boolean }).current = false
+      binding.syncProcessTracking()
+      expect(setHiddenRendererPty).toHaveBeenLastCalledWith('pty-id', true)
+    })
+
+    it('never marks hidden while the codex startup renderer-query window is active', async () => {
+      enableMainAuthority()
+      // Why: only fake the clock — the default fake set would also replace
+      // the suite's synchronous requestAnimationFrame mock and the deferred
+      // connect frame would never run.
+      vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+      try {
+        const deps = createDeps({
+          isVisibleRef: { current: false },
+          startup: { command: 'codex' }
+        })
+        const { transport, dataCallback } = await connectHiddenPane(deps)
+        const setHiddenRendererPty = getSetHiddenRendererPtyMock()
+        const transportOptions = createdTransportOptions.at(-1) as {
+          onPtySpawn?: (ptyId: string) => void
+        }
+        transportOptions.onPtySpawn?.('pty-id')
+        const factsHandler = await import('./terminal-side-effect-facts-handler')
+
+        dataCallback('startup probe output\r\n')
+        expect(setHiddenRendererPty).not.toHaveBeenCalledWith('pty-id', true)
+
+        // Why: the fact is the sole 2031 responder for gate-managed PTYs —
+        // even during the startup window (the xterm-side CSI reply is
+        // suppressed by the lifecycle for these panes), so a fact racing the
+        // hidden mark can never produce zero or two replies.
+        factsHandler._dispatchTerminalSideEffectBatchForTest({
+          ptyId: 'pty-id',
+          seq: 8,
+          facts: [{ kind: '2031-subscribe' }]
+        })
+        expect(transport.sendInput).toHaveBeenCalledTimes(1)
+        expect(transport.sendInput).toHaveBeenCalledWith('\x1b[?997;1n')
+
+        // Why: after the 10s window lapses, hidden output gates normally.
+        vi.advanceTimersByTime(10_001)
+        dataCallback('post window output\r\n')
+        expect(setHiddenRendererPty).toHaveBeenLastCalledWith('pty-id', true)
+
+        // Gated now — a new subscribe fact still gets exactly one reply.
+        factsHandler._dispatchTerminalSideEffectBatchForTest({
+          ptyId: 'pty-id',
+          seq: 16,
+          facts: [{ kind: '2031-subscribe' }]
+        })
+        expect(transport.sendInput).toHaveBeenCalledTimes(2)
+        expect(transport.sendInput).toHaveBeenLastCalledWith('\x1b[?997;1n')
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it('latches model restore from the out-of-band marker and restores on reveal', async () => {
+      enableMainAuthority()
+      const deps = createDeps({ isVisibleRef: { current: false } })
+      const { pane, dataCallback } = await connectHiddenPane(deps)
+      const getMainBufferSnapshot = window.api.pty.getMainBufferSnapshot as unknown as ReturnType<
+        typeof vi.fn
+      >
+      getMainBufferSnapshot.mockResolvedValue({
+        data: 'dropped bytes snapshot\r\n',
+        cols: 100,
+        rows: 30,
+        seq: 64
+      })
+      // Why: the marker subscription is keyed by the live PTY id — the byte
+      // path latches it on the first hidden chunk, like the hidden mark.
+      dataCallback('pre-drop output\r\n', { seq: 16, rawLength: 17 })
+      const { _dispatchPtyModelRestoreNeededForTest } = await import('./pty-model-restore-channel')
+
+      // Main dropped gated bytes and signalled it out-of-band.
+      _dispatchPtyModelRestoreNeededForTest({ id: 'pty-id', reason: 'hidden-drop', markerSeq: 64 })
+      expect(getMainBufferSnapshot).not.toHaveBeenCalled()
+      ;(deps.isVisibleRef as { current: boolean }).current = true
+      const { requestTerminalBacklogRecovery } =
+        await import('@/lib/pane-manager/pane-terminal-output-scheduler')
+      requestTerminalBacklogRecovery(pane.terminal as never)
+      await flushAsyncTicks(20)
+
+      expect(getMainBufferSnapshot).toHaveBeenCalledWith('pty-id', { scrollbackRows: 5000 })
+      expect(pane.terminal.write).toHaveBeenCalledWith(
+        expect.stringContaining('dropped bytes snapshot'),
+        expect.any(Function)
+      )
+    })
+
+    it('answers each 2031-subscribe fact exactly once, before any hidden mark exists', async () => {
+      enableMainAuthority()
+      const deps = createDeps({ isVisibleRef: { current: false } })
+      const { transport } = await connectHiddenPane(deps)
+      // Simulate the transport's spawn completion so the pane registers its
+      // side-effect fact consumer (the mock transport never calls onPtySpawn).
+      const transportOptions = createdTransportOptions.at(-1) as {
+        onPtySpawn?: (ptyId: string) => void
+      }
+      transportOptions.onPtySpawn?.('pty-id')
+      const factsHandler = await import('./terminal-side-effect-facts-handler')
+
+      // Why: no pty:data has flowed, so no hidden mark was sent — the fact
+      // can outrun the mark (codex post-startup-window race) and must still
+      // reply: ownership is structural, never mark-dependent.
+      factsHandler._dispatchTerminalSideEffectBatchForTest({
+        ptyId: 'pty-id',
+        seq: 12,
+        facts: [{ kind: '2031-subscribe' }]
+      })
+      expect(transport.sendInput).toHaveBeenCalledTimes(1)
+      expect(transport.sendInput).toHaveBeenCalledWith('\x1b[?997;1n')
+
+      // Why: a visible gated pane still answers via the fact — the lifecycle
+      // suppresses the xterm CSI reply for gate-managed panes, so this stays
+      // the only reply for the new subscribe.
+      ;(deps.isVisibleRef as { current: boolean }).current = true
+      factsHandler._dispatchTerminalSideEffectBatchForTest({
+        ptyId: 'pty-id',
+        seq: 24,
+        facts: [{ kind: '2031-subscribe' }]
+      })
+      expect(transport.sendInput).toHaveBeenCalledTimes(2)
+      expect(transport.sendInput).toHaveBeenLastCalledWith('\x1b[?997;1n')
+    })
+
+    it('registers the fact-answered 2031 subscription for later theme flips', async () => {
+      enableMainAuthority()
+      const recordPaneMode2031Subscription = vi.fn()
+      const deps = createDeps({
+        isVisibleRef: { current: false },
+        recordPaneMode2031Subscription
+      })
+      const { transport } = await connectHiddenPane(deps)
+      const transportOptions = createdTransportOptions.at(-1) as {
+        onPtySpawn?: (ptyId: string) => void
+      }
+      transportOptions.onPtySpawn?.('pty-id')
+      const factsHandler = await import('./terminal-side-effect-facts-handler')
+
+      factsHandler._dispatchTerminalSideEffectBatchForTest({
+        ptyId: 'pty-id',
+        seq: 12,
+        facts: [{ kind: '2031-subscribe' }]
+      })
+
+      expect(transport.sendInput).toHaveBeenCalledWith('\x1b[?997;1n')
+      // Why: without the registry write, applyTerminalAppearance's
+      // maybePushMode2031Flip never pushes CSI 997 after a theme change and
+      // the revealed TUI keeps a stale theme.
+      expect(recordPaneMode2031Subscription).toHaveBeenCalledWith(1, 'dark')
+    })
+
+    it('reports the gate-managed predicate on the binding for the xterm 2031 observer', async () => {
+      enableMainAuthority()
+      const deps = createDeps({ isVisibleRef: { current: false } })
+      const { binding } = await connectHiddenPane(deps)
+      const bindingWithPredicate = binding as typeof binding & {
+        isHiddenDeliveryGateManagedPty: () => boolean
+      }
+      expect(bindingWithPredicate.isHiddenDeliveryGateManagedPty()).toBe(true)
+    })
+
+    it('does not gate or fact-reply when the hidden-delivery kill switch is off', async () => {
+      enableMainAuthority()
+      mockStoreState.settings = {
+        ...mockStoreState.settings,
+        terminalHiddenDeliveryGate: false
+      } as StoreState['settings']
+      const deps = createDeps({ isVisibleRef: { current: false } })
+      const { transport, dataCallback, binding } = await connectHiddenPane(deps)
+      // Why: the lifecycle's xterm CSI observer consults this predicate —
+      // kill switch off must keep the legacy xterm reply path.
+      expect(
+        (
+          binding as typeof binding & { isHiddenDeliveryGateManagedPty: () => boolean }
+        ).isHiddenDeliveryGateManagedPty()
+      ).toBe(false)
+      const transportOptions = createdTransportOptions.at(-1) as {
+        onPtySpawn?: (ptyId: string) => void
+      }
+      transportOptions.onPtySpawn?.('pty-id')
+      const setHiddenRendererPty = getSetHiddenRendererPtyMock()
+
+      dataCallback('hidden output\r\n')
+      expect(setHiddenRendererPty).not.toHaveBeenCalled()
+
+      // Why: gate off keeps the byte-scan responder authoritative — the fact
+      // must not produce a second reply for the same subscribe.
+      const factsHandler = await import('./terminal-side-effect-facts-handler')
+      factsHandler._dispatchTerminalSideEffectBatchForTest({
+        ptyId: 'pty-id',
+        seq: 12,
+        facts: [{ kind: '2031-subscribe' }]
+      })
+      expect(transport.sendInput).not.toHaveBeenCalled()
+    })
+
+    it('clears a marked-hidden PTY on dispose so a remount is never gated', async () => {
+      enableMainAuthority()
+      const deps = createDeps({ isVisibleRef: { current: false } })
+      const { dataCallback, binding } = await connectHiddenPane(deps)
+      const setHiddenRendererPty = getSetHiddenRendererPtyMock()
+
+      dataCallback('hidden output\r\n')
+      expect(setHiddenRendererPty).toHaveBeenLastCalledWith('pty-id', true)
+
+      binding.dispose()
+      expect(setHiddenRendererPty).toHaveBeenLastCalledWith('pty-id', false)
+    })
+
+    it('never treats a live chunk that strips to empty as a restore marker', async () => {
+      // Why: a chunk that is purely OSC 9999 reaches the data callback as ''
+      // (transport stripping) — only the out-of-band pty:modelRestoreNeeded
+      // channel may trigger a snapshot restore, or visible panes would be
+      // spuriously cleared and repainted mid-session.
+      enableMainAuthority()
+      const deps = createDeps({ isVisibleRef: { current: true } })
+      const { dataCallback } = await connectHiddenPane(deps)
+      const getMainBufferSnapshot = window.api.pty.getMainBufferSnapshot as unknown as ReturnType<
+        typeof vi.fn
+      >
+
+      dataCallback('', { seq: 32, rawLength: 24 })
+      await flushAsyncTicks(20)
+
+      expect(getMainBufferSnapshot).not.toHaveBeenCalled()
+    })
+
+    it('fetches a fresh snapshot when a marker lands while a restore is in flight', async () => {
+      enableMainAuthority()
+      const deps = createDeps({ isVisibleRef: { current: true } })
+      await connectHiddenPane(deps)
+      const transportOptions = createdTransportOptions.at(-1) as {
+        onPtySpawn?: (ptyId: string) => void
+      }
+      transportOptions.onPtySpawn?.('pty-id')
+      const getMainBufferSnapshot = window.api.pty.getMainBufferSnapshot as unknown as ReturnType<
+        typeof vi.fn
+      >
+      const firstSnapshot = createDeferred<{
+        data: string
+        cols: number
+        rows: number
+        seq: number
+      }>()
+      getMainBufferSnapshot
+        .mockReturnValueOnce(firstSnapshot.promise)
+        .mockResolvedValue({ data: 'fresh snapshot\r\n', cols: 100, rows: 30, seq: 96 })
+      const { _dispatchPtyModelRestoreNeededForTest } = await import('./pty-model-restore-channel')
+
+      _dispatchPtyModelRestoreNeededForTest({ id: 'pty-id', reason: 'pending-cap', markerSeq: 64 })
+      await flushAsyncTicks(4)
+      expect(getMainBufferSnapshot).toHaveBeenCalledTimes(1)
+
+      // Second drop while the first snapshot is still being serialized — the
+      // in-flight snapshot may predate it, so a fresh one must follow.
+      _dispatchPtyModelRestoreNeededForTest({ id: 'pty-id', reason: 'pending-cap', markerSeq: 80 })
+      firstSnapshot.resolve({ data: 'stale snapshot\r\n', cols: 100, rows: 30, seq: 64 })
+      await flushAsyncTicks(20)
+
+      expect(getMainBufferSnapshot).toHaveBeenCalledTimes(2)
+    })
+
+    describe('post-restore backlog reconciliation', () => {
+      async function restoreVisiblePaneToBaseline(): Promise<{
+        pane: ReturnType<typeof createPane>
+        dataCallback: (data: string, meta?: { seq?: number; rawLength?: number }) => void
+        getMainBufferSnapshot: ReturnType<typeof vi.fn>
+      }> {
+        enableMainAuthority()
+        const deps = createDeps({ isVisibleRef: { current: true } })
+        const { pane, dataCallback } = await connectHiddenPane(deps)
+        const transportOptions = createdTransportOptions.at(-1) as {
+          onPtySpawn?: (ptyId: string) => void
+        }
+        transportOptions.onPtySpawn?.('pty-id')
+        const getMainBufferSnapshot = window.api.pty.getMainBufferSnapshot as unknown as ReturnType<
+          typeof vi.fn
+        >
+        getMainBufferSnapshot.mockResolvedValue({
+          data: 'restored snapshot\r\n',
+          cols: 100,
+          rows: 30,
+          seq: 64
+        })
+        const { _dispatchPtyModelRestoreNeededForTest } =
+          await import('./pty-model-restore-channel')
+        _dispatchPtyModelRestoreNeededForTest({
+          id: 'pty-id',
+          reason: 'pending-cap',
+          markerSeq: 64
+        })
+        await flushAsyncTicks(20)
+        expect(getMainBufferSnapshot).toHaveBeenCalledTimes(1)
+        expect(pane.terminal.write).toHaveBeenCalledWith(
+          expect.stringContaining('restored snapshot'),
+          expect.any(Function)
+        )
+        pane.terminal.write.mockClear()
+        return { pane, dataCallback, getMainBufferSnapshot }
+      }
+
+      function writtenData(pane: ReturnType<typeof createPane>): string {
+        return pane.terminal.write.mock.calls.map((call) => String(call[0])).join('')
+      }
+
+      it('drops backlog chunks the restored snapshot already covers', async () => {
+        const { pane, dataCallback } = await restoreVisiblePaneToBaseline()
+
+        // Whole chunk at or before the baseline seq: duplicate, never written.
+        dataCallback('OLD-DUPLICATE', { seq: 60, rawLength: 13 })
+        await flushAsyncTicks(8)
+        expect(writtenData(pane)).not.toContain('OLD-DUPLICATE')
+
+        // Contiguous post-baseline chunk flows through normally.
+        dataCallback('NEW', { seq: 67, rawLength: 3 })
+        await flushAsyncTicks(8)
+        expect(writtenData(pane)).toContain('NEW')
+      })
+
+      it('slices a partial overlap when raw and clean lengths match', async () => {
+        const { pane, dataCallback } = await restoreVisiblePaneToBaseline()
+
+        // start seq 61 < baseline 64 < end seq 67 — only the last 3 chars are new.
+        dataCallback('ABCDEF', { seq: 67, rawLength: 6 })
+        await flushAsyncTicks(8)
+
+        const written = writtenData(pane)
+        expect(written).toContain('DEF')
+        expect(written).not.toContain('ABC')
+      })
+
+      it('forces a fresh snapshot for an overlap whose offsets cannot be mapped', async () => {
+        const { pane, dataCallback, getMainBufferSnapshot } = await restoreVisiblePaneToBaseline()
+        getMainBufferSnapshot.mockResolvedValue({
+          data: 'second snapshot\r\n',
+          cols: 100,
+          rows: 30,
+          seq: 80
+        })
+
+        // rawLength (6) !== data.length (4): renderer-side OSC stripping makes
+        // the slice offset unmappable — restore from a fresh snapshot instead.
+        dataCallback('ABCD', { seq: 67, rawLength: 6 })
+        await flushAsyncTicks(20)
+
+        expect(writtenData(pane)).not.toContain('ABCD')
+        expect(getMainBufferSnapshot).toHaveBeenCalledTimes(2)
+        expect(writtenData(pane)).toContain('second snapshot')
+      })
+
+      it('detects a seq gap after restore and forces another restore', async () => {
+        const { pane, dataCallback, getMainBufferSnapshot } = await restoreVisiblePaneToBaseline()
+        getMainBufferSnapshot.mockResolvedValue({
+          data: 'gap-heal snapshot\r\n',
+          cols: 100,
+          rows: 30,
+          seq: 120
+        })
+
+        // Why: a chunk starting past the continuity point (start seq 87 >
+        // expected 64) means main trimmed bytes after the one-shot overflow
+        // marker was consumed — only the model snapshot can heal the gap.
+        dataCallback('AFTER-GAP', { seq: 96, rawLength: 9 })
+        await flushAsyncTicks(20)
+
+        expect(writtenData(pane)).not.toContain('AFTER-GAP')
+        expect(getMainBufferSnapshot).toHaveBeenCalledTimes(2)
+        expect(writtenData(pane)).toContain('gap-heal snapshot')
+      })
+
+      it('writes genuinely-new live output whose seq sits below an empty-backlog baseline', async () => {
+        // E2E twin (terminal-hidden-tui-visual-restore "keeps newer live
+        // output correct"): main's snapshot seq is a cumulative PTY counter
+        // (shell init + prompt echo + hidden frame), while a synthetic live
+        // chunk meters only its own frames — far below the baseline. With an
+        // empty pending queue main can never re-deliver seqs at or below the
+        // snapshot, so the chunk must write, never silently drop.
+        enableMainAuthority()
+        const isVisibleRef = { current: true }
+        const deps = createDeps({ isVisibleRef })
+        const { pane, dataCallback } = await connectHiddenPane(deps)
+        const transportOptions = createdTransportOptions.at(-1) as {
+          onPtySpawn?: (ptyId: string) => void
+        }
+        transportOptions.onPtySpawn?.('pty-id')
+        const getMainBufferSnapshot = window.api.pty.getMainBufferSnapshot as unknown as ReturnType<
+          typeof vi.fn
+        >
+        // Visible prompt echo metered in main's cumulative seq domain.
+        dataCallback('$ node frame-script.mjs\r\n', { seq: 2_315, rawLength: 25 })
+        // Pane hides mid-stream; main drops the hidden frame and marks restore.
+        isVisibleRef.current = false
+        const { _dispatchPtyModelRestoreNeededForTest } =
+          await import('./pty-model-restore-channel')
+        _dispatchPtyModelRestoreNeededForTest({
+          id: 'pty-id',
+          reason: 'hidden-drop',
+          markerSeq: 2_472
+        })
+        // Reveal: the snapshot covers everything ingested; pending queue empty
+        // (pendingDeliveryStartSeq === seq).
+        getMainBufferSnapshot.mockResolvedValue({
+          data: 'LOW_RISK_RESTORE_FRAME_40\r\n',
+          cols: 100,
+          rows: 30,
+          seq: 2_472,
+          pendingDeliveryStartSeq: 2_472
+        })
+        isVisibleRef.current = true
+        const { requestTerminalBacklogRecovery } =
+          await import('@/lib/pane-manager/pane-terminal-output-scheduler')
+        requestTerminalBacklogRecovery(pane.terminal as never)
+        await flushAsyncTicks(20)
+        expect(writtenData(pane)).toContain('LOW_RISK_RESTORE_FRAME_40')
+        pane.terminal.write.mockClear()
+
+        // Newer live frame injected with a seq domain unrelated to main's
+        // counter (e2e __terminalPtyDataInjection twin).
+        dataCallback('LOW_RISK_RESTORE_FRAME_41\r\n', { seq: 315, rawLength: 27 })
+        await flushAsyncTicks(8)
+        expect(writtenData(pane)).toContain('LOW_RISK_RESTORE_FRAME_41')
+
+        // The retired baseline keeps subsequent low-seq live chunks flowing.
+        dataCallback('progress=041\r\n', { seq: 329, rawLength: 14 })
+        await flushAsyncTicks(8)
+        expect(writtenData(pane)).toContain('progress=041')
+      })
+
+      it('keeps suppressing backlog duplicates inside the reported pending window', async () => {
+        const { pane, dataCallback, getMainBufferSnapshot } = await restoreVisiblePaneToBaseline()
+        getMainBufferSnapshot.mockResolvedValue({
+          data: 'windowed snapshot\r\n',
+          cols: 100,
+          rows: 30,
+          seq: 96,
+          pendingDeliveryStartSeq: 80
+        })
+        const { _dispatchPtyModelRestoreNeededForTest } =
+          await import('./pty-model-restore-channel')
+        _dispatchPtyModelRestoreNeededForTest({
+          id: 'pty-id',
+          reason: 'pending-cap',
+          markerSeq: 96
+        })
+        await flushAsyncTicks(20)
+        expect(writtenData(pane)).toContain('windowed snapshot')
+        pane.terminal.write.mockClear()
+
+        // Inside the pending window (80, 96]: a draining backlog duplicate.
+        dataCallback('IN-WINDOW-DUP-16', { seq: 96, rawLength: 16 })
+        await flushAsyncTicks(8)
+        expect(writtenData(pane)).not.toContain('IN-WINDOW-DUP-16')
+
+        // Past the baseline: genuinely-new live output still flows.
+        dataCallback('PAST-BASELINE', { seq: 109, rawLength: 13 })
+        await flushAsyncTicks(8)
+        expect(writtenData(pane)).toContain('PAST-BASELINE')
+
+        // Below the pending window (≤ 80): main can never re-send these seqs,
+        // so this is a foreign seq domain — written, never silently dropped.
+        dataCallback('BELOW-WINDOW', { seq: 60, rawLength: 12 })
+        await flushAsyncTicks(8)
+        expect(writtenData(pane)).toContain('BELOW-WINDOW')
+      })
+    })
   })
 
   it('skips split hidden synchronized output frames for model-backed restore', async () => {

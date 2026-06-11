@@ -7,15 +7,22 @@
  * first parking attempt.) Under main side-effect authority the watcher is
  * purely fact-driven (one pty:sideEffect consumer, no byte parsing); with the
  * kill switch off it registers the legacy byte parsers on the dispatcher
- * sidecar channel. The DECSET 2031 reply lives in its own byte sidecar
- * (parked-terminal-mode2031-responder.ts) in BOTH modes — query authority
- * never moves to main. See docs/reference/terminal-hidden-view-parking.md and
+ * sidecar channel. DECSET 2031 ownership follows the hidden-delivery gate:
+ * gate ON answers from main's '2031-subscribe' fact (no parked bytes exist),
+ * gate OFF keeps the byte sidecar (parked-terminal-mode2031-responder.ts).
+ * Either way the reply is sent from the renderer — query authority never
+ * moves to main. See docs/reference/terminal-hidden-view-parking.md and
  * docs/reference/terminal-side-effect-authority.md.
  */
 import { isClaudeAgent } from '../../../../shared/agent-detection'
 import { makePaneKey } from '../../../../shared/stable-pane-id'
 import { useAppStore } from '@/store'
+import {
+  mode2031SequenceFor,
+  resolveTerminalColorSchemeMode
+} from '../../../../shared/terminal-color-scheme-protocol'
 import { createTerminalGitHubPRLinkDetector } from '../../../../shared/terminal-github-pr-link-detector'
+import { getSystemPrefersDark } from '@/lib/terminal-theme'
 import {
   AGENT_TASK_COMPLETE_NOTIFICATION_GRACE_MS,
   isAgentTaskCompleteOsNotificationEnabledFromState,
@@ -24,6 +31,7 @@ import {
 import { startParkedTerminalMode2031Responder } from './parked-terminal-mode2031-responder'
 import { subscribeToPtyData } from './pty-dispatcher'
 import { createPtyOutputProcessor } from './pty-transport'
+import { isRendererHiddenPtyDeliveryGateEnabled } from './terminal-hidden-delivery-gate'
 import {
   isMainTerminalSideEffectAuthorityForPty,
   registerTerminalSideEffectFactConsumer
@@ -219,6 +227,18 @@ export function startParkedTerminalByteWatcher(
     settings: useAppStore.getState().settings,
     runtimeEnvironmentId: null
   })
+  // Why: under the Phase-4 gate a parked PTY needs no renderer bytes at all —
+  // facts carry side effects and the reveal remount restores from the model
+  // snapshot. Decided once at watcher start: it picks which 2031 responder
+  // (byte sidecar vs fact reply) exists, so it must never flip per chunk.
+  const hiddenDeliveryGateActive =
+    mainSideEffectAuthority &&
+    isRendererHiddenPtyDeliveryGateEnabled(useAppStore.getState().settings)
+
+  const sendMode2031Reply = (): void => {
+    const settings = useAppStore.getState().settings
+    sendInput(mode2031SequenceFor(resolveTerminalColorSchemeMode(settings, getSystemPrefersDark())))
+  }
 
   // Why (byte-parser mode only): reuse the transport's output processor so
   // the parked path keeps the exact live-path parsing semantics — all-titles
@@ -246,16 +266,32 @@ export function startParkedTerminalByteWatcher(
         callbacks: {
           ...sideEffectCallbacks,
           onPrLink: (link) =>
-            useAppStore.getState().observeTerminalGitHubPullRequestLink(worktreeId, link)
+            useAppStore.getState().observeTerminalGitHubPullRequestLink(worktreeId, link),
+          // Why (gate mode only): bytes never arrive while gated, so the 2031
+          // subscribe arrives as a main-tracker fact instead of a byte scan.
+          // The reply is still sent from here — query authority stays with
+          // the view/watcher (model/view contract invariant 6).
+          ...(hiddenDeliveryGateActive ? { onMode2031Subscribe: sendMode2031Reply } : {})
         }
       })
     : null
 
   // Why: no xterm exists while parked, so nothing answers a DECSET 2031
-  // subscription. The responder is the parked path's only byte consumer under
-  // main authority — query authority belongs to the view/watcher (model/view
-  // contract invariant 6), so it can never move to main.
-  const stopMode2031Responder = startParkedTerminalMode2031Responder({ ptyId, sendInput })
+  // subscription. With the hidden-delivery gate OFF the byte responder is the
+  // parked path's only byte consumer under main authority. With the gate ON it
+  // must NOT register: its subscribeToPtyData sidecar doubles as a
+  // delivery-interest signal that would force-feed bytes to the gated PTY —
+  // the fact callback above replaces the byte scan.
+  const stopMode2031Responder = hiddenDeliveryGateActive
+    ? null
+    : startParkedTerminalMode2031Responder({ ptyId, sendInput })
+
+  // Why: parked tabs are the canonical hidden view — mark the PTY gated so
+  // main stops renderer byte delivery; dispose clears the bit before the
+  // reveal remount re-registers pane handlers (existing dispose ordering).
+  if (hiddenDeliveryGateActive) {
+    ;(globalThis as { window?: Window }).window?.api?.pty?.setHiddenRendererPty?.(ptyId, true)
+  }
 
   // Why (byte-parser mode only): with main authority the watcher consumes
   // pty:sideEffect facts exclusively and registers NO byte parsers here —
@@ -279,7 +315,13 @@ export function startParkedTerminalByteWatcher(
       return
     }
     disposed = true
-    stopMode2031Responder()
+    // Why: unhide BEFORE the reveal remount registers pane handlers — main
+    // resumes delivery and (if bytes were dropped) emits the restore marker
+    // the remounted pane's restore machinery consumes.
+    if (hiddenDeliveryGateActive) {
+      ;(globalThis as { window?: Window }).window?.api?.pty?.setHiddenRendererPty?.(ptyId, false)
+    }
+    stopMode2031Responder?.()
     unsubscribeByteParsers?.()
     unregisterFactConsumer?.()
     // Why: cancels the deferred side-effect drain, stale-title timer, and

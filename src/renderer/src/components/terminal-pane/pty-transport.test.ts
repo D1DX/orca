@@ -112,6 +112,23 @@ describe('createIpcPtyTransport', () => {
     transport.disconnect()
   })
 
+  it('drops the OSC-9999 cross-chunk carry on resetAgentStatusCarry', async () => {
+    // Why: a model-restore marker means bytes were dropped between chunks —
+    // a partial OSC-9999 prefix carried across that gap would swallow the
+    // next live chunk's head as bogus status payload.
+    const { createPtyOutputProcessor } = await import('./pty-transport')
+    const processor = createPtyOutputProcessor({})
+    const callbacks = { onData: vi.fn() }
+
+    processor.processData('\x1b]9999;', callbacks)
+    expect(callbacks.onData).toHaveBeenLastCalledWith('')
+
+    processor.resetAgentStatusCarry()
+    processor.processData('plain output after the gap', callbacks)
+
+    expect(callbacks.onData).toHaveBeenLastCalledWith('plain output after the gap')
+  })
+
   it('does not schedule PTY side-effect drains for ordinary output with no working title', async () => {
     vi.useFakeTimers()
     try {

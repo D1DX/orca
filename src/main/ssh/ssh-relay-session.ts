@@ -40,6 +40,11 @@ import {
   setPtyOwnership
 } from '../ipc/pty'
 import {
+  recordHiddenRendererPtyDataDrop,
+  shouldDropHiddenRendererPtyData
+} from '../ipc/pty-hidden-delivery-gate'
+import type { PtyModelRestoreNeededEvent } from '../../shared/pty-model-restore-marker'
+import {
   registerSshFilesystemProvider,
   unregisterSshFilesystemProvider,
   getSshFilesystemProvider
@@ -914,12 +919,30 @@ export class SshRelaySession {
     ptyProvider.onData((payload) => {
       const seq = this.runtime?.onPtyData(payload.id, payload.data, Date.now())
       const win = this.getMainWindow()
-      if (win && !win.isDestroyed()) {
-        win.webContents.send('pty:data', {
-          ...payload,
-          ...(typeof seq === 'number' ? { seq, rawLength: payload.data.length } : {})
-        })
+      if (!win || win.isDestroyed()) {
+        return
       }
+      // Why: hidden-delivery gate parity with ipc/pty.ts — runtime ingestion
+      // above already consumed the chunk; gated renderer delivery is dropped
+      // and one out-of-band pty:modelRestoreNeeded signal latches
+      // model-restore-needed for reveal. Never an in-band pty:data sentinel:
+      // OSC-9999-only chunks legitimately strip to empty in the renderer.
+      const store = this.store as { getSettings?: Store['getSettings'] }
+      if (shouldDropHiddenRendererPtyData(payload.id, store.getSettings?.())) {
+        const drop = recordHiddenRendererPtyDataDrop(payload.id, payload.data.length)
+        if (drop.shouldEmitRestoreMarker) {
+          win.webContents.send('pty:modelRestoreNeeded', {
+            id: payload.id,
+            reason: 'hidden-drop',
+            ...(typeof seq === 'number' ? { markerSeq: seq } : {})
+          } satisfies PtyModelRestoreNeededEvent)
+        }
+        return
+      }
+      win.webContents.send('pty:data', {
+        ...payload,
+        ...(typeof seq === 'number' ? { seq, rawLength: payload.data.length } : {})
+      })
     })
     ptyProvider.onReplay((payload) => {
       const win = this.getMainWindow()

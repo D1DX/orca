@@ -539,6 +539,13 @@ export function useTerminalPaneLifecycle({
       dispatchNotification,
       setCacheTimerStartedAt,
       syncPanePtyLayoutBinding,
+      // Why: a DECSET 2031 subscribe answered from main's fact channel must
+      // land in the same registries the xterm CSI handler writes — otherwise
+      // theme flips never push CSI 997 and the TUI keeps a stale theme.
+      recordPaneMode2031Subscription: (paneId: number, repliedMode: 'dark' | 'light') => {
+        paneMode2031Ref.current.set(paneId, true)
+        paneLastThemeModeRef.current.set(paneId, repliedMode)
+      },
       restoredPtyIdByLeafId: initialLayoutRef.current.ptyIdsByLeafId ?? {}
     }
 
@@ -566,7 +573,19 @@ export function useTerminalPaneLifecycle({
         const mode2031Disposables = installMode2031Handlers({
           paneId: pane.id,
           parser: pane.terminal.parser,
-          onSubscribe: () => pushMode2031ForPane(pane.id),
+          onSubscribe: () => {
+            // Why: for hidden-delivery-gate-managed PTYs main's
+            // '2031-subscribe' fact is the sole responder — bytes reaching
+            // xterm live (foreground, sidecar interest) must not produce a
+            // second reply. The CSI handler still records the subscription.
+            const binding = panePtyBindings.get(pane.id) as
+              | (IDisposable & { isHiddenDeliveryGateManagedPty?: () => boolean })
+              | undefined
+            if (binding?.isHiddenDeliveryGateManagedPty?.()) {
+              return
+            }
+            pushMode2031ForPane(pane.id)
+          },
           isReplaying: () => isPaneReplaying(replayingPanesRef, pane.id),
           paneMode2031: paneMode2031Ref.current,
           paneLastThemeMode: paneLastThemeModeRef.current

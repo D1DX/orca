@@ -1,13 +1,13 @@
 /**
- * DECSET 2031 color-scheme responder for parked terminals.
+ * DECSET 2031 color-scheme responder for parked terminals (byte-scan mode).
  *
  * Why a dedicated byte sidecar: no xterm exists while a tab is parked, so
  * nothing answers a TUI's mode-2031 theme subscription. Query authority stays
  * with the view/watcher (model/view contract invariant 6), so this reply can
- * never move to main — it is the parked path's ONLY byte consumer when main
- * holds side-effect authority. Phase 4: this subscribeToPtyData registration
- * doubles as the delivery-interest signal that keeps hidden byte delivery
- * alive for parked PTYs.
+ * never move to main. Phase 4: this subscribeToPtyData registration doubles
+ * as a delivery-interest signal, so it is only used while the hidden-delivery
+ * gate is OFF — gated parked PTYs answer from the main tracker's
+ * '2031-subscribe' fact instead (parked-terminal-byte-watcher.ts).
  */
 import {
   mode2031SequenceFor,

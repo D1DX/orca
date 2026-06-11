@@ -3698,9 +3698,9 @@ export class OrcaRuntimeService {
         onAgentExited: () => {
           this.recordTerminalSideEffectFact(ptyId, { kind: 'agent-exited' })
         },
-        // Why: bell/command-finished/pr-link facts exist only for the
+        // Why: bell/command-finished/pr-link/2031 facts exist only for the
         // pty:sideEffect channel. Headless serve has no consumer, so skip the
-        // per-chunk bell walk and 133/URL scans entirely.
+        // per-chunk bell walk and 133/URL/2031 scans entirely.
         ...(this.onTerminalSideEffects
           ? {
               onBell: () => {
@@ -3711,6 +3711,12 @@ export class OrcaRuntimeService {
               },
               onPrLink: (link: TerminalGitHubPRLink) => {
                 this.recordTerminalSideEffectFact(ptyId, { kind: 'pr-link', link })
+              },
+              // Why: hidden-delivery-gated views never see the bytes, so main
+              // surfaces DECSET 2031 subscribes as facts; the theme reply is
+              // still sent by the renderer (query authority stays with the view).
+              onMode2031Subscribe: () => {
+                this.recordTerminalSideEffectFact(ptyId, { kind: '2031-subscribe' })
               }
             }
           : {})

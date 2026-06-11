@@ -18,6 +18,7 @@ import {
   normalizeTerminalTitle
 } from './agent-detection'
 import { createBellDetector } from './terminal-bell-detector'
+import { scanMode2031Sequences } from './terminal-color-scheme-protocol'
 import {
   createTerminalGitHubPRLinkDetector,
   type TerminalGitHubPRLink
@@ -73,6 +74,12 @@ export type TerminalTitleTrackerCallbacks = {
   /** Fired once per newly observed GitHub PR URL (chunk-boundary-safe,
    *  deduplicated per tracker like the renderer detector). */
   onPrLink?: (link: TerminalGitHubPRLink) => void
+  /**
+   * Fired per chunk containing a DECSET 2031 subscribe (chunk-boundary-safe).
+   * Lets hidden-delivery-gated renderer views answer the color-scheme query
+   * without byte access; the reply itself stays with the view.
+   */
+  onMode2031Subscribe?: () => void
 }
 
 export type TerminalTitleTracker = {
@@ -108,7 +115,8 @@ export function createTerminalTitleTracker(
     onAgentExited,
     onBell,
     onCommandFinished,
-    onPrLink
+    onPrLink,
+    onMode2031Subscribe
   } = callbacks
   const bellDetector = onBell ? createBellDetector() : null
   // Why: created only when a consumer exists (like the bell detector) so
@@ -117,6 +125,9 @@ export function createTerminalTitleTracker(
     ? createOsc133CommandFinishedScanner(onCommandFinished)
     : null
   const prLinkDetector = onPrLink ? createTerminalGitHubPRLinkDetector() : null
+  // Why: a DECSET 2031 subscribe can be split across PTY chunks; carry a
+  // bounded tail between chunks so split sequences still match.
+  let mode2031ScanTail = ''
   // Why: seed both the emitted-title memory (stale-title probe) and the agent
   // tracker so a mid-session tracker behaves as if it had observed the pane's
   // last live title — parity with the renderer processor's seeding.
@@ -211,13 +222,21 @@ export function createTerminalTitleTracker(
         }
       }, STALE_WORKING_TITLE_TIMEOUT_MS)
     }
-    // Per-chunk fact order: titles → command-finished → pr-link → bell. The
-    // bell stays last (the renderer drain's order); the byte scanners keep
-    // their own cross-chunk carry so split sequences/URLs still resolve.
+    // Per-chunk fact order: titles → command-finished → pr-link →
+    // 2031-subscribe → bell. The bell stays last (the renderer drain's
+    // order); the byte scanners keep their own cross-chunk carry so split
+    // sequences/URLs still resolve.
     commandFinishedScanner?.scan(data)
     if (prLinkDetector) {
       for (const link of prLinkDetector(data)) {
         onPrLink?.(link)
+      }
+    }
+    if (onMode2031Subscribe) {
+      const mode2031Scan = scanMode2031Sequences(mode2031ScanTail, data)
+      mode2031ScanTail = mode2031Scan.tail
+      if (mode2031Scan.subscribe) {
+        onMode2031Subscribe()
       }
     }
     if (containsBell) {
@@ -267,6 +286,7 @@ export function createTerminalTitleTracker(
       agentTracker?.reset()
       bellDetector?.reset()
       commandFinishedScanner?.reset()
+      mode2031ScanTail = ''
     }
   }
 }

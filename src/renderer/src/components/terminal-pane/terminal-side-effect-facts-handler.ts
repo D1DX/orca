@@ -82,6 +82,10 @@ export type TerminalSideEffectFactConsumerCallbacks = {
    *  done is settle-checked by the pane policy before completing the turn. */
   onCommandCodeWorking?: (prompt: string) => void
   onCommandCodeDone?: (prompt: string) => void
+  /** DECSET 2031 subscribe observed by main's tracker. Registered only by
+   *  hidden-delivery-gated consumers (their bytes never arrive); the theme
+   *  reply is sent renderer-side — query authority stays with the view. */
+  onMode2031Subscribe?: () => void
 }
 
 type ConsumerEntry = {
@@ -130,6 +134,9 @@ function applyLiveFact(entry: ConsumerEntry, fact: TerminalSideEffectFact, seq: 
       return
     case 'command-code-done':
       entry.callbacks.onCommandCodeDone?.(fact.prompt)
+      return
+    case '2031-subscribe':
+      entry.callbacks.onMode2031Subscribe?.()
   }
 }
 

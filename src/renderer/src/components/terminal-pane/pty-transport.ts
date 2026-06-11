@@ -103,9 +103,13 @@ export function createPtyOutputProcessor({
   clearStaleTitleTimer: () => void
   flushPendingSideEffects: () => void
   resetBellDetector: () => void
+  resetAgentStatusCarry: () => void
 } {
   const bellDetector = createBellDetector()
-  const processAgentStatusChunk = createAgentStatusOscProcessor()
+  // Why `let`: a model-restore marker means bytes were dropped between
+  // chunks; a partial OSC-9999 prefix carried across that gap would swallow
+  // the next live chunk's head as bogus payload. Reset recreates the parser.
+  let processAgentStatusChunk = createAgentStatusOscProcessor()
   // Why: seed both the emitted-title memory (stale-title probe) and the agent
   // tracker so a mid-session processor behaves as if it had observed the
   // pane's last live title — full parity with the live path it replaces.
@@ -423,7 +427,10 @@ export function createPtyOutputProcessor({
     clearAccumulatedState,
     clearStaleTitleTimer,
     flushPendingSideEffects,
-    resetBellDetector: () => bellDetector.reset()
+    resetBellDetector: () => bellDetector.reset(),
+    resetAgentStatusCarry: () => {
+      processAgentStatusChunk = createAgentStatusOscProcessor()
+    }
   }
 }
 
@@ -781,6 +788,13 @@ export function createIpcPtyTransport(opts: IpcPtyTransportOptions = {}): PtyTra
 
     getPtyId() {
       return ptyId
+    },
+
+    resetCrossChunkParserState() {
+      // Why: only the OSC-9999 carry spans the dropped-byte gap a
+      // model-restore marker reports; title/bell trackers re-sync from the
+      // snapshot's side-effect replay and must not be reset here.
+      outputProcessor.resetAgentStatusCarry()
     },
 
     destroy() {

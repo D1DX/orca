@@ -23,6 +23,7 @@ type MockStoreState = {
     promptCacheTimerEnabled?: boolean
     experimentalTerminalAttention?: boolean
     terminalMainSideEffectAuthority?: boolean
+    terminalHiddenDeliveryGate?: boolean
     notifications?: { enabled?: boolean; agentTaskComplete?: boolean }
   } | null
   setRuntimePaneTitle: ReturnType<typeof vi.fn>
@@ -673,11 +674,18 @@ describe('startParkedTerminalByteWatcher', () => {
       dispose()
     })
 
-    it('keeps the byte sidecar only for the DECSET 2031 reply — no PR byte scan', async () => {
+    it('answers DECSET 2031 from the main 2031-subscribe fact, never the byte scan', async () => {
+      // Why: with the hidden-delivery gate on (default), parked PTY bytes are
+      // dropped in main — the fact is the only 2031 signal, and the byte
+      // sidecar must NOT exist (its registration would re-enable delivery).
       enableMainAuthority()
       const { dispose, sendInput } = await startWatcher()
 
       emit('\x1b[?2031h')
+      expect(sendInput).not.toHaveBeenCalled()
+
+      await dispatchFacts([{ kind: '2031-subscribe' }])
+      expect(sendInput).toHaveBeenCalledTimes(1)
       expect(sendInput).toHaveBeenCalledWith('\x1b[?997;1n')
 
       // Why: pr-link facts arrive on the channel; byte-scanning here too
@@ -687,16 +695,47 @@ describe('startParkedTerminalByteWatcher', () => {
       dispose()
     })
 
-    it('answers a DECSET 2031 subscribe split across chunks via the responder sidecar', async () => {
+    it('marks the PTY hidden for delivery on start and clears it on dispose', async () => {
       enableMainAuthority()
+      const setHiddenRendererPty = vi.fn()
+      ;(
+        window as unknown as { api: { pty: Record<string, unknown> } }
+      ).api.pty.setHiddenRendererPty = setHiddenRendererPty
+      const { dispose } = await startWatcher()
+
+      expect(setHiddenRendererPty).toHaveBeenCalledWith(PTY_ID, true)
+
+      dispose()
+      // Why: the unhide must land before reveal re-registers pane handlers —
+      // the watcher registry disposes watchers before the remount effect runs.
+      expect(setHiddenRendererPty).toHaveBeenLastCalledWith(PTY_ID, false)
+    })
+
+    it('keeps the byte 2031 responder and no hidden bit when the gate kill switch is off', async () => {
+      enableMainAuthority()
+      mockStoreState.settings = {
+        ...mockStoreState.settings,
+        terminalHiddenDeliveryGate: false
+      } as MockStoreState['settings']
+      const setHiddenRendererPty = vi.fn()
+      ;(
+        window as unknown as { api: { pty: Record<string, unknown> } }
+      ).api.pty.setHiddenRendererPty = setHiddenRendererPty
       const { dispose, sendInput } = await startWatcher()
 
+      // Gate off — bytes keep flowing, so the split-chunk byte scan answers.
       emit('\x1b[?20')
       expect(sendInput).not.toHaveBeenCalled()
       emit('31h')
-
       expect(sendInput).toHaveBeenCalledTimes(1)
       expect(sendInput).toHaveBeenCalledWith('\x1b[?997;1n')
+
+      // Why: a 2031-subscribe fact must not double-fire the reply in byte
+      // mode — exactly one responder owns the answer at any time.
+      await dispatchFacts([{ kind: '2031-subscribe' }])
+      expect(sendInput).toHaveBeenCalledTimes(1)
+
+      expect(setHiddenRendererPty).not.toHaveBeenCalled()
       dispose()
     })
 

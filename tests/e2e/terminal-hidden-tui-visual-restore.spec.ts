@@ -32,12 +32,6 @@ type HiddenTuiWindow = Window & {
   }
 }
 
-type HiddenTuiDebugSnapshot = {
-  hiddenRendererSkipCount: number
-  hiddenRendererSkippedChars: number
-  hiddenRendererMode2031ReplyCount: number
-}
-
 type TuiCursorState = {
   hidden: boolean | null
   initialized: boolean | null
@@ -79,8 +73,11 @@ function lowRiskRestoreFrame(runId: string, frame: number): string {
 }
 
 async function resetHiddenDebug(page: Page): Promise<void> {
-  await page.evaluate(() => {
+  await page.evaluate(async () => {
     ;(window as HiddenTuiWindow).__terminalPtyOutputDebug?.reset()
+    // Why: under the Phase-4 hidden-delivery gate the withheld-output signal
+    // lives in main's delivery debug counters, not the renderer skip path.
+    await window.api.pty.resetRendererDeliveryDebug()
   })
 }
 
@@ -105,9 +102,14 @@ async function writeHiddenFrames(page: Page, ptyId: string, scriptPath: string):
   await sendToTerminal(page, ptyId, `node ${JSON.stringify(scriptPath)}\r`)
 }
 
-async function readHiddenDebug(page: Page): Promise<HiddenTuiDebugSnapshot | null> {
-  return page.evaluate(() => {
-    return (window as HiddenTuiWindow).__terminalPtyOutputDebug?.snapshot() ?? null
+// Why: Phase-4 hidden-delivery gate contract — hidden PTY bytes are dropped
+// in main after model ingestion and never reach the renderer, so "hidden
+// output was withheld" is observed via main's dropped-chars counter instead
+// of the old renderer hidden-skip counters.
+async function readMainHiddenDeliveryDroppedChars(page: Page): Promise<number> {
+  return page.evaluate(async () => {
+    const snapshot = await window.api.pty.getRendererDeliveryDebugSnapshot()
+    return snapshot.hiddenDeliveryDroppedChars
   })
 }
 
@@ -245,16 +247,13 @@ test.describe('Hidden terminal TUI visual restore', () => {
     await writeHiddenFrames(orcaPage, hiddenPane.ptyId, scriptPath)
     await resetHiddenDebug(orcaPage)
 
+    // Why: hidden-delivery gate contract — the bulk TUI frames must be
+    // withheld in main (dropped after model ingestion), not delivered and
+    // skipped renderer-side.
     await expect
-      .poll(async () => (await readHiddenDebug(orcaPage))?.hiddenRendererSkipCount ?? 0, {
+      .poll(() => readMainHiddenDeliveryDroppedChars(orcaPage), {
         timeout: 10_000,
-        message: 'visually rich hidden TUI output should skip renderer writes'
-      })
-      .toBeGreaterThan(0)
-    await expect
-      .poll(async () => (await readHiddenDebug(orcaPage))?.hiddenRendererSkippedChars ?? 0, {
-        timeout: 10_000,
-        message: 'visually rich hidden TUI output did not skip bulk renderer writes'
+        message: 'visually rich hidden TUI output was not withheld from the renderer'
       })
       .toBeGreaterThan(1024)
     await expect
@@ -342,10 +341,12 @@ test.describe('Hidden terminal TUI visual restore', () => {
     await sendToTerminal(orcaPage, hiddenPane.ptyId, `node ${JSON.stringify(scriptPath)}\r`)
     await resetHiddenDebug(orcaPage)
 
+    // Why: hidden-delivery gate contract — even plain hidden output is
+    // dropped in main, so the withheld signal is main's dropped counter.
     await expect
-      .poll(async () => (await readHiddenDebug(orcaPage))?.hiddenRendererSkipCount ?? 0, {
+      .poll(() => readMainHiddenDeliveryDroppedChars(orcaPage), {
         timeout: 10_000,
-        message: 'plain hidden injected output should skip renderer writes'
+        message: 'plain hidden injected output was not withheld from the renderer'
       })
       .toBeGreaterThan(0)
 
@@ -428,10 +429,12 @@ test.describe('Hidden terminal TUI visual restore', () => {
       await writeHiddenFrames(orcaPage, hiddenPane.ptyId, scriptPath)
       await resetHiddenDebug(orcaPage)
 
+      // Why: hidden-delivery gate contract — synchronized rich frames are
+      // withheld in main; the headless model snapshot is the restore source.
       await expect
-        .poll(async () => (await readHiddenDebug(orcaPage))?.hiddenRendererSkipCount ?? 0, {
+        .poll(() => readMainHiddenDeliveryDroppedChars(orcaPage), {
           timeout: 10_000,
-          message: 'rich hidden TUI output should skip renderer writes'
+          message: 'rich hidden TUI output was not withheld from the renderer'
         })
         .toBeGreaterThan(0)
       await expect

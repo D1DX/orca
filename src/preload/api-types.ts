@@ -145,6 +145,7 @@ import type {
   WorkspaceSessionPatch,
   WorkspaceSessionState
 } from '../shared/types'
+import type { PtyModelRestoreNeededEvent } from '../shared/pty-model-restore-marker'
 import type { SetupScriptImportCandidate } from '../shared/setup-script-imports'
 import type { GitHistoryOptions, GitHistoryResult } from '../shared/git-history'
 import type { PublicKnownRuntimeEnvironment } from '../shared/runtime-environments'
@@ -936,6 +937,12 @@ export type PreloadApi = {
     ackColdRestore: (id: string) => void
     ackData: (id: string, charCount: number) => void
     setActiveRendererPty: (id: string, active: boolean) => void
+    /** Hidden-delivery gate (Phase 4): hidden=true lets main drop renderer
+     *  byte delivery after model ingestion; reveal restores from snapshots. */
+    setHiddenRendererPty: (id: string, hidden: boolean) => void
+    /** Ref-counted-on-the-renderer delivery-interest signal that suppresses
+     *  the hidden-delivery gate while any raw-byte consumer is registered. */
+    setPtyDeliveryInterest: (id: string, interested: boolean) => void
     hasChildProcesses: (id: string) => Promise<boolean>
     getForegroundProcess: (id: string) => Promise<string | null>
     getCwd: (id: string) => Promise<string>
@@ -949,6 +956,10 @@ export type PreloadApi = {
       rows: number
       cwd?: string | null
       seq?: number
+      /** Start of main's pending renderer-delivery queue at snapshot time
+       *  (equals `seq` when empty) — bounds the renderer's post-restore
+       *  duplicate window. */
+      pendingDeliveryStartSeq?: number
       source?: 'headless' | 'renderer'
     } | null>
     getRendererDeliveryDebugSnapshot: () => Promise<{
@@ -965,12 +976,21 @@ export type PreloadApi = {
       peakRendererInFlightChars: number
       peakMaxRendererInFlightCharsByPty: number
       ackGatedFlushSkipCount: number
+      hiddenDeliveryGatedPtyCount: number
+      deliveryInterestPtyCount: number
+      hiddenDeliveryDroppedChars: number
+      hiddenDeliveryDroppedChunks: number
+      pendingDroppedChars: number
     }>
     resetRendererDeliveryDebug: () => Promise<void>
     onData: (
       callback: (data: { id: string; data: string; seq?: number; rawLength?: number }) => void
     ) => () => void
     onReplay: (callback: (data: { id: string; data: string }) => void) => () => void
+    /** Out-of-band main→renderer signal that renderer-bound bytes were
+     *  dropped (hidden-delivery gate / pending cap); the pane restores from
+     *  the model snapshot. Never delivered in-band on pty:data. */
+    onModelRestoreNeeded: (callback: (event: PtyModelRestoreNeededEvent) => void) => () => void
     /** Batched derived side-effect facts for PTYs whose bytes transit local
      *  main; see docs/reference/terminal-side-effect-authority.md. */
     onSideEffect: (callback: (batch: TerminalSideEffectBatch) => void) => () => void
