@@ -540,7 +540,7 @@ export function AccountsPane({
           {
             description: translate(
               'auto.components.settings.AccountsPane.b15ce90870',
-              '{{value0}} -> {{value1}}. Restart live Claude terminals before continuing old sessions.',
+              '{{value0}} -> {{value1}}. New Claude terminals use the selected account. Restart existing terminals to move them.',
               {
                 value0: getClaudeAccountLabel(claudeAccounts, previousActiveAccountId),
                 value1: getClaudeAccountLabel(next, nextActiveAccountId)

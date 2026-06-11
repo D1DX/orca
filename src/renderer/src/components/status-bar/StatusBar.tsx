@@ -844,7 +844,7 @@ function ClaudeSwitcherMenu({
           <div className="px-2 py-1.5 text-[10px] leading-4 text-muted-foreground">
             {translate(
               'auto.components.status.bar.StatusBar.8295903d17',
-              'Restart live Claude terminals before continuing old conversations after switching.'
+              'New Claude terminals use the selected account. Restart existing terminals to move them.'
             )}
           </div>
         </div>
