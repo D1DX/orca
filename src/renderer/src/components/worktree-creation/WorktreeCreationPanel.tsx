@@ -1,7 +1,10 @@
 import React from 'react'
 import { AlertTriangle, GitBranch, Loader2, RotateCcw, X } from 'lucide-react'
 import { useAppStore } from '@/store'
-import { retryBackgroundWorktreeCreation } from '@/lib/worktree-creation-flow'
+import {
+  createInitialCommitAndRetryWorktreeCreation,
+  retryBackgroundWorktreeCreation
+} from '@/lib/worktree-creation-flow'
 import { getCreationProgressLabel } from '@/lib/pending-worktree-creation'
 import { translate } from '@/i18n/i18n'
 
@@ -91,6 +94,22 @@ export default function WorktreeCreationPanel({
                 'Retry'
               )}
             </button>
+            {entry.errorAction === 'create-initial-commit' ? (
+              <button
+                type="button"
+                onClick={() => void createInitialCommitAndRetryWorktreeCreation(creationId)}
+                disabled={entry.initialCommitPending === true}
+                className="inline-flex items-center gap-1 text-foreground hover:underline disabled:pointer-events-none disabled:opacity-60"
+              >
+                {entry.initialCommitPending === true ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : null}
+                {translate(
+                  'auto.components.worktree.creation.WorktreeCreationPanel.d2339d41a1',
+                  'Create initial commit'
+                )}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={dismiss}

@@ -20,6 +20,7 @@ import type {
 import type { TerminalGitHubPRLink } from '@/lib/terminal-github-pr-link-detector'
 import type {
   PendingWorktreeCreation,
+  WorktreeCreationRequest,
   WorktreeCreationPhase
 } from '@/lib/pending-worktree-creation'
 export { getRepoIdFromWorktreeId } from '../../../../shared/worktree-id'
@@ -143,7 +144,10 @@ export type WorktreeSlice = {
       phase?: WorktreeCreationPhase
       status?: 'creating' | 'error'
       error?: string
+      errorAction?: PendingWorktreeCreation['errorAction']
+      initialCommitPending?: boolean
       loaderVisible?: boolean
+      request?: WorktreeCreationRequest
     }
   ) => void
   /** Drop a pending entry (on success or dismiss), clearing the active surface

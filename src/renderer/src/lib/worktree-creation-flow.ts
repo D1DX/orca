@@ -14,7 +14,8 @@ import {
   formatWorkspaceCreateError,
   getWorkspaceCreateErrorToastMessage
 } from '@/lib/workspace-create-error-format'
-import type { CreateWorktreeResult } from '../../../shared/types'
+import { createRuntimeRepoInitialCommit } from '@/runtime/runtime-repo-client'
+import type { CreateInitialCommitResult, CreateWorktreeResult } from '../../../shared/types'
 import type { WorktreeCreationRequest } from '@/lib/pending-worktree-creation'
 
 // Why: most local creates finish in well under this window; holding the loader
@@ -98,12 +99,14 @@ async function executeWorktreeCreation(
     if (!useAppStore.getState().pendingWorktreeCreations[creationId]) {
       return
     }
-    const message = getWorkspaceCreateErrorToastMessage(formatWorkspaceCreateError(error))
+    const formattedError = formatWorkspaceCreateError(error)
+    const message = getWorkspaceCreateErrorToastMessage(formattedError)
     // Why: an error must surface immediately even if it lands before the loader
     // debounce fired, so force the loader visible alongside the error.
     useAppStore.getState().updatePendingWorktreeCreation(creationId, {
       status: 'error',
       error: message,
+      errorAction: formattedError.action,
       loaderVisible: true
     })
     // Why: only toast when the panel isn't already showing this error (the user
@@ -228,10 +231,60 @@ export function retryBackgroundWorktreeCreation(creationId: string): void {
   store.updatePendingWorktreeCreation(creationId, {
     status: 'creating',
     phase: 'fetching',
-    error: undefined
+    error: undefined,
+    initialCommitPending: false
   })
   store.setActivePendingWorktreeCreation(creationId)
   store.setActiveView('terminal')
   store.setSidebarOpen(true)
   void executeWorktreeCreation(creationId, entry.request)
+}
+
+export async function createInitialCommitAndRetryWorktreeCreation(
+  creationId: string
+): Promise<void> {
+  const store = useAppStore.getState()
+  const entry = store.pendingWorktreeCreations[creationId]
+  if (
+    !entry ||
+    entry.status !== 'error' ||
+    entry.errorAction !== 'create-initial-commit' ||
+    entry.initialCommitPending
+  ) {
+    return
+  }
+
+  store.updatePendingWorktreeCreation(creationId, { initialCommitPending: true })
+
+  let result: CreateInitialCommitResult
+  try {
+    result = await createRuntimeRepoInitialCommit(store.settings, entry.request.repoId)
+  } catch (error) {
+    result = { ok: false as const, error: error instanceof Error ? error.message : String(error) }
+  }
+
+  // Why: the user may dismiss the failed create while the runtime is creating
+  // the commit; a late result must not resurrect a panel they already removed.
+  if (!useAppStore.getState().pendingWorktreeCreations[creationId]) {
+    return
+  }
+
+  if (!result.ok) {
+    useAppStore.getState().updatePendingWorktreeCreation(creationId, {
+      initialCommitPending: false,
+      error: result.error
+    })
+    return
+  }
+
+  const latestEntry = useAppStore.getState().pendingWorktreeCreations[creationId]
+  if (!latestEntry) {
+    return
+  }
+  useAppStore.getState().updatePendingWorktreeCreation(creationId, {
+    request: { ...latestEntry.request, baseBranch: result.baseRef },
+    initialCommitPending: false,
+    errorAction: undefined
+  })
+  retryBackgroundWorktreeCreation(creationId)
 }

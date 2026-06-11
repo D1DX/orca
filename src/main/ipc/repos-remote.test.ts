@@ -946,6 +946,27 @@ describe('repos:addRemote', () => {
     expect(result).toHaveProperty('repo.path', '/home/user/project')
   })
 
+  it('adds a bare SSH repo using the relay-reported repo dir as the path', async () => {
+    mockGitProvider.isGitRepoAsync.mockResolvedValueOnce({
+      isRepo: true,
+      rootPath: '/work/bare-unborn.git'
+    })
+
+    const result = await handlers.get('repos:addRemote')!(null, {
+      connectionId: 'conn-1',
+      remotePath: '/work/bare-unborn.git'
+    })
+
+    expect(mockStore.addRepo).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'git',
+        path: '/work/bare-unborn.git',
+        connectionId: 'conn-1'
+      })
+    )
+    expect(result).toHaveProperty('repo.path', '/work/bare-unborn.git')
+  })
+
   it('uses the resolved git root basename for the default remote display name', async () => {
     mockGitProvider.isGitRepoAsync.mockResolvedValueOnce({
       isRepo: true,

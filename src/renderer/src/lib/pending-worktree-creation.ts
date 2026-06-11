@@ -74,6 +74,8 @@ export type PendingWorktreeCreation = {
    *  to its terminal. */
   loaderVisible: boolean
   error?: string
+  errorAction?: 'create-initial-commit'
+  initialCommitPending?: boolean
   request: WorktreeCreationRequest
 }
 

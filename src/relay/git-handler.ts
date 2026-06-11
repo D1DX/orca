@@ -626,6 +626,16 @@ export class GitHandler {
       const { stdout } = await this.git(['rev-parse', '--show-toplevel'], dirPath)
       return { isRepo: true, rootPath: stdout.trim() }
     } catch {
+      // Why: local repo detection accepts bare repos; SSH project adds must
+      // preserve that contract even though bare repos have no worktree root.
+      try {
+        const { stdout } = await this.git(['rev-parse', '--is-bare-repository'], dirPath)
+        if (stdout.trim() === 'true') {
+          return { isRepo: true, rootPath: dirPath }
+        }
+      } catch {
+        // Fall through to the non-repo result below.
+      }
       return { isRepo: false, rootPath: null }
     }
   }
