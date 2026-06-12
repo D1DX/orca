@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   storeState: {
     settings: { activeRuntimeEnvironmentId: null as string | null },
     repos: [] as Repo[],
+    projects: [],
+    projectHostSetups: [],
     worktreesByRepo: {} as Record<string, unknown[]>
   },
   createRepo: vi.fn(),
@@ -98,6 +100,8 @@ describe('useCreateRepo default-checkout handoff', () => {
     mocks.stateSetters = []
     mocks.stateValues = ['created', '/projects', 'git', null, false]
     mocks.storeState.repos = []
+    mocks.storeState.projects = []
+    mocks.storeState.projectHostSetups = []
     mocks.storeState.worktreesByRepo = {}
     mocks.createRepo.mockReset()
     mocks.createRemoteRepo.mockReset()
@@ -130,6 +134,12 @@ describe('useCreateRepo default-checkout handoff', () => {
     expect(mocks.fetchWorktrees).toHaveBeenCalledWith(repo.id, {
       requireAuthoritative: true
     })
+    expect(mocks.storeState.projects).toEqual(
+      expect.arrayContaining([expect.objectContaining({ sourceRepoIds: [repo.id] })])
+    )
+    expect(mocks.storeState.projectHostSetups).toEqual(
+      expect.arrayContaining([expect.objectContaining({ repoId: repo.id, path: repo.path })])
+    )
     expect(mocks.onGitRepoReady).toHaveBeenCalledWith(repo.id)
   })
 

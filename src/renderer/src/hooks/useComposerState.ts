@@ -25,6 +25,7 @@ import {
 import { tuiAgentToAgentKind } from '@/lib/telemetry'
 import { isGitRepoKind } from '../../../shared/repo-kind'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
+import { getRuntimeRepoBaseRefDefault } from '@/runtime/runtime-repo-client'
 import type {
   GitHubWorkItem,
   GitHubPrStartPoint,
@@ -2423,6 +2424,11 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
           workspaceName,
           preserveWorkspaceNameEdits: branchNameOverridePreservesNameEdits
         })
+        const submitBaseBranch =
+          selectedRepoIsGit && !baseBranch
+            ? ((await getRuntimeRepoBaseRefDefault(selectedRepoSettings, repoId).catch(() => null))
+                ?.defaultBaseRef ?? undefined)
+            : baseBranch
         const createDisplayName =
           smartGitHubResolution?.displayName ??
           (nameIsAutoManaged ? submitTitleName?.displayName : undefined)
@@ -2503,7 +2509,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
           repoId,
           name: workspaceName,
           ...(createDisplayName ? { displayName: createDisplayName } : {}),
-          ...(selectedRepoIsGit && baseBranch ? { baseBranch } : {}),
+          ...(selectedRepoIsGit && submitBaseBranch ? { baseBranch: submitBaseBranch } : {}),
           setupDecision: effectiveSetupDecision,
           ...(selectedRepoIsGit && sparseEnabled
             ? {
@@ -2581,6 +2587,7 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       resolvedInitialWorkspaceStatus,
       selectedRepo,
       selectedRepoIsGit,
+      selectedRepoSettings,
       selectedRepoRequiresConnection,
       showProjectRequiredError,
       settings?.agentCmdOverrides,

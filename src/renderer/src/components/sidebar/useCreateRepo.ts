@@ -12,6 +12,7 @@ import type { Repo } from '../../../../shared/types'
 import { translate } from '@/i18n/i18n'
 import type { RepoKind } from './create-project-defaults'
 import { extractIpcErrorMessage } from '@/lib/ipc-error'
+import { upsertAddedRepoWithProjectHostSetup } from './add-repo-store-upsert'
 
 export function useCreateRepo(
   fetchWorktrees: (
@@ -137,8 +138,6 @@ export function useCreateRepo(
         return
       }
       const repo = result.repo
-      // Upsert into the store before the repos:changed event round-trips,
-      // so the next step can find the repo immediately.
       const state = useAppStore.getState()
       const existingIdx = state.repos.findIndex((r) => r.id === repo.id)
       // Why: the IPC handler dedupes by path (see repos:create) and returns
@@ -146,13 +145,7 @@ export function useCreateRepo(
       // handler took the dedup path — no new project was created, so don't
       // claim one was.
       const wasDeduped = existingIdx !== -1
-      if (existingIdx === -1) {
-        useAppStore.setState({ repos: [...state.repos, repo] })
-      } else {
-        const updated = [...state.repos]
-        updated[existingIdx] = repo
-        useAppStore.setState({ repos: updated })
-      }
+      upsertAddedRepoWithProjectHostSetup(repo)
       if (wasDeduped) {
         toast.info(
           translate(

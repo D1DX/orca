@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   stateIndex: 0,
   storeState: {
     repos: [] as Repo[],
+    projects: [],
+    projectHostSetups: [],
     clearOrcaHookTrustForRepo: vi.fn(),
     openModal: vi.fn(),
     cancelNestedRepoScan: vi.fn()
@@ -92,6 +94,8 @@ describe('useRemoteRepo default-checkout handoff', () => {
     mocks.stateSetters = []
     mocks.stateValues = [[], 'ssh-1', '/srv/repo', null, false, null]
     mocks.storeState.repos = []
+    mocks.storeState.projects = []
+    mocks.storeState.projectHostSetups = []
     mocks.listTargets.mockResolvedValue([
       { id: 'ssh-1', label: 'Builder 1' },
       { id: 'ssh-2', label: 'Builder 2' }
@@ -133,6 +137,12 @@ describe('useRemoteRepo default-checkout handoff', () => {
     expect(mocks.fetchWorktrees).toHaveBeenCalledWith(repo.id, {
       requireAuthoritative: true
     })
+    expect(mocks.storeState.projects).toEqual(
+      expect.arrayContaining([expect.objectContaining({ sourceRepoIds: [repo.id] })])
+    )
+    expect(mocks.storeState.projectHostSetups).toEqual(
+      expect.arrayContaining([expect.objectContaining({ repoId: repo.id, path: repo.path })])
+    )
     expect(mocks.onGitRepoReady).toHaveBeenCalledWith(repo.id)
   })
 

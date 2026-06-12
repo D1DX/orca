@@ -54,6 +54,7 @@ const {
     readDir: vi.fn().mockResolvedValue([]),
     readFile: vi.fn().mockRejectedValue(new Error('not found')),
     stat: vi.fn().mockRejectedValue(new Error('not found')),
+    createDir: vi.fn().mockResolvedValue(undefined),
     createDirNoClobber: vi.fn().mockResolvedValue(undefined),
     deletePath: vi.fn().mockResolvedValue(undefined)
   },
@@ -913,6 +914,7 @@ describe('repos:addRemote', () => {
       destination: '/home/user'
     })
 
+    expect(mockFilesystemProvider.createDir).toHaveBeenCalledWith('/home/user')
     expect(mockGitProvider.clone).toHaveBeenCalledWith(
       ['clone', '--progress', '--', 'https://github.com/stablyai/orca.git', 'orca'],
       '/home/user',

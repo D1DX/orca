@@ -10,7 +10,9 @@ const mocks = vi.hoisted(() => ({
   refIndex: 0,
   storeState: {
     settings: { activeRuntimeEnvironmentId: null as string | null },
-    repos: [] as Repo[]
+    repos: [] as Repo[],
+    projects: [],
+    projectHostSetups: []
   },
   cloneRemote: vi.fn(),
   cloneLocal: vi.fn(),
@@ -96,6 +98,8 @@ describe('useAddRepoCloneFlow', () => {
     mocks.refValues = []
     mocks.stateValues = ['https://github.com/stablyai/orca.git', '/srv', false, null, null]
     mocks.storeState.repos = []
+    mocks.storeState.projects = []
+    mocks.storeState.projectHostSetups = []
     vi.stubGlobal('window', {
       api: {
         repos: {
@@ -134,6 +138,12 @@ describe('useAddRepoCloneFlow', () => {
     expect(mocks.fetchWorktrees).toHaveBeenCalledWith(repo.id, {
       requireAuthoritative: true
     })
+    expect(mocks.storeState.projects).toEqual(
+      expect.arrayContaining([expect.objectContaining({ sourceRepoIds: [repo.id] })])
+    )
+    expect(mocks.storeState.projectHostSetups).toEqual(
+      expect.arrayContaining([expect.objectContaining({ repoId: repo.id, path: repo.path })])
+    )
     expect(mocks.onGitRepoReady).toHaveBeenCalledWith(repo.id, 'clone_url')
   })
 

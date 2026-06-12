@@ -329,6 +329,10 @@ async function cloneRemoteRepo(
   if (!gitProvider) {
     throw new Error(`SSH connection "${args.connectionId}" not found or not connected`)
   }
+  const fsProvider = getSshFilesystemProvider(args.connectionId)
+  if (!fsProvider) {
+    throw new Error(`SSH connection "${args.connectionId}" not found or not connected`)
+  }
   const host = gitProvider.getHostPlatform?.()
   if (!host) {
     throw new Error('SSH host platform is unavailable. Reconnect the SSH target before cloning.')
@@ -367,6 +371,9 @@ async function cloneRemoteRepo(
   activeRemoteClone = metadata
   remoteCloneInFlightByPath.add(remoteCloneKey)
   try {
+    // Why: local clone creates the typed parent before spawning git. SSH clone
+    // must match that behavior or a fresh remote parent surfaces as spawn ENOENT.
+    await fsProvider.createDir(trimmedDestination)
     // Why: the SSH relay exposes argv-based git execution, not a shell. Use
     // the repo folder name as the target so git creates it inside the chosen
     // parent, and keep the same flag separator safety as local clone.

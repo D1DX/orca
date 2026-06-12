@@ -8,6 +8,7 @@ import { getCloneDestinationAutoFill } from './clone-defaults'
 import type { AddRepoDialogStep } from './add-repo-dialog-types'
 import { translate } from '@/i18n/i18n'
 import { extractIpcErrorMessage } from '@/lib/ipc-error'
+import { upsertAddedRepoWithProjectHostSetup } from './add-repo-store-upsert'
 
 export function useAddRepoCloneFlow({
   step,
@@ -151,16 +152,7 @@ export function useAddRepoCloneFlow({
         translate('auto.components.sidebar.useAddRepoCloneFlow.4d0013cc93', 'Repository cloned'),
         { description: repo.displayName }
       )
-      // Why: eagerly upsert so step 2 finds the repo before the IPC event.
-      const state = useAppStore.getState()
-      const existingIdx = state.repos.findIndex((r) => r.id === repo.id)
-      if (existingIdx === -1) {
-        useAppStore.setState({ repos: [...state.repos, repo] })
-      } else {
-        const updated = [...state.repos]
-        updated[existingIdx] = repo
-        useAppStore.setState({ repos: updated })
-      }
+      upsertAddedRepoWithProjectHostSetup(repo)
       // Why: once the repo exists, a transient non-authoritative refresh
       // should fall through to project reveal instead of leaving the add flow open.
       await fetchWorktrees(repo.id, { requireAuthoritative: true })

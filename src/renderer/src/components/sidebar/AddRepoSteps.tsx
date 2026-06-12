@@ -7,6 +7,7 @@ import type { SshTarget, SshConnectionState } from '../../../../shared/ssh-types
 import { createNestedRepoTelemetryAttemptId } from '../../../../shared/nested-repo-telemetry'
 import { translate } from '@/i18n/i18n'
 import { extractIpcErrorMessage } from '@/lib/ipc-error'
+import { upsertAddedRepoWithProjectHostSetup } from './add-repo-store-upsert'
 
 // ── Remote project hook ─────────────────────────────────────────────
 
@@ -188,13 +189,7 @@ export function useRemoteRepo(
       if (existingIdx !== -1) {
         state.clearOrcaHookTrustForRepo(repo.id)
       }
-      if (existingIdx === -1) {
-        useAppStore.setState({ repos: [...state.repos, repo] })
-      } else {
-        const updated = [...state.repos]
-        updated[existingIdx] = repo
-        useAppStore.setState({ repos: updated })
-      }
+      upsertAddedRepoWithProjectHostSetup(repo)
 
       if (!mountedRef.current || gen !== remoteGenRef.current) {
         return
