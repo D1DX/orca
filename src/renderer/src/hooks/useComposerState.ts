@@ -94,6 +94,10 @@ import {
   buildProjectHostSetupOptions,
   type ProjectHostSetupOption
 } from '@/lib/project-host-setup-options'
+import {
+  buildNewWorkspaceProjectOptions,
+  type NewWorkspaceProjectOption
+} from '@/lib/new-workspace-project-options'
 import { buildExecutionHostRegistry } from '../../../shared/execution-host-registry'
 import { getHostDisplayLabelOverrides } from '../../../shared/host-setting-overrides'
 import { queueNewWorkspaceTerminalFocus } from '@/lib/new-workspace-terminal-focus'
@@ -160,8 +164,11 @@ export type UseComposerStateOptions = {
 export type ComposerCardProps = {
   eligibleRepos: ReturnType<typeof useAppStore.getState>['repos']
   repoId: string
+  projectOptions: NewWorkspaceProjectOption[]
+  selectedProjectId: string | null
   selectedRepoIsGit: boolean
   onRepoChange: (value: string) => void
+  onProjectChange: (value: string) => void
   projectHostSetupOptions: ProjectHostSetupOption[]
   selectedProjectHostSetupId: string | null
   onProjectHostSetupChange: (setupId: string) => void
@@ -413,6 +420,15 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         hosts: hostOptions
       }),
     [eligibleRepos, hostOptions, projectHostSetups, selectedProjectId]
+  )
+  const projectOptions = useMemo(
+    () =>
+      buildNewWorkspaceProjectOptions({
+        projects,
+        projectHostSetups,
+        eligibleRepos
+      }),
+    [eligibleRepos, projectHostSetups, projects]
   )
   const selectedRepoSettings = useMemo(() => {
     if (!settings) {
@@ -1709,12 +1725,38 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
     },
     [handleRepoChange, projectHostSetupOptions]
   )
+  const handleProjectChange = useCallback(
+    (projectId: string): void => {
+      const preferredHostId =
+        selectedWorkspaceTarget.status === 'ready' ? selectedWorkspaceTarget.target.hostId : null
+      const nextRepoId = resolveWorkspaceCreationRepoId({
+        eligibleRepos,
+        projects,
+        projectHostSetups,
+        projectId,
+        hostId: preferredHostId,
+        focusedHostScope: workspaceHostScope
+      })
+      if (!nextRepoId) {
+        return
+      }
+      handleRepoChange(nextRepoId)
+    },
+    [
+      eligibleRepos,
+      handleRepoChange,
+      projectHostSetups,
+      projects,
+      selectedWorkspaceTarget,
+      workspaceHostScope
+    ]
+  )
   const showProjectRequiredError = useCallback((): void => {
     setProjectError('Choose or add a project before creating a workspace.')
     requestAnimationFrame(() => {
       document
         .querySelector<HTMLElement>(
-          '[data-contextual-tour-target="workspace-creation-project"] [data-repo-combobox-root="true"][role="combobox"]'
+          '[data-contextual-tour-target="workspace-creation-project"] [data-project-combobox-root="true"][role="combobox"]'
         )
         ?.focus()
     })
@@ -2626,8 +2668,11 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
   const cardProps: ComposerCardProps = {
     eligibleRepos,
     repoId,
+    projectOptions,
+    selectedProjectId,
     selectedRepoIsGit,
     onRepoChange: handleRepoChange,
+    onProjectChange: handleProjectChange,
     projectHostSetupOptions,
     selectedProjectHostSetupId,
     onProjectHostSetupChange: handleProjectHostSetupChange,
