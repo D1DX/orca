@@ -121,7 +121,7 @@ Done means: the sidebar reflects project availability, not every configured SSH 
 - [x] Keep SSH and remote server behavior represented as host capabilities rather than separate product concepts.
 - [x] Ensure remote server mode can still support users who want the desktop client to behave like “the server” when explicitly configured.
 - [x] Ensure SSH remains the lightweight “execute on this machine over SSH” path.
-- [~] Ensure remote server remains the durable runtime path for web/mobile handoff, background work, and richer server-owned state.
+- [x] Ensure remote server remains the durable runtime path for web/mobile handoff, background work, and richer server-owned state.
 - [x] Note cloud VM provisioning as future host onboarding/provisioning work, not a requirement for this PR.
 
 Done means: Local, SSH, remote server, and future cloud VMs share one Host model while keeping their different capabilities clear.
@@ -137,7 +137,9 @@ Done means: Local, SSH, remote server, and future cloud VMs share one Host model
 - [x] Integration-test task source on Host A with workspace run on Host B.
 - [x] Integration-test two hosts with different GitHub accounts and verify issue/PR lists and mutations use the selected source.
 - [x] Integration-test GitLab where path-only selectors previously existed.
-- [~] Integration-test Linear/Jira with explicit source account selection.
+- [x] Integration-test Linear/Jira with explicit source account selection.
+  - Linear was verified against the connected profile during Electron verification.
+  - Jira explicit source routing was verified with provider-routing and cache-boundary tests; this profile does not have a live Jira account connected for manual OAuth verification.
 - [x] Integration-test automations on local host, SSH host, and remote server where supported.
 - [x] Integration-test disconnected host UX for Tasks, New Workspace modal, sidebar, and automations.
   - 2026-06-13 follow-up: verified patched main IPC against a live Docker SSH target.
@@ -158,7 +160,11 @@ Done means: the test report demonstrates the complete user journey, including lo
 - [x] Update PR description with exact completed scope and explicit out-of-scope items.
 - [x] Link this checklist from the PR or implementation notes.
 - [x] Keep evidence screenshots out of git and attach/report them through approved PR channels.
-- [ ] Add plain-English release note copy for the Host model only after UX is verified.
+- [x] Add plain-English release note copy for the Host model only after UX is verified.
+
+Release note copy:
+
+Orca now treats machines as Hosts for projects and workspaces. A project can exist on your local Mac, an SSH machine, or a connected remote Orca server, and workspace creation lets you choose the host where the work should run. Tasks, automations, settings, and project setup now carry explicit host/source context so Orca does not silently use the wrong machine or the wrong provider account. Remote servers remain the durable option for web/mobile handoff and background automation, while SSH stays the lightweight way to run work on another machine.
 
 Done means: reviewers and future agents can understand the vision, implementation state, verification evidence, and remaining risk without reconstructing this conversation.
 
@@ -274,6 +280,8 @@ Done means: reviewers and future agents can understand the vision, implementatio
 - [x] 2026-06-12: Marked repo-id/path compatibility adapters complete after hardening the renderer project-host selector to merge repo-derived compatibility rows when hydrated project/setup arrays are empty or partial, alongside existing shared projection, persistence backfill/sync, automation context migration, and pending worktree context coverage. Verified with selector/projection tests, persistence tests, targeted oxlint, full `pnpm run typecheck`, and `git diff --check`.
 - [x] 2026-06-12: Marked the Host copy audit complete after replacing remaining visible stale SSH/project wording in paired-web project creation errors, Settings SSH search entries, AI Vault SSH-host workspace copy, and SSH shutdown errors. Verified with a stale-copy scan showing only comments/tests/technical internals, focused SSH IPC tests, targeted oxlint, full `pnpm run typecheck`, and `git diff --check`.
 - [x] 2026-06-12: Completed Settings ownership/account rows by adding a shared provider Host scope control with a Change Host action that opens Settings > Active Server from GitHub/GitLab/Linear/Jira account surfaces and GitHub/GitLab API budget panels. Existing ownership diagnostics still distinguish desktop-client versus remote-server credentials, and rate-limit panels show the budget Host scope. Verified with settings ownership, RuntimeEnvironmentsPane, provider account, source-control card, task-tracker card, Jira card, and rate-limit panel tests, targeted oxlint, full `pnpm run typecheck`, and `git diff --check`.
+- [x] 2026-06-13: Completed the remote-server durable automation path by adding a serve-mode headless dispatcher. Remote-owned automations now launch through `OrcaRuntimeService` when no renderer is available, create new per-run workspaces or launch existing workspaces in the server runtime, expose startup terminal tab IDs, honor scheduled prechecks before launch, wait for agent idle, and persist completion/failure plus bounded terminal output. Verified with focused AutomationService headless dispatch/precheck coverage, runtime worktree method coverage, broader automation/runtime automation tests, Linear/Jira source-context tests (12 files / 111 tests), targeted oxlint, full `pnpm run typecheck`, and `git diff --check`.
+- [x] 2026-06-13: Closed the Linear/Jira source-context verification row with explicit evidence boundaries. Linear was previously verified live in Electron against the connected profile; Jira has no live connected account in this profile, so verification is provider-routing/cache-boundary coverage only (`linear.test.ts`, `runtime-linear-client.test.ts`, `jira.test.ts`, `task-page-jira-cache-selectors.test.ts`, `task-drawer-source-boundary.test.ts`, 5 files / 66 tests).
 - [x] 2026-06-12: Completed Tasks account/host metadata by showing repo-backed account labels in source summaries when GitHub/GitLab accounts differ by Host, while preserving host labels, provider identities, Linear workspace names, Jira site names, and unavailable-host status in labels/titles. Verified with source-summary and repo picker tests, targeted oxlint, full `pnpm run typecheck`, and `git diff --check`.
 - [x] 2026-06-12: Continued the automation project-id migration by changing CLI automation show output to foreground explicit `runContext` fields (`runProjectId`, `runHostId`, `projectHostSetupId`, `runRepoId`, `runPath`) and label the old repo id as `legacyRepoId`. The checklist row remains partial because the shared `Automation.projectId` compatibility field still exists. Verified with CLI format/index tests, targeted oxlint, full `pnpm run typecheck`, and `git diff --check`.
 - [x] 2026-06-12: Aligned Automations manual-run disabled states with the backend run-target resolver so saved run contexts now disable Run Now when the project-host setup is missing or not ready, instead of failing after dispatch. Verified with focused automation availability tests, targeted oxlint, full `pnpm run typecheck`, and `git diff --check`.

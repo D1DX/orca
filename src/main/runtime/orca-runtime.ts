@@ -9853,6 +9853,7 @@ export class OrcaRuntimeService {
     let didSpawnStartup = false
     let didSpawnSetup = false
     let startupTerminalHandle: string | null = null
+    let startupTerminalTabId: string | null = null
     if (effectiveStartup && this.ptyController?.spawn) {
       try {
         // Why: automation startup must not depend on a renderer TerminalPane
@@ -9875,6 +9876,7 @@ export class OrcaRuntimeService {
         }
         didSpawnStartup = true
         startupTerminalHandle = terminal.handle
+        startupTerminalTabId = terminal.tabId ?? null
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         warning = warning
@@ -9994,6 +9996,16 @@ export class OrcaRuntimeService {
         : {}),
       ...(addResult.localBaseRefUpdateSuggestion
         ? { localBaseRefUpdateSuggestion: addResult.localBaseRefUpdateSuggestion }
+        : {}),
+      ...(didSpawnStartup && startupTerminalHandle
+        ? {
+            startupTerminal: {
+              spawned: true,
+              handle: startupTerminalHandle,
+              ...(startupTerminalTabId ? { tabId: startupTerminalTabId } : {}),
+              surface: 'background' as const
+            }
+          }
         : {})
     }
   }
@@ -10085,6 +10097,7 @@ export class OrcaRuntimeService {
     let didSpawnStartup = false
     let didSpawnSetup = false
     let startupTerminalHandle: string | null = null
+    let startupTerminalTabId: string | null = null
     if (args.startup && this.ptyController?.spawn) {
       try {
         const startupTrustAgent = args.startupDraftPaste?.agent ?? args.createdWithAgent
@@ -10108,6 +10121,7 @@ export class OrcaRuntimeService {
         }
         didSpawnStartup = true
         startupTerminalHandle = terminal.handle
+        startupTerminalTabId = terminal.tabId ?? null
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         warning = warning
@@ -10209,7 +10223,20 @@ export class OrcaRuntimeService {
       }
     }
 
-    return warning ? { ...result, warning } : result
+    const resultWithStartupTerminal =
+      didSpawnStartup && startupTerminalHandle
+        ? {
+            ...result,
+            startupTerminal: {
+              spawned: true,
+              handle: startupTerminalHandle,
+              ...(startupTerminalTabId ? { tabId: startupTerminalTabId } : {}),
+              surface: 'background' as const
+            }
+          }
+        : result
+
+    return warning ? { ...resultWithStartupTerminal, warning } : resultWithStartupTerminal
   }
 
   /**
@@ -11557,7 +11584,7 @@ export class OrcaRuntimeService {
           console.warn(`[terminal-create] failed to create inactive tab for ${result.id}:`, err)
         }
       }
-      return { handle, worktreeId: workspace.id, title: opts.title ?? null, surface }
+      return { handle, tabId, worktreeId: workspace.id, title: opts.title ?? null, surface }
     }
 
     this.assertGraphReady()
@@ -11607,7 +11634,36 @@ export class OrcaRuntimeService {
     // populates this.leaves may not have arrived yet. Wait for the leaf to
     // appear so we can return a valid handle the caller can use right away.
     const handle = await this.waitForTerminalHandle(reply.tabId)
-    return { handle, worktreeId: worktreeId ?? '', title: reply.title, surface: 'visible' }
+    return {
+      handle,
+      tabId: reply.tabId,
+      worktreeId: worktreeId ?? '',
+      title: reply.title,
+      surface: 'visible'
+    }
+  }
+
+  async launchAgentTerminal(
+    worktreeSelector: string,
+    opts: { agent: TuiAgent; prompt: string; title?: string }
+  ): Promise<RuntimeTerminalCreate> {
+    const worktree = await this.resolveWorktreeSelector(worktreeSelector)
+    const repo = this.store?.getRepo(worktree.repoId)
+    if (!repo) {
+      throw new Error('Repository for the selected workspace is no longer available.')
+    }
+    const startup = this.buildStartupForAgent(repo, opts.agent, opts.prompt)
+    if (repo.connectionId) {
+      await this.markRemoteWorkspaceTrustedForAgent(opts.agent, repo.connectionId, worktree.path)
+    } else {
+      this.markLocalWorkspaceTrustedForAgent(opts.agent, worktree.path)
+    }
+    return await this.createTerminal(`id:${worktree.id}`, {
+      command: startup.startup.command,
+      env: startup.startup.env,
+      telemetry: startup.startup.telemetry,
+      title: opts.title
+    })
   }
 
   async createMobileSessionTerminal(

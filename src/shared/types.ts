@@ -1880,6 +1880,8 @@ export type CreateWorktreeResult = {
   localBaseRefUpdateSuggestion?: LocalBaseRefUpdateSuggestion
   startupTerminal?: {
     spawned: boolean
+    handle?: string
+    tabId?: string
     surface?: 'visible' | 'background'
   }
   timing?: WorktreeCreateTiming

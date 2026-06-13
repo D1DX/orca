@@ -286,6 +286,66 @@ describe('AutomationService', () => {
     )
   })
 
+  it('dispatches remote-host automations headlessly when no renderer is available', async () => {
+    vi.setSystemTime(new Date('2026-05-13T08:00:00Z'))
+    const store = await createStore()
+    const runtimeHostId = toRuntimeExecutionHostId('gpu-server')
+    store.addRepo(makeRepo({ executionHostId: runtimeHostId }))
+    const setup = store.getProjectHostSetups()[0]!
+    const automation = store.createAutomation({
+      name: 'Remote check',
+      prompt: 'Check the remote repo',
+      agentId: 'claude',
+      projectId: 'r1',
+      runContext: {
+        kind: 'workspace-run',
+        projectId: setup.projectId,
+        hostId: runtimeHostId,
+        projectHostSetupId: setup.id,
+        repoId: setup.repoId,
+        path: setup.path
+      },
+      workspaceMode: 'new_per_run',
+      timezone: 'UTC',
+      rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
+      dtstart: new Date('2026-05-14T00:00:00Z').getTime()
+    })
+    const service = new AutomationService(store, {
+      tickMs: 60_000,
+      allowRemoteHostScheduling: true,
+      headlessDispatcher: vi.fn().mockResolvedValue({
+        workspaceId: 'remote-wt-1',
+        workspaceDisplayName: 'Remote automation',
+        terminalSessionId: 'remote-tab-1',
+        completion: Promise.resolve({
+          status: 'completed',
+          outputSnapshot: {
+            format: 'plain_text',
+            content: 'Done.',
+            capturedAt: Date.now(),
+            truncated: false
+          },
+          error: null
+        })
+      })
+    })
+
+    const run = await service.runNow(automation.id)
+
+    expect(run.status).toBe('dispatched')
+    expect(run.workspaceId).toBe('remote-wt-1')
+    expect(run.workspaceDisplayName).toBe('Remote automation')
+    expect(run.terminalSessionId).toBe('remote-tab-1')
+    await vi.waitFor(() =>
+      expect(store.listAutomationRuns(automation.id)[0]).toMatchObject({
+        status: 'completed',
+        workspaceId: 'remote-wt-1',
+        terminalSessionId: 'remote-tab-1',
+        outputSnapshot: expect.objectContaining({ content: 'Done.' })
+      })
+    )
+  })
+
   it('attaches provider usage when a completed run can be attributed', async () => {
     vi.setSystemTime(new Date('2026-05-13T10:00:00'))
     const store = await createStore()
