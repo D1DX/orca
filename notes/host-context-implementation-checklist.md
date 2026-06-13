@@ -36,7 +36,7 @@ Done means: a new agent can read the shared types and understand exactly where w
 - [x] Guard or retire GitLab path-only fallbacks where they can mutate or fetch from the wrong host.
 - [x] Update Linear routing to use an explicit source account/workspace context instead of settings.activeRuntimeEnvironmentId.
 - [x] Update Jira routing to use an explicit source account/site/project context instead of settings.activeRuntimeEnvironmentId.
-- [~] Add provider diagnostics that show which host/account/site a task source is using.
+- [x] Add provider diagnostics that show which host/account/site a task source is using.
 - [~] Add error states for unavailable source hosts, missing provider auth, unsupported provider on host, and version-skewed remote servers.
 
 Done means: if Machine A and Machine B have different provider accounts, every list and mutation goes through the user-selected source context.
@@ -47,7 +47,7 @@ Done means: if Machine A and Machine B have different provider accounts, every l
 - [x] Decide and implement the default Tasks view when a logical project exists on multiple hosts.
 - [x] Support switching the task source without changing the current run host.
 - [~] Show enough account/host metadata to make mismatched GitHub/GitLab/Linear/Jira accounts understandable.
-- [~] Persist task source context in task drawer URLs/state so refresh, deep links, and reopen preserve the same source.
+- [x] Persist task source context in task drawer URLs/state so refresh, deep links, and reopen preserve the same source.
 - [x] Ensure task drawer actions reuse the drawer item source context, not a global provider default.
 - [x] Add disabled/auth-needed/disconnected states for source hosts.
 - [x] Add empty states explaining when a project has no configured task source on the selected host.
@@ -252,3 +252,5 @@ Done means: reviewers and future agents can understand the vision, implementatio
 - [x] 2026-06-12: Marked the default Tasks multi-host behavior complete based on the existing implementation that selects one source per logical GitHub project, prefers Local Mac for duplicate logical projects, and preserves manual multi-host selection; evidence is `task-page-default-repo-selection.test.ts` plus the prior full typecheck.
 - [x] 2026-06-12: Made provider settings and API-budget scope copy point users to Settings > Active Server when they need to edit or inspect another Host's provider credentials/budgets, keeping the existing global Host selector discoverable without duplicating a per-card selector; verified with provider-scope, source-control card, tracker card, and rate-limit panel tests.
 - [x] 2026-06-12: Added a TaskPage boundary regression proving source-provider switching updates only task source/default task source and does not mutate focused runtime, project-host setup, or workspace run context; this completes the task-source versus run-host switching row alongside the existing Composer host-context boundary tests.
+- [x] 2026-06-12: Marked provider task-source diagnostics complete based on the Tasks source summary/picker implementation that names provider, host, repo/project identity, Linear workspace, Jira site, and unavailable source-host state; verified with source-summary and combobox tests.
+- [x] 2026-06-12: Marked task drawer source-context persistence complete based on UI slice coverage that records GitHub, GitLab, Linear, and Jira task-detail history entries with their exact `TaskSourceContext`, plus direct-open prefetch coverage for source-scoped GitHub and Linear reads.
