@@ -890,6 +890,30 @@ Landed so far:
   project-plus-host resolution, same-name non-merging, and unavailable setup
   reasons.
 
+Persisted context migration notes:
+
+- Existing automations and automation runs are upgraded on load when they do not
+  yet contain `runContext` or `sourceContext`. The migration derives a
+  `WorkspaceRunContext` from the saved repo/project-host setup and derives a
+  `TaskSourceContext` from the repo provider identity when available. Missing
+  provider identity is preserved as `null` rather than guessed.
+- `Automation.projectId` remains accepted as the legacy repo-id compatibility
+  field during this transition. New dispatch/precheck paths prefer the explicit
+  run context; older records continue to load and run through the backfilled
+  context or return a clear unavailable-target error.
+- Pending workspace creation requests now persist both `taskSourceContext` and
+  `workspaceRunContext`. Older pending requests without those fields continue
+  through the repo-id fallback path; newer retries preserve where the task came
+  from separately from where the workspace should be created.
+- Cached GitHub task selections and task-detail navigation entries include the
+  task source context in their cache/history keys when present. Legacy entries
+  without source context are kept under an explicit `legacy` scope so old drawer
+  history can still reopen without colliding with source-scoped entries.
+- Task drawer state remains renderer-session state rather than a durable disk
+  migration surface. The important persisted boundary is the navigation/history
+  and pending-workspace handoff state that can replay an item after refresh or
+  retry; those now carry source context when the caller has it.
+
 Important limitation:
 
 - This is not the full migration yet. `Repo` remains the source of truth for the

@@ -6,15 +6,13 @@ import type {
   AutomationDispatchResult,
   AutomationPrecheckResult,
   AutomationRun,
-  AutomationRunStatus,
-  AutomationRunUsage
+  AutomationRunStatus
 } from '../../shared/automations-types'
 import type { ClaudeUsageStore } from '../claude-usage/store'
 import type { CodexUsageStore } from '../codex-usage/store'
-import { splitWorktreeIdForFilesystem } from '../../shared/worktree-id'
 import { runAutomationPrecheck } from './precheck-runner'
-import { getRepoExecutionHostId } from '../../shared/execution-host'
-import type { ProjectHostSetup, Repo } from '../../shared/types'
+import { resolveAutomationRunTarget } from './run-target-resolution'
+import { collectAutomationRunUsage } from './run-usage-collection'
 
 const DEFAULT_TICK_MS = 60 * 1000
 
@@ -89,7 +87,7 @@ export class AutomationService {
     if (run.trigger !== 'scheduled' || !automation.precheck) {
       return null
     }
-    const target = this.resolveRunTarget(automation)
+    const target = resolveAutomationRunTarget(this.store, automation)
     if (!target.ok) {
       return {
         command: automation.precheck.command,
@@ -126,7 +124,12 @@ export class AutomationService {
     if (run.usage) {
       return run
     }
-    const usage = await this.collectRunUsage(run)
+    const usage = await collectAutomationRunUsage({
+      automation: this.store.listAutomations().find((entry) => entry.id === run.automationId),
+      run,
+      claudeUsage: this.claudeUsage,
+      codexUsage: this.codexUsage
+    })
     return this.store.updateAutomationRun({
       runId: run.id,
       status: run.status,
@@ -135,83 +138,6 @@ export class AutomationService {
       usage,
       error: run.error
     })
-  }
-
-  private async collectRunUsage(run: AutomationRun): Promise<AutomationRunUsage> {
-    const automation = this.store.listAutomations().find((entry) => entry.id === run.automationId)
-    const collectedAt = Date.now()
-    const unavailable = (
-      provider: AutomationRunUsage['provider'],
-      unavailableReason: AutomationRunUsage['unavailableReason'],
-      unavailableMessage: string
-    ): AutomationRunUsage => ({
-      status: 'unavailable',
-      provider,
-      model: null,
-      inputTokens: null,
-      outputTokens: null,
-      cacheReadTokens: null,
-      cacheWriteTokens: null,
-      reasoningOutputTokens: null,
-      totalTokens: null,
-      estimatedCostUsd: null,
-      estimatedCostSource: null,
-      providerSessionId: null,
-      attribution: null,
-      collectedAt,
-      unavailableReason,
-      unavailableMessage
-    })
-
-    if (!automation || run.status !== 'completed') {
-      return unavailable(
-        automation?.agentId === 'codex'
-          ? 'codex'
-          : automation?.agentId === 'claude'
-            ? 'claude'
-            : null,
-        'run_not_finished',
-        'Usage is only collected for completed automation runs.'
-      )
-    }
-    if (automation.executionTargetType === 'ssh') {
-      return unavailable(
-        automation.agentId === 'codex'
-          ? 'codex'
-          : automation.agentId === 'claude'
-            ? 'claude'
-            : null,
-        'remote_usage_unavailable',
-        'Remote automation usage is not available from local usage logs.'
-      )
-    }
-    if (automation.agentId === 'claude') {
-      if (!this.claudeUsage) {
-        return unavailable('claude', 'scan_failed', 'Claude usage store is unavailable.')
-      }
-      return this.claudeUsage.getAutomationRunUsage({
-        worktreeId: run.workspaceId,
-        terminalSessionId: run.terminalSessionId,
-        startedAt: run.startedAt,
-        completedAt: collectedAt
-      })
-    }
-    if (automation.agentId === 'codex') {
-      if (!this.codexUsage) {
-        return unavailable('codex', 'scan_failed', 'Codex usage store is unavailable.')
-      }
-      return this.codexUsage.getAutomationRunUsage({
-        worktreeId: run.workspaceId,
-        terminalSessionId: run.terminalSessionId,
-        startedAt: run.startedAt,
-        completedAt: collectedAt
-      })
-    }
-    return unavailable(
-      null,
-      'provider_unsupported',
-      'This agent does not report usage to Orca yet.'
-    )
   }
 
   private async evaluateDueRuns(): Promise<void> {
@@ -230,80 +156,6 @@ export class AutomationService {
     } finally {
       this.evaluating = false
     }
-  }
-
-  private getLegacyPrecheckCwd(automation: Automation): string | null {
-    if (automation.workspaceMode === 'existing') {
-      const parsed = automation.workspaceId
-        ? splitWorktreeIdForFilesystem(automation.workspaceId)
-        : null
-      return parsed?.worktreePath ?? null
-    }
-    return this.store.getRepo(automation.projectId)?.path ?? null
-  }
-
-  private resolveRunTarget(
-    automation: Automation
-  ):
-    | { ok: true; cwd: string; repo: Repo; setup?: ProjectHostSetup }
-    | { ok: false; error: string } {
-    const context = automation.runContext ?? null
-    if (!context) {
-      const repo = this.store.getRepo(automation.projectId)
-      const cwd = this.getLegacyPrecheckCwd(automation)
-      if (!repo || !cwd) {
-        return { ok: false, error: 'Automation run target is no longer available.' }
-      }
-      return { ok: true, cwd, repo }
-    }
-
-    const setup = this.store
-      .getProjectHostSetups()
-      .find((candidate) => candidate.id === context.projectHostSetupId)
-    if (!setup) {
-      return {
-        ok: false,
-        error: 'Project is not set up on the selected automation host anymore.'
-      }
-    }
-    if (setup.setupState !== 'ready') {
-      return {
-        ok: false,
-        error: `Project setup on the selected automation host is ${setup.setupState}.`
-      }
-    }
-    if (
-      setup.projectId !== context.projectId ||
-      setup.hostId !== context.hostId ||
-      setup.repoId !== context.repoId
-    ) {
-      return {
-        ok: false,
-        error: 'Automation run target no longer matches the selected project host setup.'
-      }
-    }
-
-    const repo = this.store.getRepo(context.repoId)
-    if (!repo) {
-      return {
-        ok: false,
-        error: 'Repository for the selected automation host is no longer available.'
-      }
-    }
-    if (getRepoExecutionHostId(repo) !== context.hostId) {
-      return {
-        ok: false,
-        error: 'Repository is no longer attached to the selected automation host.'
-      }
-    }
-    if (repo.path !== setup.path || context.path !== setup.path) {
-      return {
-        ok: false,
-        error: 'Project path for the selected automation host has changed.'
-      }
-    }
-
-    return { ok: true, cwd: setup.path, repo, setup }
   }
 
   private async evaluateAutomation(automation: Automation, now: number): Promise<void> {
@@ -333,7 +185,7 @@ export class AutomationService {
     automation: Automation,
     run: AutomationRun
   ): Promise<AutomationRun> {
-    const target = this.resolveRunTarget(automation)
+    const target = resolveAutomationRunTarget(this.store, automation)
     if (!target.ok) {
       return this.store.updateAutomationRun({
         runId: run.id,

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { toRuntimeExecutionHostId, toSshExecutionHostId } from './execution-host'
+import {
+  LOCAL_EXECUTION_HOST_ID,
+  toRuntimeExecutionHostId,
+  toSshExecutionHostId
+} from './execution-host'
 import {
   buildTaskSourceContextFromRepo,
   buildWorkspaceRunContext,
@@ -94,6 +98,50 @@ describe('task source context', () => {
 
     expect(local).not.toBe(ssh)
     expect(local).not.toBe(differentRepo)
+  })
+
+  it('serializes provider identities for GitLab, Linear, and Jira cache scopes', () => {
+    const base = {
+      projectId: 'project-1',
+      hostId: LOCAL_EXECUTION_HOST_ID,
+      repoId: 'repo-1'
+    } as const
+
+    expect(
+      getTaskSourceCacheScope({
+        ...base,
+        provider: 'gitlab',
+        providerIdentity: { provider: 'gitlab', namespace: 'stably', project: 'orca' }
+      })
+    ).toContain(encodeURIComponent('stably/orca'))
+    expect(
+      getTaskSourceCacheScope({
+        ...base,
+        provider: 'linear',
+        providerIdentity: { provider: 'linear', workspaceId: 'workspace-1', teamKey: 'ENG' }
+      })
+    ).toContain(encodeURIComponent('workspace-1/ENG'))
+    expect(
+      getTaskSourceCacheScope({
+        ...base,
+        provider: 'jira',
+        providerIdentity: {
+          provider: 'jira',
+          siteUrl: 'https://example.atlassian.net',
+          projectKey: 'OPS'
+        }
+      })
+    ).toContain(encodeURIComponent('https://example.atlassian.net/OPS'))
+  })
+
+  it('drops provider identities that do not match the source provider', () => {
+    expect(
+      normalizeTaskSourceContext({
+        provider: 'gitlab',
+        projectId: 'project-1',
+        providerIdentity: { provider: 'github', owner: 'stablyai', repo: 'orca' }
+      })?.providerIdentity
+    ).toBeNull()
   })
 
   it('builds workspace run context from an explicit project host setup', () => {

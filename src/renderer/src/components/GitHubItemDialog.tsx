@@ -1903,7 +1903,7 @@ function PRFilesCombinedDiffViewer({
           )
         })
     },
-    [baseSha, fileByPath, headSha, prNumber, repoId, repoPath]
+    [baseSha, fileByPath, headSha, prNumber, repoId, repoPath, sourceContext]
   )
 
   const retrySection = useCallback(

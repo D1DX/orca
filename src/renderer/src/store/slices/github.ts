@@ -238,7 +238,7 @@ function getGitHubWorkItemSourceSettings(
 ): AppState['settings'] {
   if (sourceContext?.provider === 'github') {
     return {
-      ...(settings ?? {}),
+      ...settings,
       ...getTaskSourceRuntimeSettings(sourceContext)
     } as AppState['settings']
   }
@@ -564,6 +564,7 @@ function bypassesGitHubPRRefreshFreshness(reason: GitHubPRRefreshReason): boolea
 
 const CACHE_TTL = 300_000 // 5 minutes (stale data shown instantly, then refreshed)
 const CHECKS_CACHE_TTL = 60_000 // 1 minute — checks change more frequently
+const EMPTY_CHECKS_CACHE_TTL = 10_000
 // Why: the NewWorkspace page's work-item list is a browse surface, not a
 // source of truth, so 60s staleness is fine — stale data renders instantly
 // while a background refresh keeps it current.
@@ -578,7 +579,12 @@ const inflightPRRequests = new Map<
   { promise: Promise<PRInfo | null>; force: boolean; generation: number; lookupHintKey: string }
 >()
 const inflightIssueRequests = new Map<string, Promise<IssueInfo | null>>()
-const inflightChecksRequests = new Map<string, Promise<PRCheckDetail[]>>()
+type InflightChecks = {
+  promise: Promise<PRCheckDetail[]>
+  force: boolean
+  noCache: boolean
+}
+const inflightChecksRequests = new Map<string, InflightChecks>()
 const inflightCommentsRequests = new Map<string, Promise<PRComment[]>>()
 type InflightWorkItems = {
   promise: Promise<GitHubWorkItem[]>
@@ -816,6 +822,10 @@ type GitHubPRFallbackSource = NonNullable<GitHubPRRefreshAlias['fallbackPRSource
 
 function isFresh<T>(entry: CacheEntry<T> | undefined, ttl = CACHE_TTL): entry is CacheEntry<T> {
   return entry !== undefined && Date.now() - entry.fetchedAt < ttl
+}
+
+function getPRChecksCacheTtl(entry: CacheEntry<PRCheckDetail[]> | undefined): number {
+  return entry?.data?.length === 0 ? EMPTY_CHECKS_CACHE_TTL : CHECKS_CACHE_TTL
 }
 
 function findWorktreeById(state: AppState, worktreeId: string): Worktree | null {
@@ -2700,7 +2710,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
     const cached = get().checksCache[cacheKey] ?? get().checksCache[legacyCacheKey]
     if (
       !options?.force &&
-      isFresh(cached, CHECKS_CACHE_TTL) &&
+      !options?.noCache &&
+      isFresh(cached, getPRChecksCacheTtl(cached)) &&
       (!headSha || cached.headSha === headSha)
     ) {
       const cachedChecks = cached.data ?? []
@@ -2725,7 +2736,14 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
 
     const inflightRequest = inflightChecksRequests.get(inflightKey)
     if (inflightRequest) {
-      return inflightRequest
+      if (
+        (options?.force && !inflightRequest.force) ||
+        (options?.noCache && !inflightRequest.noCache)
+      ) {
+        await inflightRequest.promise.catch(() => {})
+      } else {
+        return inflightRequest.promise
+      }
     }
 
     const request = (async () => {
@@ -2740,7 +2758,7 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
                 prNumber,
                 headSha,
                 prRepo: prRepo ?? null,
-                noCache: options?.force
+                noCache: Boolean(options?.force || options?.noCache)
               },
               { timeoutMs: 30_000 }
             )
@@ -2750,7 +2768,7 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
               prNumber,
               headSha,
               prRepo: prRepo ?? null,
-              noCache: options?.force
+              noCache: Boolean(options?.force || options?.noCache)
             })) as PRCheckDetail[])
         set((s) => {
           const nextState: Partial<AppState> = {
@@ -2793,7 +2811,11 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
       }
     })()
 
-    inflightChecksRequests.set(inflightKey, request)
+    inflightChecksRequests.set(inflightKey, {
+      promise: request,
+      force: Boolean(options?.force),
+      noCache: Boolean(options?.force || options?.noCache)
+    })
     return request
   },
 
@@ -3211,10 +3233,34 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
                   const checksCacheKeys = [
                     ...(alias.repoId
                       ? [
+                          ...(pr.headSha
+                            ? [
+                                runtimeScopedRepoCacheKey(
+                                  alias.repoPath,
+                                  alias.repoId,
+                                  prChecksCacheSuffix(pr.number, pr.prRepo, pr.headSha),
+                                  s.settings,
+                                  alias.connectionId,
+                                  aliasExecutionHostId
+                                )
+                              ]
+                            : []),
                           runtimeScopedRepoCacheKey(
                             alias.repoPath,
                             alias.repoId,
                             prChecksCacheSuffix(pr.number, pr.prRepo),
+                            s.settings,
+                            alias.connectionId,
+                            aliasExecutionHostId
+                          )
+                        ]
+                      : []),
+                    ...(pr.headSha
+                      ? [
+                          runtimeScopedRepoCacheKey(
+                            alias.repoPath,
+                            undefined,
+                            prChecksCacheSuffix(pr.number, pr.prRepo, pr.headSha),
                             s.settings,
                             alias.connectionId,
                             aliasExecutionHostId
@@ -3239,7 +3285,8 @@ export const createGitHubSlice: StateCreator<AppState, [], [], GitHubSlice> = (s
                     checksEntry.headSha &&
                     pr.headSha &&
                     checksEntry.headSha === pr.headSha &&
-                    event.outcome.fetchedAt - checksEntry.fetchedAt < CHECKS_CACHE_TTL
+                    event.outcome.fetchedAt - checksEntry.fetchedAt <
+                      getPRChecksCacheTtl(checksEntry)
                   ) {
                     return { ...pr, checksStatus: deriveCheckStatusFromChecks(checksEntry.data) }
                   }

@@ -110,6 +110,18 @@ export function getRuntimeCapabilitiesSummary(status: RuntimeStatus | null | und
   return hiddenCount > 0 ? `${visibleCapabilities} +${hiddenCount}` : visibleCapabilities
 }
 
+export function getActiveServerModeDescription(allowLocalRuntime: boolean): string {
+  return allowLocalRuntime
+    ? translate(
+        'auto.components.settings.RuntimeEnvironmentsPane.3f67e8078a',
+        "Local keeps today's desktop behavior. Selecting a saved server makes that server the default Host for server-routed projects, files, terminals, provider accounts, and browser/mobile handoff."
+      )
+    : translate(
+        'auto.components.settings.RuntimeEnvironmentsPane.2c85efb3e8',
+        'Selecting a saved server makes this browser use that paired Orca runtime as its default Host.'
+      )
+}
+
 export function RuntimeEnvironmentsPane({
   settings,
   switchRuntimeEnvironment,
@@ -462,15 +474,7 @@ export function RuntimeEnvironmentsPane({
             )}
           </Label>
           <p className="text-xs text-muted-foreground">
-            {allowLocalRuntime
-              ? translate(
-                  'auto.components.settings.RuntimeEnvironmentsPane.f75ce1c7a5',
-                  "Local keeps today's desktop behavior. Saved servers route supported client calls through the remote runtime."
-                )
-              : translate(
-                  'auto.components.settings.RuntimeEnvironmentsPane.8cf8790697',
-                  'Saved servers route this browser through a paired Orca runtime.'
-                )}
+            {getActiveServerModeDescription(allowLocalRuntime)}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

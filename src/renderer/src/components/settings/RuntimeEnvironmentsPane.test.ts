@@ -5,6 +5,7 @@ import {
 } from '../../../../shared/protocol-version'
 import {
   evaluateHostDetails,
+  getActiveServerModeDescription,
   getHostDetailsDescription,
   getHostDetailsSummary,
   getRuntimeCapabilitiesSummary,
@@ -126,5 +127,12 @@ describe('RuntimeEnvironmentsPane host details', () => {
         ]
       })
     ).toBe('runtime.environments.v1, browser.screencast.v1, terminal.multiplex.v1 +1')
+  })
+
+  it('explains that selecting a saved server is the explicit default Host mode', () => {
+    expect(getActiveServerModeDescription(true)).toContain('default Host')
+    expect(getActiveServerModeDescription(true)).toContain('browser/mobile handoff')
+    expect(getActiveServerModeDescription(false)).toContain('default Host')
+    expect(getActiveServerModeDescription(false)).toContain('paired Orca runtime')
   })
 })

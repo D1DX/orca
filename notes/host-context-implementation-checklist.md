@@ -23,7 +23,7 @@ The target model is:
 - [~] Audit user-facing copy so the product says **Host** for Local Mac, SSH hosts, remote servers, and future cloud VMs, while preserving technical labels only where useful.
 - [x] Document the invariant that task source context and run host are separate choices.
 - [~] Add compatibility adapters for existing repo-id/path-based callers so old data can be read while new code moves to explicit contexts.
-- [~] Add schema migration notes for old automations, cached task selections, pending worktree requests, and any persisted task drawer state.
+- [x] Add schema migration notes for old automations, cached task selections, pending worktree requests, and any persisted task drawer state.
 
 Done means: a new agent can read the shared types and understand exactly where work item data comes from versus where execution happens.
 
@@ -99,7 +99,7 @@ Done means: settings pages no longer imply one global provider/account when the 
 - [~] Ensure request ownership is explicit for provider fetches, provider mutations, file-system calls, git calls, terminal calls, and automation runs.
 - [~] Add capability negotiation for remote servers so new clients can degrade gracefully with older servers.
 - [~] Add version-skew UX for unsupported source-context or host-context APIs.
-- [~] Ensure SSH hosts and remote servers expose comparable availability/health states to the UI.
+- [x] Ensure SSH hosts and remote servers expose comparable availability/health states to the UI.
 - [x] Keep future cloud VM support as a host capability model, not a separate user-facing mental model.
 
 Done means: no background request can accidentally use the wrong host because it fell back to global state.
@@ -107,9 +107,9 @@ Done means: no background request can accidentally use the wrong host because it
 ## 8. Sidebar And Project Host UX
 
 - [x] Verify sidebar only shows host entries for projects that actually exist on those hosts.
-- [~] Verify disconnected hosts are visually disabled and not selectable when selection would fail.
+- [x] Verify disconnected hosts are visually disabled and not selectable when selection would fail.
 - [x] Keep local-only users in the low-jarring path: no unnecessary host chrome when only one local host exists.
-- [~] Preserve workspace drag/reorder behavior and host-section drag behavior after project-first host changes.
+- [x] Preserve workspace drag/reorder behavior and host-section drag behavior after project-first host changes.
 - [x] Verify collapsed/expanded host behavior is stable while dragging.
 - [x] Ensure host labels, counts, and status indicators are visually calm and aligned with docs/STYLEGUIDE.md.
 
@@ -119,7 +119,7 @@ Done means: the sidebar reflects project availability, not every configured SSH 
 
 - [~] Add CLI selectors for logical project, project host setup, source host/context, and run host.
 - [x] Keep SSH and remote server behavior represented as host capabilities rather than separate product concepts.
-- [ ] Ensure remote server mode can still support users who want the desktop client to behave like “the server” when explicitly configured.
+- [x] Ensure remote server mode can still support users who want the desktop client to behave like “the server” when explicitly configured.
 - [x] Ensure SSH remains the lightweight “execute on this machine over SSH” path.
 - [~] Ensure remote server remains the durable runtime path for web/mobile handoff, background work, and richer server-owned state.
 - [x] Note cloud VM provisioning as future host onboarding/provisioning work, not a requirement for this PR.
@@ -128,7 +128,7 @@ Done means: Local, SSH, remote server, and future cloud VMs share one Host model
 
 ## 10. Verification Matrix
 
-- [~] Unit-test source-context serialization, cache keys, and provider routing.
+- [x] Unit-test source-context serialization, cache keys, and provider routing.
 - [x] Unit-test automation migration from repo-id/path-based records.
 - [x] Unit-test workspace creation selectors for logical project plus host setup.
 - [ ] Integration-test local project with local provider credentials.
@@ -220,3 +220,9 @@ Done means: reviewers and future agents can understand the vision, implementatio
 - [x] 2026-06-12: Added `taskSourceContext` and `workspaceRunContext` to retryable pending worktree creation requests, seeded them from the Composer's selected task source and project-host setup, and verified the pending store preserves both identities with focused worktree tests plus web typecheck.
 - [x] 2026-06-12: Updated PR #5071 with the current verified scope, evidence docs, validation commands, explicit out-of-scope cloud/onboarding items, and remaining provider/version-skew risk.
 - [x] 2026-06-12: Added load-time backfill for legacy automations and automation runs that predate `runContext`/`sourceContext`, deriving explicit project host and provider source contexts from the saved repo id/path; verified with focused persistence migration coverage, automation service/precheck tests, daemon/settings merge-repair tests, and full `pnpm run typecheck`.
+- [x] 2026-06-12: Repaired the merge-repair lint gate without disabling max-lines by extracting automation run-target/usage modules and settings subcomponents, fixed stale source-context hook dependencies, and tightened GitHub PR checks cache ownership so `noCache` bypasses cache/in-flight requests while head-specific checks are reused during refresh events; verified targeted oxlint, focused automation/settings/GitHub cache tests (10 files / 157 tests), `github-checks-cache.test.ts`, `git diff --check`, and full `pnpm run typecheck`.
+- [x] 2026-06-12: Preserved the explicit remote-server focus path as Settings → Active Server, with copy explaining that selecting a saved server makes it the default Host for server-routed projects, files, terminals, provider accounts, and browser/mobile handoff rather than introducing a separate Focused Host Mode; verified with `RuntimeEnvironmentsPane.test.ts`.
+- [x] 2026-06-12: Added persisted context migration notes to `notes/project-first-host-model.md` covering old automations/runs, legacy `Automation.projectId`, cached task selections, retryable pending workspace creation requests, and task drawer/navigation replay state.
+- [x] 2026-06-12: Completed source-context unit coverage by adding GitLab/Linear/Jira provider identity cache-scope serialization tests and rerunning shared source-context, GitHub source/cache routing, UI open-task, and task-navigation history suites (6 files / 261 tests) plus targeted oxlint.
+- [x] 2026-06-12: Reconciled Add Project host-selection tests with the disabled-host UX: disconnected SSH hosts and blocked runtime hosts remain visible but disabled, the hook falls back to Local Mac instead of selecting a disconnected SSH host, and selection handlers ignore unavailable hosts; verified Add Project host selector/selection/dialog, sidebar host options, and execution-host registry tests (5 files / 34 tests) plus targeted oxlint.
+- [x] 2026-06-12: Re-verified project-first drag/reorder behavior across workspace manual order, drag units, workspace-board pointer drops, host-section order/rows, repo reorder host splitting, and project-header drag helpers; 9 files / 62 tests passed plus targeted oxlint.

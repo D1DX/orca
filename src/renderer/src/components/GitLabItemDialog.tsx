@@ -40,10 +40,7 @@ import type {
   GitLabWorkItemDetails,
   MRComment
 } from '../../../shared/types'
-import {
-  getTaskSourceCacheScope,
-  type TaskSourceContext
-} from '../../../shared/task-source-context'
+import type { TaskSourceContext } from '../../../shared/task-source-context'
 import { translate } from '@/i18n/i18n'
 
 type Props = {
@@ -365,7 +362,6 @@ export default function GitLabItemDialog({
   const [retryingJobId, setRetryingJobId] = useState<number | null>(null)
   const [actionInFlight, setActionInFlight] = useState<'close' | 'reopen' | 'merge' | null>(null)
   const mountedRef = useMountedRef()
-  const sourceContextKey = sourceContext ? getTaskSourceCacheScope(sourceContext) : ''
   const repoSelector = useMemo<GitLabDialogRepoSelector | null>(() => {
     if (!repoPath) {
       return null
@@ -375,7 +371,7 @@ export default function GitLabItemDialog({
       ...(repoId ? { repoId } : {}),
       ...(sourceContext ? { sourceContext } : {})
     }
-  }, [repoId, repoPath, sourceContext, sourceContextKey])
+  }, [repoId, repoPath, sourceContext])
   const updateCommentDraft = useCallback(
     (value: string): void => {
       setCommentDraftState({ itemId, value })
