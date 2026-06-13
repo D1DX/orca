@@ -27,7 +27,10 @@ import {
   projectHostSetupProjectionFromRepos,
   type ProjectHostSetupProjection
 } from '../../../../shared/project-host-setup-projection'
-import { PROJECT_HOST_SETUP_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
+import {
+  PROJECT_HOST_SETUP_RUNTIME_CAPABILITY,
+  WORKSPACE_RUN_CONTEXT_RUNTIME_CAPABILITY
+} from '../../../../shared/protocol-version'
 import {
   FOLDER_WORKSPACE_PATH_STATUS_TTL_MS,
   type FolderWorkspacePathStatus,
@@ -266,6 +269,21 @@ async function assertProjectHostSetupRuntimeCapability(
     target.environmentId,
     PROJECT_HOST_SETUP_RUNTIME_CAPABILITY,
     'The selected Orca server does not support project host setup yet. Update Orca on the server and try again.',
+    15_000
+  )
+}
+
+async function assertProjectHostSetupMutationRuntimeCapabilities(
+  target: ReturnType<typeof getActiveRuntimeTarget>
+): Promise<void> {
+  if (target.kind !== 'environment') {
+    return
+  }
+  await assertProjectHostSetupRuntimeCapability(target)
+  await assertRuntimeEnvironmentCapability(
+    target.environmentId,
+    WORKSPACE_RUN_CONTEXT_RUNTIME_CAPABILITY,
+    'The selected Orca server does not support explicit workspace run hosts yet. Update Orca on the server and try again.',
     15_000
   )
 }
@@ -1170,7 +1188,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
   setupProjectExistingFolder: async (args) => {
     try {
       const target = getProjectSetupRuntimeTarget(args.hostId)
-      await assertProjectHostSetupRuntimeCapability(target)
+      await assertProjectHostSetupMutationRuntimeCapabilities(target)
       const result =
         target.kind === 'local'
           ? await window.api.projects.setupExistingFolder(args)
@@ -1218,7 +1236,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
   createProjectHostSetup: async (args) => {
     try {
       const target = getProjectSetupRuntimeTarget(args.hostId)
-      await assertProjectHostSetupRuntimeCapability(target)
+      await assertProjectHostSetupMutationRuntimeCapabilities(target)
       const result =
         target.kind === 'local'
           ? await window.api.projects.createHostSetup(args)
@@ -1257,7 +1275,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
       const target = currentSetup
         ? getProjectSetupRuntimeTarget(currentSetup.hostId)
         : { kind: 'local' as const }
-      await assertProjectHostSetupRuntimeCapability(target)
+      await assertProjectHostSetupMutationRuntimeCapabilities(target)
       const result =
         target.kind === 'local'
           ? await window.api.projects.updateHostSetup(args)
@@ -1302,7 +1320,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
       const target = currentSetup
         ? getProjectSetupRuntimeTarget(currentSetup.hostId)
         : { kind: 'local' as const }
-      await assertProjectHostSetupRuntimeCapability(target)
+      await assertProjectHostSetupMutationRuntimeCapabilities(target)
       const result =
         target.kind === 'local'
           ? await window.api.projects.deleteHostSetup(args)
@@ -1343,7 +1361,7 @@ export const createRepoSlice: StateCreator<AppState, [], [], RepoSlice> = (set, 
       const parsedHost = parseExecutionHostId(args.hostId)
       const target = getProjectSetupRuntimeTarget(args.hostId)
       if (parsedHost?.kind !== 'ssh') {
-        await assertProjectHostSetupRuntimeCapability(target)
+        await assertProjectHostSetupMutationRuntimeCapabilities(target)
       }
       const repo =
         parsedHost?.kind === 'ssh'

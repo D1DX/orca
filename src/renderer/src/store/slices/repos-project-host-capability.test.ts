@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Repo } from '../../../../shared/types'
+import { PROJECT_HOST_SETUP_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
 import { clearRuntimeCompatibilityCacheForTests } from '../../runtime/runtime-rpc-client'
 import type { RuntimeEnvironmentCallRequest } from '../../runtime/runtime-compatibility-test-fixture'
 import { createTestStore } from './store-test-helpers'
@@ -17,6 +18,7 @@ const reposClone = vi.fn()
 const reposCloneRemote = vi.fn()
 const runtimeEnvironmentCall = vi.fn()
 const runtimeEnvironmentTransportCall = vi.fn()
+let runtimeCapabilities: string[] = []
 
 function runtimeStatusWithoutProjectHostSetup() {
   return {
@@ -31,7 +33,7 @@ function runtimeStatusWithoutProjectHostSetup() {
       liveLeafCount: 0,
       runtimeProtocolVersion: 3,
       minCompatibleRuntimeClientVersion: 2,
-      capabilities: []
+      capabilities: runtimeCapabilities
     },
     _meta: { runtimeId: 'runtime-remote' }
   }
@@ -44,6 +46,7 @@ beforeEach(() => {
   reposCloneRemote.mockReset()
   runtimeEnvironmentCall.mockReset()
   runtimeEnvironmentTransportCall.mockReset()
+  runtimeCapabilities = []
   runtimeEnvironmentTransportCall.mockImplementation((args: RuntimeEnvironmentCallRequest) => {
     if (args.method === 'status.get') {
       return runtimeStatusWithoutProjectHostSetup()
@@ -104,6 +107,31 @@ describe('repo slice project-host setup runtime capability', () => {
 
   it('blocks runtime project clone before mutating unsupported servers', async () => {
     const store = createTestStore()
+
+    await expect(
+      store.getState().setupProjectClone({
+        projectId: 'project-1',
+        hostId: 'runtime:env-1',
+        url: 'https://github.com/stablyai/orca.git',
+        destination: '/srv'
+      })
+    ).resolves.toBeNull()
+
+    expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
+  })
+
+  it('blocks runtime project setup mutations when workspace run-context support is missing', async () => {
+    runtimeCapabilities = [PROJECT_HOST_SETUP_RUNTIME_CAPABILITY]
+    const store = createTestStore()
+
+    await expect(
+      store.getState().setupProjectExistingFolder({
+        projectId: 'project-1',
+        hostId: 'runtime:env-1',
+        path: '/srv/project',
+        kind: 'git'
+      })
+    ).resolves.toBeNull()
 
     await expect(
       store.getState().setupProjectClone({
