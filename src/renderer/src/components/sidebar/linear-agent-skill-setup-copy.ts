@@ -76,13 +76,13 @@ function getLinearAgentSkillSetupToastBaseDescription(
   if (!cliAvailable && !skillInstalled) {
     return translate(
       'auto.components.sidebar.LinearAgentSkillSetupPrompt.toastInstallCliAndSkillDescription',
-      'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks through the Orca CLI.'
+      'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks.'
     )
   }
   if (!cliAvailable) {
     return translate(
       'auto.components.sidebar.LinearAgentSkillSetupPrompt.toastInstallCliDescription',
-      'Install the Orca CLI to enable your agents to read and edit Linear tasks through the Orca CLI.'
+      'Install the Orca CLI to enable your agents to read and edit Linear tasks.'
     )
   }
   return translate(

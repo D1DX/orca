@@ -429,7 +429,7 @@ describe('LinearAgentSkillSetupPrompt', () => {
       })
     )
     expect(getLastReminderToastDescriptionProps().description).toBe(
-      'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks through the Orca CLI.'
+      'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks.'
     )
     expect(getLastReminderToastDescriptionProps().onOpen).toEqual(expect.any(Function))
     expect(vi.mocked(toast.warning).mock.calls.at(-1)?.[1]?.action).toBeUndefined()
@@ -456,7 +456,25 @@ describe('LinearAgentSkillSetupPrompt', () => {
       })
     )
     expect(getLastReminderToastDescriptionProps().description).toBe(
-      'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks through the Orca CLI.'
+      'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks.'
+    )
+  })
+
+  it('does not repeat the Orca CLI in CLI-only reminder toast copy', async () => {
+    mocks.skillState.installed = true
+    await renderPrompt({ linked: true, remote: false, surface: 'modal' })
+    await clickBodyButton('Not now')
+    await unmountPrompt()
+    await renderPrompt({ linked: true, remote: false, surface: 'modal' })
+
+    expect(toast.warning).toHaveBeenCalledWith(
+      'Orca CLI is missing',
+      expect.objectContaining({
+        description: expect.anything()
+      })
+    )
+    expect(getLastReminderToastDescriptionProps().description).toBe(
+      'Install the Orca CLI to enable your agents to read and edit Linear tasks.'
     )
   })
 
@@ -473,7 +491,7 @@ describe('LinearAgentSkillSetupPrompt', () => {
       })
     )
     expect(getLastReminderToastDescriptionProps().description).toBe(
-      'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks through the Orca CLI. Remote agent environments may need their own setup.'
+      'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks. Remote agent environments may need their own setup.'
     )
   })
 
@@ -508,7 +526,7 @@ describe('LinearAgentSkillSetupPrompt', () => {
       })
     )
     expect(getLastReminderToastDescriptionProps().description).toBe(
-      'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks through the Orca CLI. This setup runs in the selected WSL agent runtime.'
+      'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks. This setup runs in the selected WSL agent runtime.'
     )
   })
 
@@ -641,7 +659,7 @@ describe('LinearAgentSkillSetupPrompt', () => {
       })
     )
     expect(getLastReminderToastDescriptionProps().description).toBe(
-      'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks through the Orca CLI.'
+      'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks.'
     )
   })
 })

@@ -3962,8 +3962,8 @@
           "toastMissingCliAndSkill": "缺少 Orca CLI 和 Linear 技能",
           "toastMissingCli": "缺少 Orca CLI",
           "toastMissingSkill": "缺少 Linear 技能",
-          "toastInstallCliAndSkillDescription": "安装 Orca CLI 和 Linear 技能，让 Agents 可以通过 Orca CLI 读取并编辑 Linear 任务。",
-          "toastInstallCliDescription": "安装 Orca CLI，让 Agents 可以通过 Orca CLI 读取并编辑 Linear 任务。",
+          "toastInstallCliAndSkillDescription": "安装 Orca CLI 和 Linear 技能，让 Agents 可以读取并编辑 Linear 任务。",
+          "toastInstallCliDescription": "安装 Orca CLI，让 Agents 可以读取并编辑 Linear 任务。",
           "toastInstallSkillDescription": "安装 Linear 技能，让 Agents 可以通过 Orca CLI 读取并编辑 Linear 任务。",
           "toastRemoteDescription": "{{value0}} 远程 Agent 环境可能仍需要自己的设置。",
           "toastWslDescription": "{{value0}} 此设置会在所选 WSL Agent 运行时中执行。"
