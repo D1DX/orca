@@ -448,6 +448,54 @@ describe('LinearAgentSkillSetupPrompt', () => {
     )
   })
 
+  it('keeps remote setup nuance in reminder toast copy', async () => {
+    await renderPrompt({ linked: true, remote: true, surface: 'modal' })
+    await clickBodyButton('Not now')
+    await unmountPrompt()
+    await renderPrompt({ linked: true, remote: true, surface: 'modal' })
+
+    expect(toast.warning).toHaveBeenCalledWith(
+      'Orca CLI and Linear skill are missing',
+      expect.objectContaining({
+        description:
+          'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks through the Orca CLI. Remote agent environments may need their own setup.'
+      })
+    )
+  })
+
+  it('keeps WSL target nuance in reminder toast copy', async () => {
+    const wslSettings = {
+      localAgentRuntime: 'wsl',
+      localAgentWslDistro: 'Fedora',
+      terminalWindowsShell: 'wsl.exe',
+      activeRuntimeEnvironmentId: null
+    } as const
+    await renderPrompt({
+      linked: true,
+      remote: false,
+      surface: 'modal',
+      currentPlatform: 'win32',
+      settings: wslSettings
+    })
+    await clickBodyButton('Not now')
+    await unmountPrompt()
+    await renderPrompt({
+      linked: true,
+      remote: false,
+      surface: 'modal',
+      currentPlatform: 'win32',
+      settings: wslSettings
+    })
+
+    expect(toast.warning).toHaveBeenCalledWith(
+      'Orca CLI and Linear skill are missing',
+      expect.objectContaining({
+        description:
+          'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks through the Orca CLI. This setup runs in the selected WSL agent runtime.'
+      })
+    )
+  })
+
   it('emits at most one reminder toast for a single eligible modal-only activation', async () => {
     await renderPrompt({ linked: true, remote: false, surface: 'modal' })
     await clickBodyButton('Not now')

@@ -78,7 +78,9 @@ export function AgentSkillSetupPanel({
   onRecheck
 }: AgentSkillSetupPanelProps): React.JSX.Element {
   const [terminalOpen, setTerminalOpen] = useState(false)
-  const [preInstallNoticeVisible, setPreInstallNoticeVisible] = useState(Boolean(preInstallNotice))
+  const [preInstallNoticeVisible, setPreInstallNoticeVisible] = useState(
+    Boolean(preInstallNotice && !installed)
+  )
   const mountedRef = useMountedRef()
   const readPrerequisiteStatus = useCallback(
     () => (getPrerequisiteStatus ?? window.api.cli.getInstallStatus)(),

@@ -3964,7 +3964,9 @@
           "toastMissingSkill": "Linear スキルがありません",
           "toastInstallCliAndSkillDescription": "Orca CLI と Linear スキルをインストールして、agents が Orca CLI を通じて Linear タスクを読み書きできるようにします。",
           "toastInstallCliDescription": "Orca CLI をインストールして、agents が Orca CLI を通じて Linear タスクを読み書きできるようにします。",
-          "toastInstallSkillDescription": "Linear スキルをインストールして、agents が Orca CLI を通じて Linear タスクを読み書きできるようにします。"
+          "toastInstallSkillDescription": "Linear スキルをインストールして、agents が Orca CLI を通じて Linear タスクを読み書きできるようにします。",
+          "toastRemoteDescription": "{{value0}} リモート agent 環境では独自の設定が必要な場合があります。",
+          "toastWslDescription": "{{value0}} この設定は選択した WSL agent ランタイムで実行されます。"
         },
         "FolderWorkspaceComposerDialog": {
           "connectFailed": "プロジェクトに接続できませんでした。",

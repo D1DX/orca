@@ -53,7 +53,7 @@ describe('AgentSkillSetupPanel', () => {
     expect(buttonLabels(html)).not.toContain('Re-check')
   })
 
-  it('uses the install copy when the skill is installed but the CLI prerequisite is missing', () => {
+  it('keeps update copy until the installed panel checks CLI prerequisites', () => {
     const html = renderPanel({
       installed: true,
       installLabel: 'Install CLI & Skill',
@@ -61,8 +61,8 @@ describe('AgentSkillSetupPanel', () => {
     })
 
     expect(html).toContain('Installed')
-    expect(buttonLabels(html)).toContain('Install CLI &amp; Skill')
-    expect(buttonLabels(html)).not.toContain('Update')
+    expect(buttonLabels(html)).toContain('Update')
+    expect(buttonLabels(html)).not.toContain('Install CLI &amp; Skill')
   })
 
   it('can hide install after the skill is detected', () => {

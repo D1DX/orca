@@ -47,6 +47,30 @@ export function getLinearAgentSkillSetupToastTitle(
 
 export function getLinearAgentSkillSetupToastDescription(
   cliAvailable: boolean,
+  skillInstalled: boolean,
+  remote: boolean,
+  agentRuntime: LocalAgentRuntime
+): string {
+  const baseDescription = getLinearAgentSkillSetupToastBaseDescription(cliAvailable, skillInstalled)
+  if (remote) {
+    return translate(
+      'auto.components.sidebar.LinearAgentSkillSetupPrompt.toastRemoteDescription',
+      '{{value0}} Remote agent environments may need their own setup.',
+      { value0: baseDescription }
+    )
+  }
+  if (agentRuntime.runtime === 'wsl') {
+    return translate(
+      'auto.components.sidebar.LinearAgentSkillSetupPrompt.toastWslDescription',
+      '{{value0}} This setup runs in the selected WSL agent runtime.',
+      { value0: baseDescription }
+    )
+  }
+  return baseDescription
+}
+
+function getLinearAgentSkillSetupToastBaseDescription(
+  cliAvailable: boolean,
   skillInstalled: boolean
 ): string {
   if (!cliAvailable && !skillInstalled) {

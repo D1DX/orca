@@ -183,7 +183,12 @@ export function LinearAgentSkillSetupPrompt({
 
   const toastTitle = getLinearAgentSkillSetupToastTitle(cliAvailable, skill.installed)
 
-  const toastDescription = getLinearAgentSkillSetupToastDescription(cliAvailable, skill.installed)
+  const toastDescription = getLinearAgentSkillSetupToastDescription(
+    cliAvailable,
+    skill.installed,
+    remote,
+    agentRuntime
+  )
 
   useEffect(() => {
     if (surface !== 'modal' || !missingSetup || setupDialogOpen) {
