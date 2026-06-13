@@ -18,6 +18,8 @@ type StoreState = {
   checkLinearConnection: (force?: boolean) => Promise<void>
   testLinearConnection: (workspaceId: string) => Promise<{ ok: boolean; error?: string }>
   settings: { activeRuntimeEnvironmentId: string | null }
+  openSettingsPage: () => void
+  openSettingsTarget: (target: { pane: string; repoId: string | null }) => void
 }
 
 const mocks = vi.hoisted(() => ({
@@ -68,7 +70,9 @@ function installStore(
     disconnectLinearWorkspace: vi.fn(async () => {}),
     checkLinearConnection: vi.fn(async () => {}),
     testLinearConnection: vi.fn(async () => ({ ok: true })),
-    settings
+    settings,
+    openSettingsPage: vi.fn(),
+    openSettingsTarget: vi.fn()
   }
   mocks.store.current = state
   return state
@@ -106,6 +110,7 @@ describe('LinearIntegrationCard account scope', () => {
     expect(rendered.textContent).toContain(
       'Credentials and account checks for this provider are owned by this desktop client. Choose a remote Host from Settings > Active Server to edit server-owned credentials.'
     )
+    expect(rendered.textContent).toContain('Change Host')
     expect(rendered.textContent).toContain('Add access with a Personal API key')
 
     await act(async () => {
@@ -126,6 +131,13 @@ describe('LinearIntegrationCard account scope', () => {
     expect(rendered.textContent).toContain(
       'Credentials and account checks for this provider are owned by this remote server. Choose a different Host from Settings > Active Server to edit another account scope.'
     )
+    await act(async () => {
+      Array.from(rendered.querySelectorAll('button'))
+        .find((button) => button.textContent === 'Change Host')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(state.openSettingsPage).toHaveBeenCalledTimes(1)
+    expect(state.openSettingsTarget).toHaveBeenCalledWith({ pane: 'servers', repoId: null })
     expect(rendered.textContent).toContain('Acme')
     expect(rendered.textContent).toContain('Acme workspace · linear@example.test')
 

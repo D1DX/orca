@@ -7,6 +7,7 @@ import { useAppStore } from '@/store'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import type { GetGitLabRateLimitResult, GitLabRateLimitSnapshot } from '../../../../shared/types'
 import { getProviderRateLimitScope } from '@/components/settings/provider-account-scope'
+import { ProviderHostScopeControl } from '@/components/settings/ProviderHostScopeControl'
 import { translate } from '@/i18n/i18n'
 
 const REFRESH_INTERVAL_MS = 60_000
@@ -167,16 +168,14 @@ export function GitLabRateLimitPanel({ className }: { className?: string }): Rea
               'Orca uses REST through the GitLab CLI.'
             )}
           </p>
-          <p className="text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">
-              {translate(
-                'auto.components.gitlab.gitlab.rate.limit.display.budget_scope',
-                'Budget scope: {{value0}}',
-                { value0: budgetScope.label }
-              )}
-            </span>{' '}
-            {budgetScope.description}
-          </p>
+          <ProviderHostScopeControl
+            labelPrefix={translate(
+              'auto.components.gitlab.gitlab.rate.limit.display.budget_scope_prefix',
+              'Budget scope'
+            )}
+            scope={budgetScope}
+            className="text-xs"
+          />
         </div>
         <Button
           type="button"

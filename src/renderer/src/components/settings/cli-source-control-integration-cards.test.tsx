@@ -10,6 +10,8 @@ import {
 
 type StoreState = {
   settings: { activeRuntimeEnvironmentId: string | null }
+  openSettingsPage: () => void
+  openSettingsTarget: (target: { pane: string; repoId: string | null }) => void
 }
 
 const mocks = vi.hoisted(() => ({
@@ -74,7 +76,13 @@ describe('CLI source-control integration card account scope', () => {
   })
 
   it('shows local-client ownership for connected GitHub CLI credentials', async () => {
-    mocks.store.current = { settings: { activeRuntimeEnvironmentId: null } }
+    const openSettingsPage = vi.fn()
+    const openSettingsTarget = vi.fn()
+    mocks.store.current = {
+      settings: { activeRuntimeEnvironmentId: null },
+      openSettingsPage,
+      openSettingsTarget
+    }
 
     const rendered = await renderCard(<GitHubIntegrationCard />)
 
@@ -84,10 +92,22 @@ describe('CLI source-control integration card account scope', () => {
     expect(rendered.textContent).toContain(
       'Credentials and account checks for this provider are owned by this desktop client. Choose a remote Host from Settings > Active Server to edit server-owned credentials.'
     )
+    await act(async () => {
+      Array.from(rendered.querySelectorAll('button'))
+        .find((button) => button.textContent === 'Change Host')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    expect(openSettingsPage).toHaveBeenCalledTimes(1)
+    expect(openSettingsTarget).toHaveBeenCalledWith({ pane: 'servers', repoId: null })
   })
 
   it('shows remote-server ownership for GitLab CLI credential checks', async () => {
-    mocks.store.current = { settings: { activeRuntimeEnvironmentId: 'runtime-1' } }
+    mocks.store.current = {
+      settings: { activeRuntimeEnvironmentId: 'runtime-1' },
+      openSettingsPage: vi.fn(),
+      openSettingsTarget: vi.fn()
+    }
     mocks.preflight.statuses.glabStatus = 'not-authenticated'
 
     const rendered = await renderCard(<GitLabIntegrationCard />)

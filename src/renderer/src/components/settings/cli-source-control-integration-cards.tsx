@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button'
 import { useAppStore } from '@/store'
 import { IntegrationCardDetails, IntegrationCardShell } from './integration-card-shell'
 import { getProviderAccountScope } from './provider-account-scope'
+import { ProviderHostScopeControl } from './ProviderHostScopeControl'
 import { usePreflightCardStatuses } from './source-control-preflight-card-status'
 import { translate } from '@/i18n/i18n'
 
@@ -16,16 +17,14 @@ function ProviderAccountScopeDetails({
 
   return (
     <IntegrationCardDetails>
-      <div className="text-xs">
-        <span className="font-medium text-foreground">
-          {translate(
-            'auto.components.settings.cli.source.control.integration.cards.account_scope',
-            'Account scope: {{value0}}',
-            { value0: accountScope.label }
-          )}
-        </span>
-        <div className="mt-0.5 text-muted-foreground">{accountScope.description}</div>
-      </div>
+      <ProviderHostScopeControl
+        labelPrefix={translate(
+          'auto.components.settings.cli.source.control.integration.cards.account_scope_prefix',
+          'Account scope'
+        )}
+        scope={accountScope}
+        className="text-xs"
+      />
       {children}
     </IntegrationCardDetails>
   )

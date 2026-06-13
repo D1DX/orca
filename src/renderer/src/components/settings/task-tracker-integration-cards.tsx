@@ -8,6 +8,7 @@ import { getProviderRuntimeContextKey } from '@/lib/provider-runtime-context'
 import { useAppStore } from '@/store'
 import { IntegrationCardDetails, IntegrationCardShell } from './integration-card-shell'
 import { getProviderAccountScope } from './provider-account-scope'
+import { ProviderHostScopeControl } from './ProviderHostScopeControl'
 import { translate } from '@/i18n/i18n'
 
 type VerificationResult = { state: 'ok' | 'error'; error?: string }
@@ -214,16 +215,14 @@ export function LinearIntegrationCard(): React.JSX.Element {
 
 function ProviderAccountScopeRow({ scope }: { scope: ReturnType<typeof getProviderAccountScope> }) {
   return (
-    <div className="mt-3 rounded-md border border-border/40 bg-background/50 px-3 py-2 text-xs">
-      <div className="font-medium text-foreground">
-        {translate(
-          'auto.components.settings.task.tracker.integration.cards.account_scope',
-          'Account scope: {{value0}}',
-          { value0: scope.label }
-        )}
-      </div>
-      <div className="mt-0.5 text-muted-foreground">{scope.description}</div>
-    </div>
+    <ProviderHostScopeControl
+      labelPrefix={translate(
+        'auto.components.settings.task.tracker.integration.cards.account_scope_prefix',
+        'Account scope'
+      )}
+      scope={scope}
+      className="mt-3 rounded-md border border-border/40 bg-background/50 px-3 py-2 text-xs"
+    />
   )
 }
 

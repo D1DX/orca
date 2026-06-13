@@ -84,9 +84,9 @@ Done means: scheduled or manual automations behave predictably when a project ex
 
 ## 6. Settings, Accounts, And Host Ownership
 
-- [~] Clarify which settings are client-owned versus host-owned.
-- [~] Add host/account selectors to provider settings where credentials may differ by host.
-- [~] Make provider rate limits, diagnostics, and “current account” views show their host/source context.
+- [x] Clarify which settings are client-owned versus host-owned.
+- [x] Add host/account selectors to provider settings where credentials may differ by host.
+- [x] Make provider rate limits, diagnostics, and “current account” views show their host/source context.
 - [x] Audit source-control AI, agent defaults, command defaults, and model selections for whether they should be client-global or host-scoped.
 - [x] Preserve existing Windows/WSL-style setting patterns where they already solve host-specific settings.
 - [x] Ensure remote server version/capability information is visible enough to explain unavailable controls.
@@ -258,3 +258,4 @@ Done means: reviewers and future agents can understand the vision, implementatio
 - [x] 2026-06-12: Extracted and tested external automation source availability copy so local missing tooling, disconnected SSH sources, connecting SSH sources, and connected SSH hosts with missing remote tooling get distinct states; verified with focused automation availability tests, targeted oxlint, and full `pnpm run typecheck`.
 - [x] 2026-06-12: Marked repo-id/path compatibility adapters complete after hardening the renderer project-host selector to merge repo-derived compatibility rows when hydrated project/setup arrays are empty or partial, alongside existing shared projection, persistence backfill/sync, automation context migration, and pending worktree context coverage. Verified with selector/projection tests, persistence tests, targeted oxlint, full `pnpm run typecheck`, and `git diff --check`.
 - [x] 2026-06-12: Marked the Host copy audit complete after replacing remaining visible stale SSH/project wording in paired-web project creation errors, Settings SSH search entries, AI Vault SSH-host workspace copy, and SSH shutdown errors. Verified with a stale-copy scan showing only comments/tests/technical internals, focused SSH IPC tests, targeted oxlint, full `pnpm run typecheck`, and `git diff --check`.
+- [x] 2026-06-12: Completed Settings ownership/account rows by adding a shared provider Host scope control with a Change Host action that opens Settings > Active Server from GitHub/GitLab/Linear/Jira account surfaces and GitHub/GitLab API budget panels. Existing ownership diagnostics still distinguish desktop-client versus remote-server credentials, and rate-limit panels show the budget Host scope. Verified with settings ownership, RuntimeEnvironmentsPane, provider account, source-control card, task-tracker card, Jira card, and rate-limit panel tests, targeted oxlint, full `pnpm run typecheck`, and `git diff --check`.

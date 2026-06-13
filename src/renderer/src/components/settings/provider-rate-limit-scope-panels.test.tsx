@@ -5,10 +5,18 @@ import { GitLabRateLimitPanel } from '@/components/gitlab/gitlab-rate-limit-disp
 
 type StoreState = {
   settings: { activeRuntimeEnvironmentId: string | null }
+  openSettingsPage: () => void
+  openSettingsTarget: (target: { pane: string; repoId: string | null }) => void
 }
 
 const mocks = vi.hoisted(() => ({
-  store: { current: { settings: { activeRuntimeEnvironmentId: null } } as StoreState }
+  store: {
+    current: {
+      settings: { activeRuntimeEnvironmentId: null },
+      openSettingsPage: vi.fn(),
+      openSettingsTarget: vi.fn()
+    } as StoreState
+  }
 }))
 
 vi.mock('@/store', () => ({
@@ -17,7 +25,11 @@ vi.mock('@/store', () => ({
 
 describe('provider rate-limit panels account scope', () => {
   it('shows the local host scope for GitHub API budget', () => {
-    mocks.store.current = { settings: { activeRuntimeEnvironmentId: null } }
+    mocks.store.current = {
+      settings: { activeRuntimeEnvironmentId: null },
+      openSettingsPage: vi.fn(),
+      openSettingsTarget: vi.fn()
+    }
 
     const markup = renderToStaticMarkup(<GitHubRateLimitPanel />)
 
@@ -25,10 +37,15 @@ describe('provider rate-limit panels account scope', () => {
     expect(markup).toContain(
       'GitHub API budget is fetched from the CLI on this desktop client. Choose a remote Host from Settings &gt; Active Server to view server-owned budgets.'
     )
+    expect(markup).toContain('Change Host')
   })
 
   it('shows the remote server scope for GitLab API budget', () => {
-    mocks.store.current = { settings: { activeRuntimeEnvironmentId: 'runtime-1' } }
+    mocks.store.current = {
+      settings: { activeRuntimeEnvironmentId: 'runtime-1' },
+      openSettingsPage: vi.fn(),
+      openSettingsTarget: vi.fn()
+    }
 
     const markup = renderToStaticMarkup(<GitLabRateLimitPanel />)
 
