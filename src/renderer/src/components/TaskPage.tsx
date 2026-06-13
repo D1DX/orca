@@ -3579,7 +3579,9 @@ export default function TaskPage(): React.JSX.Element {
         openGitLabWorkItem: undefined,
         openGitLabSourceContext: undefined,
         openLinearIssue: undefined,
-        openLinearSourceContext: undefined
+        openLinearSourceContext: undefined,
+        openJiraIssue: undefined,
+        openJiraSourceContext: undefined
       }
     }))
   }, [clearSelectedLinearIssue, setDialogWorkItem])
@@ -3600,11 +3602,45 @@ export default function TaskPage(): React.JSX.Element {
   const selectedJiraIssue = selectedJiraIssueKey
     ? (cachedSelectedJiraIssue ?? selectedJiraIssueFallback)
     : null
+  const jiraDetailSourceContext = useMemo(() => {
+    if (
+      selectedJiraIssue &&
+      pageData.openJiraSourceContext?.provider === 'jira' &&
+      pageData.openJiraIssue?.key === selectedJiraIssue.key &&
+      pageData.openJiraIssue.siteId === selectedJiraIssue.siteId
+    ) {
+      return pageData.openJiraSourceContext
+    }
+    return jiraTaskSourceContext
+  }, [
+    jiraTaskSourceContext,
+    pageData.openJiraIssue,
+    pageData.openJiraSourceContext,
+    selectedJiraIssue
+  ])
 
   const setSelectedJiraIssue = useCallback((issue: JiraIssue | null) => {
     setSelectedJiraIssueKey(issue?.key ?? null)
     setSelectedJiraIssueFallback(issue)
   }, [])
+
+  useEffect(() => {
+    setSelectedJiraIssue(pageData.openJiraIssue ?? null)
+  }, [pageData.openJiraIssue, setSelectedJiraIssue])
+
+  const openJiraDetailPage = useCallback(
+    (issue: JiraIssue) => {
+      openTaskPage(
+        {
+          taskSource: 'jira',
+          openJiraIssue: issue,
+          openJiraSourceContext: jiraTaskSourceContext
+        },
+        { recordTasksInteraction: false }
+      )
+    },
+    [jiraTaskSourceContext, openTaskPage]
+  )
 
   // Linear tab state
   const [linearMode, setLinearMode] = useState<LinearMode>('issues')
@@ -9070,14 +9106,14 @@ export default function TaskPage(): React.JSX.Element {
                           tabIndex={0}
                           aria-current={selected ? 'true' : undefined}
                           data-current={selected ? 'true' : undefined}
-                          onClick={() => setSelectedJiraIssue(issue)}
+                          onClick={() => openJiraDetailPage(issue)}
                           onKeyDown={(e) => {
                             if (e.target !== e.currentTarget) {
                               return
                             }
                             if (e.key === 'Enter' || e.key === ' ') {
                               e.preventDefault()
-                              setSelectedJiraIssue(issue)
+                              openJiraDetailPage(issue)
                             }
                           }}
                           className={cn(
@@ -9238,8 +9274,8 @@ export default function TaskPage(): React.JSX.Element {
                 <JiraIssueWorkspace
                   issue={selectedJiraIssue}
                   onUse={handleUseJiraItem}
-                  onClose={() => setSelectedJiraIssue(null)}
-                  sourceContext={jiraTaskSourceContext}
+                  onClose={closeTaskDetailPage}
+                  sourceContext={jiraDetailSourceContext}
                 />
               </div>
             )

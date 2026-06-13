@@ -10,6 +10,7 @@ import type {
   ChangelogData,
   CustomPet,
   GitHubWorkItem,
+  JiraIssue,
   LinearIssue,
   PersistedTrustedOrcaHooks,
   PersistedUIState,
@@ -610,6 +611,8 @@ export type UISlice = {
     openGitLabSourceContext?: TaskSourceContext | null
     openLinearIssue?: LinearIssue
     openLinearSourceContext?: TaskSourceContext | null
+    openJiraIssue?: JiraIssue
+    openJiraSourceContext?: TaskSourceContext | null
   }
   taskResumeState: TaskResumeState | undefined
   setTaskResumeState: (updates: Partial<TaskResumeState>) => void
@@ -1097,6 +1100,9 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
     if (data.openLinearIssue) {
       get().recordFeatureInteraction?.('linear-tasks')
     }
+    if (data.openJiraIssue) {
+      get().recordFeatureInteraction?.('jira-tasks')
+    }
     // Why: record a Tasks visit in the shared back/forward history so the
     // titlebar Back/Forward buttons can return to Tasks. All task-source
     // variants (github/linear presets) collapse to a single 'tasks' entry;
@@ -1125,7 +1131,14 @@ export const createUISlice: StateCreator<AppState, [], [], UISlice> = (set, get)
               issue: data.openLinearIssue,
               sourceContext: data.openLinearSourceContext
             } as const)
-          : null
+          : data.openJiraIssue
+            ? ({
+                kind: 'task-detail',
+                source: 'jira',
+                issue: data.openJiraIssue,
+                sourceContext: data.openJiraSourceContext
+              } as const)
+            : null
     const currentEntry = get().worktreeNavHistory[get().worktreeNavHistoryIndex]
     const currentIsTaskStack =
       currentEntry === 'tasks' ||

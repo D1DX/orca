@@ -587,7 +587,9 @@ setWorktreeNavViewActivator((entry) => {
         openGitLabWorkItem: undefined,
         openGitLabSourceContext: undefined,
         openLinearIssue: undefined,
-        openLinearSourceContext: undefined
+        openLinearSourceContext: undefined,
+        openJiraIssue: undefined,
+        openJiraSourceContext: undefined
       }
     }))
     return
@@ -605,7 +607,9 @@ setWorktreeNavViewActivator((entry) => {
         openGitLabWorkItem: undefined,
         openGitLabSourceContext: undefined,
         openLinearIssue: undefined,
-        openLinearSourceContext: undefined
+        openLinearSourceContext: undefined,
+        openJiraIssue: undefined,
+        openJiraSourceContext: undefined
       }
     }))
     return
@@ -624,7 +628,29 @@ setWorktreeNavViewActivator((entry) => {
         openGitLabWorkItem: entry.workItem,
         openGitLabSourceContext: entry.sourceContext,
         openLinearIssue: undefined,
-        openLinearSourceContext: undefined
+        openLinearSourceContext: undefined,
+        openJiraIssue: undefined,
+        openJiraSourceContext: undefined
+      }
+    }))
+    return
+  }
+  if (entry.source === 'jira') {
+    useAppStore.setState((state) => ({
+      activeView: 'tasks',
+      githubTaskDrawerWorkItem: null,
+      taskPageData: {
+        ...state.taskPageData,
+        taskSource: 'jira',
+        openGitHubWorkItem: undefined,
+        openGitHubSourceContext: undefined,
+        openGitHubInitialTab: undefined,
+        openGitLabWorkItem: undefined,
+        openGitLabSourceContext: undefined,
+        openLinearIssue: undefined,
+        openLinearSourceContext: undefined,
+        openJiraIssue: entry.issue,
+        openJiraSourceContext: entry.sourceContext
       }
     }))
     return
@@ -641,7 +667,9 @@ setWorktreeNavViewActivator((entry) => {
       openGitLabWorkItem: undefined,
       openGitLabSourceContext: undefined,
       openLinearIssue: entry.issue,
-      openLinearSourceContext: entry.sourceContext
+      openLinearSourceContext: entry.sourceContext,
+      openJiraIssue: undefined,
+      openJiraSourceContext: undefined
     }
   }))
 })
