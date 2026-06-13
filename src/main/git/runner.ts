@@ -480,64 +480,32 @@ export function gitOptionalLocksDisabledEnv(
   }
 }
 
-// Why: a git subprocess that never exits (waiting on a credential/stdin
-// prompt, or a wedged NFS/network filesystem under the cwd) otherwise leaves
-// gitExecFileAsync pending forever. On the headless `serve` runtime these
-// read-path calls pile up and the whole runtime stops answering clients
-// (issue #5308). A generous ceiling kills a truly-hung process without
-// tripping on normal local git work.
-export const GIT_DEFAULT_TIMEOUT_MS = 60_000
-
-// Subcommands that legitimately run longer than the read-path ceiling — they
-// move data over the network or recurse into submodules/LFS. Capping these
-// would break large-repo clones/fetches, so they opt out of the default.
-const GIT_UNBOUNDED_SUBCOMMANDS = new Set([
-  'clone',
-  'fetch',
-  'pull',
-  'push',
-  'remote',
-  'submodule',
-  'lfs'
-])
-
-// Global flags that precede the subcommand: skip them (and their values, for
-// the ones that take an argument) to find the real subcommand.
-const GIT_GLOBAL_FLAGS_WITH_VALUE = new Set(['-c', '-C', '--git-dir', '--work-tree', '--namespace'])
-
-function findGitSubcommand(args: string[]): string | undefined {
-  for (let i = 0; i < args.length; i++) {
-    const arg = args[i]
-    if (GIT_GLOBAL_FLAGS_WITH_VALUE.has(arg)) {
-      i++ // skip the flag's value
-      continue
-    }
-    if (arg.startsWith('-')) {
-      continue // valueless global flag (e.g. --no-pager)
-    }
-    return arg
-  }
-  return undefined
-}
-
 /**
- * Resolve the effective timeout for a git invocation. An explicit caller
- * timeout (including an explicit 0 opt-out) always wins; otherwise read-path
- * commands get GIT_DEFAULT_TIMEOUT_MS and long-running network subcommands
- * stay unbounded.
+ * Force git to be non-interactive so it fails fast instead of blocking forever
+ * on a prompt. Without this, a git read-path call (status, worktree list, …)
+ * that hits an auth/credential prompt or an SSH host-key confirmation hangs on
+ * stdin with no terminal to answer it; on the headless `serve` runtime those
+ * stuck calls pile up and the runtime stops answering all clients (issue #5308).
+ *
+ * - GIT_TERMINAL_PROMPT=0: git refuses to prompt for credentials and errors out.
+ * - GIT_ASKPASS / SSH_ASKPASS='': disable any GUI/askpass credential helper that
+ *   would otherwise pop a prompt and block.
+ * - GIT_SSH_COMMAND BatchMode=yes: SSH fails instead of waiting on an
+ *   interactive password/host-key prompt. BatchMode does NOT change host trust
+ *   (an unknown host still errors, it just won't hang). Only added when the
+ *   caller hasn't set its own GIT_SSH_COMMAND.
  */
-export function resolveGitDefaultTimeoutMs(
-  args: string[],
-  explicitTimeout: number | undefined
-): number | undefined {
-  if (explicitTimeout !== undefined) {
-    return explicitTimeout
+export function nonInteractiveGitEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const next: NodeJS.ProcessEnv = {
+    ...env,
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_ASKPASS: env.GIT_ASKPASS ?? '',
+    SSH_ASKPASS: env.SSH_ASKPASS ?? ''
   }
-  const subcommand = findGitSubcommand(args)
-  if (subcommand && GIT_UNBOUNDED_SUBCOMMANDS.has(subcommand)) {
-    return undefined
+  if (!next.GIT_SSH_COMMAND) {
+    next.GIT_SSH_COMMAND = 'ssh -o BatchMode=yes'
   }
-  return GIT_DEFAULT_TIMEOUT_MS
+  return next
 }
 
 /**
@@ -560,8 +528,10 @@ export async function gitExecFileAsync(
         cwd: resolved.cwd,
         encoding: (options.encoding ?? 'utf-8') as BufferEncoding,
         maxBuffer: options.maxBuffer,
-        timeout: resolveGitDefaultTimeoutMs(args, options.timeout),
-        env: options.env
+        timeout: options.timeout,
+        // Why: never let a git read-path call block on an interactive prompt
+        // (issue #5308) — fail fast instead of hanging the runtime.
+        env: nonInteractiveGitEnv(options.env)
       })
       return { stdout: stdout as string, stderr: stderr as string }
     }

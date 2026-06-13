@@ -13,7 +13,7 @@ vi.mock('node:child_process', () => ({
   spawn: spawnMock
 }))
 
-import { commandExecFileAsync, gitExecFileAsync, GIT_DEFAULT_TIMEOUT_MS } from './runner'
+import { commandExecFileAsync, gitExecFileAsync } from './runner'
 
 type MockChildProcess = EventEmitter & {
   stdout: EventEmitter
@@ -211,48 +211,23 @@ describe('runner execFile timeout handling', () => {
     expect(child.kill).toHaveBeenCalled()
   })
 
-  // Issue #5308: a hung read-path git command (non-git folder on a wedged NFS
-  // mount, or git waiting on a credential prompt) with NO explicit timeout must
-  // still self-resolve at the default ceiling instead of hanging forever and
-  // wedging the serve runtime for all clients.
-  it('rejects a hung read-path git command at the default timeout when none is set', async () => {
+  // Issue #5308: git read-path calls must be forced non-interactive so a
+  // credential / SSH host-key prompt fails fast instead of blocking forever on
+  // stdin and wedging the serve runtime for all clients.
+  it('runs git non-interactively so a prompt fails fast instead of hanging', async () => {
     const child = createMockChildProcess(1234)
-    execFileMock.mockReturnValue(child)
-
-    const promise = gitExecFileAsync(['worktree', 'list', '--porcelain', '-z'], {
-      cwd: '/home5/Brian'
-    })
-    const rejection = expect(promise).rejects.toThrow('git timed out.')
-    await vi.advanceTimersByTimeAsync(GIT_DEFAULT_TIMEOUT_MS)
-
-    await rejection
-    expect(child.kill).toHaveBeenCalled()
-  })
-
-  // Long-running network subcommands opt out of the default ceiling so large
-  // clones/fetches aren't killed mid-transfer.
-  it('does not apply the default timeout to network subcommands', async () => {
-    const child = createMockChildProcess(1234)
-    let execCallback: ((err: Error | null, stdout: string, stderr: string) => void) | undefined
-    execFileMock.mockImplementation((_cmd, _args, _opts, cb) => {
-      execCallback = cb
+    let capturedEnv: NodeJS.ProcessEnv | undefined
+    execFileMock.mockImplementation((_cmd, _args, opts, cb) => {
+      capturedEnv = opts.env
+      cb(null, '', '')
       return child
     })
 
-    let settled = false
-    const promise = gitExecFileAsync(['fetch', '--prune'], { cwd: '/repo' })
-      .catch(() => undefined)
-      .finally(() => {
-        settled = true
-      })
-    // Advance well past the read-path ceiling; fetch must still be running.
-    await vi.advanceTimersByTimeAsync(GIT_DEFAULT_TIMEOUT_MS * 5)
-    expect(settled).toBe(false)
-    expect(child.kill).not.toHaveBeenCalled()
+    await gitExecFileAsync(['worktree', 'list', '--porcelain', '-z'], { cwd: '/home5/Brian' })
 
-    // Let the fetch "finish" so the test doesn't leak a pending promise.
-    execCallback?.(null, '', '')
-    await promise
-    expect(settled).toBe(true)
+    expect(capturedEnv?.GIT_TERMINAL_PROMPT).toBe('0')
+    expect(capturedEnv?.GIT_ASKPASS).toBe('')
+    expect(capturedEnv?.SSH_ASKPASS).toBe('')
+    expect(capturedEnv?.GIT_SSH_COMMAND).toContain('BatchMode=yes')
   })
 })
