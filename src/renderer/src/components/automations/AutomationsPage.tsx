@@ -276,6 +276,7 @@ export default function AutomationsPage(): React.JSX.Element {
   const agentStatusByPaneKey = useAppStore((s) => s.agentStatusByPaneKey)
   const retainedAgentsByPaneKey = useAppStore((s) => s.retainedAgentsByPaneKey)
   const sshConnectionStates = useAppStore((s) => s.sshConnectionStates)
+  const runtimeStatusByEnvironmentId = useAppStore((s) => s.runtimeStatusByEnvironmentId)
   const settings = useAppStore((s) => s.settings)
   const selectedId = useAppStore((s) => s.selectedAutomationId)
   const setSelectedId = useAppStore((s) => s.setSelectedAutomationId)
@@ -498,7 +499,8 @@ export default function AutomationsPage(): React.JSX.Element {
         repo: selectedRepo,
         workspace: selectedWorktree,
         projectHostSetups,
-        sshConnectionStates
+        sshConnectionStates,
+        runtimeStatusByEnvironmentId
       })
     : null
   const canSaveDraft =
@@ -1250,7 +1252,8 @@ export default function AutomationsPage(): React.JSX.Element {
       repo,
       workspace,
       projectHostSetups,
-      sshConnectionStates
+      sshConnectionStates,
+      runtimeStatusByEnvironmentId
     })
     if (!availability.canRunNow) {
       toast.error(availability.message)
@@ -1833,7 +1836,8 @@ export default function AutomationsPage(): React.JSX.Element {
                 repo: automationRepo,
                 workspace: automationWorktree,
                 projectHostSetups,
-                sshConnectionStates
+                sshConnectionStates,
+                runtimeStatusByEnvironmentId
               })
               const workspaceLabel =
                 automation.workspaceMode === 'new_per_run'

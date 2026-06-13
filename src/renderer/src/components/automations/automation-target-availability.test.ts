@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Automation } from '../../../../shared/automations-types'
+import type { RuntimeStatus } from '../../../../shared/runtime-types'
 import type { ProjectHostSetup, Repo, Worktree } from '../../../../shared/types'
 import { getAutomationTargetAvailability } from './automation-target-availability'
 
@@ -65,6 +66,20 @@ function makeProjectHostSetup(overrides: Partial<ProjectHostSetup> = {}): Projec
     setupMethod: 'legacy-repo',
     createdAt: 1,
     updatedAt: 1,
+    ...overrides
+  }
+}
+
+function makeRuntimeStatus(overrides: Partial<RuntimeStatus> = {}): RuntimeStatus {
+  return {
+    runtimeId: 'runtime-1',
+    rendererGraphEpoch: 1,
+    graphStatus: 'ready',
+    authoritativeWindowId: null,
+    liveTabCount: 0,
+    liveLeafCount: 0,
+    runtimeProtocolVersion: 3,
+    minCompatibleRuntimeClientVersion: 2,
     ...overrides
   }
 }
@@ -239,5 +254,65 @@ describe('automation target availability', () => {
         sshConnectionStates: new Map([['devbox', { status: 'reconnecting' }]])
       }).reason
     ).toBe('ssh-connecting')
+  })
+
+  it('explains runtime-host automation availability before the unsupported manual-run fallback', () => {
+    const automation = makeAutomation({
+      runContext: {
+        kind: 'workspace-run',
+        projectId: 'project-1',
+        hostId: 'runtime:env-1',
+        projectHostSetupId: 'setup-1',
+        repoId: 'repo-1',
+        path: '/repo'
+      }
+    })
+    const repo = makeRepo({ executionHostId: 'runtime:env-1' })
+    const setup = makeProjectHostSetup({
+      hostId: 'runtime:env-1',
+      executionHostId: 'runtime:env-1'
+    })
+    const base = {
+      automation,
+      repo,
+      workspace: makeWorkspace(),
+      projectHostSetups: [setup],
+      sshConnectionStates: new Map()
+    }
+
+    expect(getAutomationTargetAvailability(base).reason).toBe('runtime-checking')
+    expect(
+      getAutomationTargetAvailability({
+        ...base,
+        runtimeStatusByEnvironmentId: new Map([['env-1', { status: null, checkedAt: 1 }]])
+      }).reason
+    ).toBe('runtime-unavailable')
+    expect(
+      getAutomationTargetAvailability({
+        ...base,
+        runtimeStatusByEnvironmentId: new Map([
+          ['env-1', { status: makeRuntimeStatus({ graphStatus: 'unavailable' }), checkedAt: 1 }]
+        ])
+      }).message
+    ).toBe('The selected remote server is not ready to run automations yet.')
+    expect(
+      getAutomationTargetAvailability({
+        ...base,
+        runtimeStatusByEnvironmentId: new Map([
+          ['env-1', { status: makeRuntimeStatus({ runtimeProtocolVersion: 0 }), checkedAt: 1 }]
+        ])
+      }).reason
+    ).toBe('runtime-update-required')
+    expect(
+      getAutomationTargetAvailability({
+        ...base,
+        runtimeStatusByEnvironmentId: new Map([
+          ['env-1', { status: makeRuntimeStatus(), checkedAt: 1 }]
+        ])
+      })
+    ).toMatchObject({
+      reason: 'unsupported-host',
+      message: 'Manual runs for remote-server automations are not available from this client yet.'
+    })
   })
 })

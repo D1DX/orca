@@ -1,6 +1,15 @@
 import type { Automation } from '../../../../shared/automations-types'
 import { getRepoExecutionHostId, parseExecutionHostId } from '../../../../shared/execution-host'
+import {
+  describeRuntimeCompatBlock,
+  evaluateRuntimeCompat
+} from '../../../../shared/protocol-compat'
+import {
+  MIN_COMPATIBLE_RUNTIME_SERVER_VERSION,
+  RUNTIME_PROTOCOL_VERSION
+} from '../../../../shared/protocol-version'
 import type { SshConnectionState } from '../../../../shared/ssh-types'
+import type { RuntimeStatus } from '../../../../shared/runtime-types'
 import type { ProjectHostSetup, Repo, Worktree } from '../../../../shared/types'
 
 export type AutomationTargetAvailability =
@@ -18,6 +27,9 @@ export type AutomationTargetAvailability =
         | 'missing-workspace'
         | 'host-mismatch'
         | 'unsupported-host'
+        | 'runtime-checking'
+        | 'runtime-unavailable'
+        | 'runtime-update-required'
         | 'ssh-auth-needed'
         | 'ssh-unavailable'
         | 'ssh-connecting'
@@ -30,6 +42,10 @@ type AutomationTargetAvailabilityArgs = {
   workspace: Worktree | null | undefined
   projectHostSetups: readonly ProjectHostSetup[]
   sshConnectionStates: ReadonlyMap<string, Pick<SshConnectionState, 'status'>>
+  runtimeStatusByEnvironmentId?: ReadonlyMap<
+    string,
+    { status: RuntimeStatus | null; checkedAt: number }
+  >
 }
 
 export function getAutomationTargetAvailability({
@@ -37,7 +53,8 @@ export function getAutomationTargetAvailability({
   repo,
   workspace,
   projectHostSetups,
-  sshConnectionStates
+  sshConnectionStates,
+  runtimeStatusByEnvironmentId
 }: AutomationTargetAvailabilityArgs): AutomationTargetAvailability {
   if (!repo) {
     return unavailable('missing-project', 'The target project is no longer available.')
@@ -45,10 +62,13 @@ export function getAutomationTargetAvailability({
   if (automation.runContext) {
     const parsedHost = parseExecutionHostId(automation.runContext.hostId)
     if (parsedHost?.kind === 'runtime') {
-      return unavailable(
-        'unsupported-host',
-        'This automation targets a remote server that this client cannot run manually yet.'
+      const runtimeAvailability = getRuntimeAutomationAvailability(
+        parsedHost.environmentId,
+        runtimeStatusByEnvironmentId
       )
+      if (!runtimeAvailability.canRunNow) {
+        return runtimeAvailability
+      }
     }
     const setup = projectHostSetups.find(
       (candidate) => candidate.id === automation.runContext?.projectHostSetupId
@@ -104,6 +124,47 @@ export function getAutomationTargetAvailability({
     case 'error':
       return unavailable('ssh-unavailable', 'Connect this SSH host before running manually.')
   }
+}
+
+function getRuntimeAutomationAvailability(
+  environmentId: string,
+  runtimeStatusByEnvironmentId:
+    | ReadonlyMap<string, { status: RuntimeStatus | null; checkedAt: number }>
+    | undefined
+): AutomationTargetAvailability {
+  const entry = runtimeStatusByEnvironmentId?.get(environmentId)
+  if (!entry) {
+    return unavailable(
+      'runtime-checking',
+      'Checking the selected remote server before running manually.'
+    )
+  }
+  if (!entry.status) {
+    return unavailable(
+      'runtime-unavailable',
+      'Reconnect this remote server before running manually.'
+    )
+  }
+  if (entry.status.graphStatus !== 'ready') {
+    return unavailable(
+      'runtime-unavailable',
+      'The selected remote server is not ready to run automations yet.'
+    )
+  }
+  const compat = evaluateRuntimeCompat({
+    clientProtocolVersion: RUNTIME_PROTOCOL_VERSION,
+    minCompatibleServerProtocolVersion: MIN_COMPATIBLE_RUNTIME_SERVER_VERSION,
+    serverProtocolVersion: entry.status.runtimeProtocolVersion ?? entry.status.protocolVersion,
+    serverMinCompatibleClientProtocolVersion:
+      entry.status.minCompatibleRuntimeClientVersion ?? entry.status.minCompatibleMobileVersion
+  })
+  if (compat.kind === 'blocked') {
+    return unavailable('runtime-update-required', describeRuntimeCompatBlock(compat))
+  }
+  return unavailable(
+    'unsupported-host',
+    'Manual runs for remote-server automations are not available from this client yet.'
+  )
 }
 
 function getAutomationSshTargetId(automation: Automation, repo: Repo): string | null {
