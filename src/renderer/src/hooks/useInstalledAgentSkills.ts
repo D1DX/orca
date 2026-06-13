@@ -220,6 +220,7 @@ export function useInstalledAgentSkill(
     const nextCachedDiscovery = cachedDiscoveryByTarget.get(discoveryTargetKey) ?? null
     setResult(nextCachedDiscovery)
     setLoading(enabled && !nextCachedDiscovery)
+    setError(null)
   }, [discoveryTargetKey, enabled])
 
   useEffect(() => {

@@ -122,16 +122,23 @@ export function LinearAgentSkillSetupPrompt({
     setSessionSnoozed(sessionSnoozedRuntimeKeys.has(localDismissStorageKey))
   }, [localDismissStorageKey])
 
-  const refreshCliStatus = useCallback(async (): Promise<void> => {
-    const requestIdentity = setupCheckIdentity
-    const requestGeneration = ++cliRefreshGenerationRef.current
-    const writeIfCurrent = (write: () => void): void => {
+  const writeCliStatusIfCurrent = useCallback(
+    (requestIdentity: string, requestGeneration: number, write: () => void): void => {
       if (
         requestGeneration === cliRefreshGenerationRef.current &&
         currentSetupCheckIdentityRef.current === requestIdentity
       ) {
         write()
       }
+    },
+    []
+  )
+
+  const refreshCliStatus = useCallback(async (): Promise<void> => {
+    const requestIdentity = setupCheckIdentity
+    const requestGeneration = ++cliRefreshGenerationRef.current
+    const writeIfCurrent = (write: () => void): void => {
+      writeCliStatusIfCurrent(requestIdentity, requestGeneration, write)
     }
 
     if (!linked) {
@@ -152,7 +159,7 @@ export function LinearAgentSkillSetupPrompt({
     } finally {
       writeIfCurrent(() => setCliLoading(false))
     }
-  }, [agentRuntime, linked, setupCheckIdentity])
+  }, [agentRuntime, linked, setupCheckIdentity, writeCliStatusIfCurrent])
 
   useEffect(() => {
     void refreshCliStatus()
@@ -272,14 +279,21 @@ export function LinearAgentSkillSetupPrompt({
           : undefined
       }
       onBeforeOpenTerminal={async () => {
+        const requestIdentity = setupCheckIdentity
+        const requestGeneration = ++cliRefreshGenerationRef.current
+        const writeIfCurrent = (write: () => void): void => {
+          writeCliStatusIfCurrent(requestIdentity, requestGeneration, write)
+        }
         const nextStatus =
           agentRuntime.runtime === 'wsl'
             ? await ensureWslCliAvailableForAgentSkillTerminal(agentRuntime)
             : await ensureOrcaCliAvailableForAgentSkillTerminal({
-                onStatusChange: setCliStatus
+                onStatusChange: (nextCliStatus) => {
+                  writeIfCurrent(() => setCliStatus(nextCliStatus))
+                }
               })
         if (agentRuntime.runtime === 'wsl') {
-          setCliStatus(nextStatus)
+          writeIfCurrent(() => setCliStatus(nextStatus))
         }
       }}
       onRecheck={async () => {

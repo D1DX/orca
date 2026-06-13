@@ -637,6 +637,49 @@ describe('LinearAgentSkillSetupPrompt', () => {
     expect(document.body.textContent).not.toContain('Linear ticket access is ready')
   })
 
+  it('ignores stale prerequisite CLI status callbacks after the runtime context changes', async () => {
+    let reportHostCliStatus: ((status: CliInstallStatus) => void) | null = null
+    mocks.ensureCli.mockImplementationOnce(
+      async (options?: { onStatusChange?: (status: CliInstallStatus) => void }) => {
+        reportHostCliStatus = options?.onStatusChange ?? null
+        return null
+      }
+    )
+    await renderPrompt({ linked: true, remote: false, surface: 'modal' })
+
+    await act(async () => {
+      findBodyButton('Mock install')?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+
+    mocks.getWslCliStatus.mockResolvedValue(
+      cliStatus({ state: 'not_installed', pathConfigured: false })
+    )
+    mocks.skillState.installed = true
+    await updatePrompt({
+      linked: true,
+      remote: false,
+      surface: 'modal',
+      currentPlatform: 'win32',
+      settings: {
+        localAgentRuntime: 'wsl',
+        localAgentWslDistro: 'Fedora',
+        terminalWindowsShell: 'wsl.exe',
+        activeRuntimeEnvironmentId: null
+      }
+    })
+
+    await act(async () => {
+      reportHostCliStatus?.(cliStatus({}))
+    })
+    await settleRender()
+
+    expect(document.body.textContent).toContain(
+      'Enable agents to read and edit the attached Linear ticket.'
+    )
+    expect(document.body.textContent).toContain('Orca CLI is missing.')
+    expect(document.body.textContent).not.toContain('Linear ticket access is ready')
+  })
+
   it('ignores older same-context CLI refreshes that finish after a newer Re-check', async () => {
     const rendered = await renderPrompt({ linked: true, remote: false })
     const recheckButton = Array.from(rendered.querySelectorAll('button')).find(
