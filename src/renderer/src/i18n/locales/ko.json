@@ -3958,15 +3958,12 @@
           "install": "CLI 및 스킬 설치",
           "wslCopy": "연결된 Linear 작업에서 WSL agent 인계를 위해 설치합니다.",
           "wslLabel": "WSL 기본값",
-          "openSetup": "Linear 액세스 설정",
           "toastMissingCliAndSkill": "Orca CLI와 Linear 스킬이 없습니다",
           "toastMissingCli": "Orca CLI가 없습니다",
           "toastMissingSkill": "Linear 스킬이 없습니다",
-          "toastInstallCliAndSkillDescription": "Orca CLI와 Linear 스킬을 설치하여 agents가 Linear 작업을 읽고 편집할 수 있게 하세요.",
-          "toastInstallCliDescription": "Orca CLI를 설치하여 agents가 Linear 작업을 읽고 편집할 수 있게 하세요.",
-          "toastInstallSkillDescription": "Linear 스킬을 설치하여 agents가 Orca CLI를 통해 Linear 작업을 읽고 편집할 수 있게 하세요.",
-          "toastRemoteDescription": "{{value0}} 원격 agent 환경에는 자체 설정이 필요할 수 있습니다.",
-          "toastWslDescription": "{{value0}} 이 설정은 선택한 WSL agent 런타임에서 실행됩니다."
+          "toastLinkedTaskDescription": "연결된 Linear 작업에 필요합니다.",
+          "toastRemoteDescription": "{{value0}} 원격 환경에도 설정이 필요할 수 있습니다.",
+          "toastWslDescription": "{{value0}} 이 설정은 선택한 WSL 런타임에서 실행됩니다."
         },
         "FolderWorkspaceComposerDialog": {
           "connectFailed": "프로젝트에 연결하지 못했습니다.",

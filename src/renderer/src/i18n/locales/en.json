@@ -3958,15 +3958,12 @@
           "install": "Install CLI & Skill",
           "wslCopy": "Install it for WSL agent handoffs from linked Linear work.",
           "wslLabel": "WSL default",
-          "openSetup": "Set up Linear access",
           "toastMissingCliAndSkill": "Orca CLI and Linear skill are missing",
           "toastMissingCli": "Orca CLI is missing",
           "toastMissingSkill": "Linear skill is missing",
-          "toastInstallCliAndSkillDescription": "Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks.",
-          "toastInstallCliDescription": "Install the Orca CLI to enable your agents to read and edit Linear tasks.",
-          "toastInstallSkillDescription": "Install the Linear skill to enable your agents to read and edit Linear tasks through the Orca CLI.",
-          "toastRemoteDescription": "{{value0}} Remote agent environments may need their own setup.",
-          "toastWslDescription": "{{value0}} This setup runs in the selected WSL agent runtime."
+          "toastLinkedTaskDescription": "Needed for linked Linear tasks.",
+          "toastRemoteDescription": "{{value0}} Remote environments may need setup too.",
+          "toastWslDescription": "{{value0}} This setup runs in the selected WSL runtime."
         },
         "FolderWorkspaceComposerDialog": {
           "connectFailed": "Failed to connect to project.",

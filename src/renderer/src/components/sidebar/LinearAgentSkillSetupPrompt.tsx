@@ -44,7 +44,6 @@ import {
   getLinearAgentSkillSetupToastTitle,
   getLinearAgentSkillSetupToastDescription
 } from './linear-agent-skill-setup-copy'
-import { LinearAgentSkillSetupReminderToastBody } from './linear-agent-skill-setup-reminder-toast-body'
 import {
   getCurrentPlatform,
   getLinearPromptAgentRuntime,
@@ -184,12 +183,7 @@ export function LinearAgentSkillSetupPrompt({
 
   const toastTitle = getLinearAgentSkillSetupToastTitle(cliAvailable, skill.installed)
 
-  const toastDescription = getLinearAgentSkillSetupToastDescription(
-    cliAvailable,
-    skill.installed,
-    remote,
-    agentRuntime
-  )
+  const toastDescription = getLinearAgentSkillSetupToastDescription(remote, agentRuntime)
 
   useEffect(() => {
     if (surface !== 'modal' || !missingSetup || setupDialogOpen) {
@@ -215,12 +209,11 @@ export function LinearAgentSkillSetupPrompt({
     }
     state.activeToastId = toast.warning(toastTitle, {
       id: toastId,
-      description: (
-        <LinearAgentSkillSetupReminderToastBody
-          description={toastDescription}
-          onOpen={openSetupFromToast}
-        />
-      )
+      description: toastDescription,
+      action: {
+        label: translate('auto.components.sidebar.LinearAgentSkillSetupPrompt.setup', 'Set up'),
+        onClick: openSetupFromToast
+      }
     })
   }, [localDismissStorageKey, missingSetup, setupDialogOpen, surface, toastDescription, toastTitle])
 

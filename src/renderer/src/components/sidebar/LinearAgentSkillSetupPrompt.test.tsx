@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act, isValidElement, type ComponentProps, type ReactNode } from 'react'
+import { act, type ComponentProps, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { toast } from 'sonner'
 import type { CliInstallStatus } from '../../../../shared/cli-install-types'
@@ -137,14 +137,9 @@ async function clickBodyButton(label: string): Promise<void> {
   })
 }
 
-type ReminderToastDescriptionProps = {
-  description?: string
-  onOpen?: () => void
-}
-
-function getLastReminderToastDescriptionProps(): ReminderToastDescriptionProps {
-  const description = vi.mocked(toast.warning).mock.calls.at(-1)?.[1]?.description
-  return isValidElement(description) ? (description.props as ReminderToastDescriptionProps) : {}
+type ReminderToastAction = {
+  label?: string
+  onClick?: () => void
 }
 
 describe('LinearAgentSkillSetupPrompt', () => {
@@ -425,14 +420,13 @@ describe('LinearAgentSkillSetupPrompt', () => {
       'Orca CLI and Linear skill are missing',
       expect.objectContaining({
         id: 'linear-agent-skill-setup-orca.linearTicketsSkill.setupDismissed.host',
-        description: expect.anything()
+        description: 'Needed for linked Linear tasks.',
+        action: {
+          label: 'Set up',
+          onClick: expect.any(Function)
+        }
       })
     )
-    expect(getLastReminderToastDescriptionProps().description).toBe(
-      'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks.'
-    )
-    expect(getLastReminderToastDescriptionProps().onOpen).toEqual(expect.any(Function))
-    expect(vi.mocked(toast.warning).mock.calls.at(-1)?.[1]?.action).toBeUndefined()
   })
 
   it('treats closing the modal-only dialog as a casual dismissal', async () => {
@@ -452,11 +446,8 @@ describe('LinearAgentSkillSetupPrompt', () => {
       'Orca CLI and Linear skill are missing',
       expect.objectContaining({
         id: 'linear-agent-skill-setup-orca.linearTicketsSkill.setupDismissed.host',
-        description: expect.anything()
+        description: 'Needed for linked Linear tasks.'
       })
-    )
-    expect(getLastReminderToastDescriptionProps().description).toBe(
-      'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks.'
     )
   })
 
@@ -470,11 +461,8 @@ describe('LinearAgentSkillSetupPrompt', () => {
     expect(toast.warning).toHaveBeenCalledWith(
       'Orca CLI is missing',
       expect.objectContaining({
-        description: expect.anything()
+        description: 'Needed for linked Linear tasks.'
       })
-    )
-    expect(getLastReminderToastDescriptionProps().description).toBe(
-      'Install the Orca CLI to enable your agents to read and edit Linear tasks.'
     )
   })
 
@@ -487,11 +475,8 @@ describe('LinearAgentSkillSetupPrompt', () => {
     expect(toast.warning).toHaveBeenCalledWith(
       'Orca CLI and Linear skill are missing',
       expect.objectContaining({
-        description: expect.anything()
+        description: 'Needed for linked Linear tasks. Remote environments may need setup too.'
       })
-    )
-    expect(getLastReminderToastDescriptionProps().description).toBe(
-      'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks. Remote agent environments may need their own setup.'
     )
   })
 
@@ -522,11 +507,8 @@ describe('LinearAgentSkillSetupPrompt', () => {
     expect(toast.warning).toHaveBeenCalledWith(
       'Orca CLI and Linear skill are missing',
       expect.objectContaining({
-        description: expect.anything()
+        description: 'Needed for linked Linear tasks. This setup runs in the selected WSL runtime.'
       })
-    )
-    expect(getLastReminderToastDescriptionProps().description).toBe(
-      'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks. This setup runs in the selected WSL agent runtime.'
     )
   })
 
@@ -564,9 +546,11 @@ describe('LinearAgentSkillSetupPrompt', () => {
     await unmountPrompt()
     await renderPrompt({ linked: true, remote: false, surface: 'modal' })
 
-    const onOpen = getLastReminderToastDescriptionProps().onOpen
+    const action = vi.mocked(toast.warning).mock.calls.at(-1)?.[1]?.action as
+      | ReminderToastAction
+      | undefined
     await act(async () => {
-      onOpen?.()
+      action?.onClick?.()
     })
 
     expect(document.body.textContent).toContain(
@@ -584,9 +568,11 @@ describe('LinearAgentSkillSetupPrompt', () => {
     await unmountPrompt()
     await renderPrompt({ linked: true, remote: false, surface: 'modal' })
 
-    const onOpen = getLastReminderToastDescriptionProps().onOpen
+    const action = vi.mocked(toast.warning).mock.calls.at(-1)?.[1]?.action as
+      | ReminderToastAction
+      | undefined
     await act(async () => {
-      onOpen?.()
+      action?.onClick?.()
     })
     expect(toast.dismiss).toHaveBeenCalledWith(
       'linear-agent-skill-setup-orca.linearTicketsSkill.setupDismissed.host'
@@ -655,11 +641,8 @@ describe('LinearAgentSkillSetupPrompt', () => {
       'Orca CLI and Linear skill are missing',
       expect.objectContaining({
         id: 'linear-agent-skill-setup-orca.linearTicketsSkill.setupDismissed.host',
-        description: expect.anything()
+        description: 'Needed for linked Linear tasks.'
       })
-    )
-    expect(getLastReminderToastDescriptionProps().description).toBe(
-      'Install the Orca CLI and the Linear skill to enable your agents to read and edit Linear tasks.'
     )
   })
 })
