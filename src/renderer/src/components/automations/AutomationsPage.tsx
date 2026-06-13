@@ -54,12 +54,12 @@ import type {
   AutomationUpdateInput
 } from '../../../../shared/automations-types'
 import { getAutomationRunRepoId } from '../../../../shared/automation-run-identity'
-import { parseExecutionHostId } from '../../../../shared/execution-host'
+import { getRepoExecutionHostId, parseExecutionHostId } from '../../../../shared/execution-host'
 import { TASK_SOURCE_CONTEXT_RUNTIME_CAPABILITY } from '../../../../shared/protocol-version'
 import type { PreflightStatus } from '../../../../preload/api-types'
 import type { RuntimeStatus } from '../../../../shared/runtime-types'
 import type { TaskSourceContext } from '../../../../shared/task-source-context'
-import type { Worktree } from '../../../../shared/types'
+import type { Repo, Worktree } from '../../../../shared/types'
 import { getWorktreePathBasenameFromId } from '../../../../shared/worktree-id'
 import {
   buildAutomationCronSchedule,
@@ -335,6 +335,7 @@ export default function AutomationsPage(): React.JSX.Element {
   const agentStatusByPaneKey = useAppStore((s) => s.agentStatusByPaneKey)
   const retainedAgentsByPaneKey = useAppStore((s) => s.retainedAgentsByPaneKey)
   const sshConnectionStates = useAppStore((s) => s.sshConnectionStates)
+  const sshTargetLabels = useAppStore((s) => s.sshTargetLabels)
   const runtimeStatusByEnvironmentId = useAppStore((s) => s.runtimeStatusByEnvironmentId)
   const settings = useAppStore((s) => s.settings)
   const preflightStatus = useAppStore((s) => s.preflightStatus)
@@ -727,6 +728,21 @@ export default function AutomationsPage(): React.JSX.Element {
           isConnectingOverride: isSelectedExternalSshConnecting
         })
       : null
+
+  const getAutomationRepoHostLabel = useCallback(
+    (repo: Repo): string => {
+      const hostId = getRepoExecutionHostId(repo)
+      const parsed = parseExecutionHostId(hostId)
+      if (parsed?.kind === 'ssh') {
+        return sshTargetLabels.get(parsed.targetId) ?? parsed.targetId
+      }
+      if (parsed?.kind === 'runtime') {
+        return parsed.environmentId
+      }
+      return 'Local Mac'
+    },
+    [sshTargetLabels]
+  )
 
   useEffect(() => {
     if ((!selected || selectedExternal) && activePaneTab === 'runs') {
@@ -1838,6 +1854,7 @@ export default function AutomationsPage(): React.JSX.Element {
         settings={settings}
         draft={draft}
         onProjectChange={handleProjectChange}
+        getRepoHostLabel={getAutomationRepoHostLabel}
         onCreateTargetChange={handleCreateTargetChange}
         onOpenChange={setCreateOpen}
         onDraftChange={setDraft}
