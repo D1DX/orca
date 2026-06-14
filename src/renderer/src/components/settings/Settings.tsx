@@ -89,33 +89,44 @@ import { translate } from '@/i18n/i18n'
 const SETTINGS_NAV_GROUPS = [
   {
     id: 'capabilities',
-    title: translate('auto.components.settings.Settings.23c6874fdf', 'AI Capabilities')
+    titleKey: 'auto.components.settings.Settings.23c6874fdf',
+    titleDefault: 'AI Capabilities'
   },
-  { id: 'setup', title: translate('auto.components.settings.Settings.9abb9be3bc', 'Set Up') },
+  { id: 'setup', titleKey: 'auto.components.settings.Settings.9abb9be3bc', titleDefault: 'Set Up' },
   {
     id: 'workflows',
-    title: translate('auto.components.settings.Settings.e1578cd4bc', 'Workflows')
+    titleKey: 'auto.components.settings.Settings.e1578cd4bc',
+    titleDefault: 'Workflows'
   },
   {
     id: 'interface',
-    title: translate('auto.components.settings.Settings.8bd117d669', 'Interface')
+    titleKey: 'auto.components.settings.Settings.8bd117d669',
+    titleDefault: 'Interface'
   },
   {
     id: 'remote',
-    title: translate('auto.components.settings.Settings.23931df7e8', 'Remote Hosts')
+    titleKey: 'auto.components.settings.Settings.23931df7e8',
+    titleDefault: 'Remote Hosts'
   },
   {
     id: 'mobile',
-    title: translate('auto.components.settings.Settings.mobile_group', 'Mobile')
+    titleKey: 'auto.components.settings.Settings.mobile_group',
+    titleDefault: 'Mobile'
   },
   {
     id: 'security',
-    title: translate('auto.components.settings.Settings.084d8fac5b', 'Privacy & Security')
+    titleKey: 'auto.components.settings.Settings.084d8fac5b',
+    titleDefault: 'Privacy & Security'
   },
-  { id: 'advanced', title: translate('auto.components.settings.Settings.1c87f8d024', 'Advanced') },
+  {
+    id: 'advanced',
+    titleKey: 'auto.components.settings.Settings.1c87f8d024',
+    titleDefault: 'Advanced'
+  },
   {
     id: 'experimental',
-    title: translate('auto.components.settings.Settings.8b017f2506', 'Experimental')
+    titleKey: 'auto.components.settings.Settings.8b017f2506',
+    titleDefault: 'Experimental'
   }
 ] as const
 
@@ -901,7 +912,8 @@ function Settings(): React.JSX.Element {
 
   const generalNavSections = visibleNavSections.filter((section) => !section.id.startsWith('repo-'))
   const generalNavGroups: SettingsNavGroup[] = SETTINGS_NAV_GROUPS.map((group) => ({
-    ...group,
+    id: group.id,
+    title: translate(group.titleKey, group.titleDefault),
     sections: generalNavSections.filter((section) => section.group === group.id)
   })).filter((group) => group.sections.length > 0 || group.id === 'setup')
   const repoNavSections = visibleNavSections

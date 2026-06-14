@@ -2931,6 +2931,15 @@ export class OrcaRuntimeService {
                 candidate.isActive
             )
       const targetTab = activeSibling ?? tab
+      if (!this.notifier?.focusTerminal) {
+        if (
+          !targetTab.isActive &&
+          this.shouldPersistHeadlessMobileSessionActivation(snapshot!, targetTab)
+        ) {
+          this.activateHeadlessMobileSessionTerminalTab(worktreeId, snapshot!, targetTab)
+        }
+        return this.getMobileSessionTabsForWorktree(worktreeId)
+      }
       this.notifier?.focusTerminal(targetTab.parentTabId, worktreeId, targetTab.leafId)
     } else if (tab.type === 'browser') {
       // Why: browser mobile tabs are renderer-owned unified tabs; focusing the
@@ -2950,6 +2959,79 @@ export class OrcaRuntimeService {
       this.isHeadlessMobileSessionPublication(snapshot.publicationEpoch) ||
       this.hasServeOwnedPtyBinding(tab)
     )
+  }
+
+  private shouldPersistHeadlessMobileSessionActivation(
+    snapshot: RuntimeMobileSessionTabsSnapshot,
+    tab: RuntimeMobileSessionTerminalTab
+  ): boolean {
+    if (snapshot.publicationEpoch.includes(':headless-merge:')) {
+      return false
+    }
+    if (this.authoritativeWindowId !== null && this.graphStatus === 'ready') {
+      return false
+    }
+    return this.shouldMaterializeHeadlessMobileSessionTab(snapshot, tab)
+  }
+
+  private activateHeadlessMobileSessionTerminalTab(
+    worktreeId: string,
+    snapshot: RuntimeMobileSessionTabsSnapshot,
+    activeTab: RuntimeMobileSessionTerminalTab
+  ): void {
+    const tabs = snapshot.tabs.map((candidate) => ({
+      ...candidate,
+      isActive: candidate.id === activeTab.id
+    }))
+    const terminalTabs = tabs.filter(
+      (candidate): candidate is RuntimeMobileSessionTerminalTab => candidate.type === 'terminal'
+    )
+    const nextSnapshot: RuntimeMobileSessionTabsSnapshot = {
+      ...snapshot,
+      publicationEpoch: `headless:${Date.now().toString(36)}`,
+      snapshotVersion: snapshot.snapshotVersion + 1,
+      activeTabId: activeTab.id,
+      activeTabType: 'terminal',
+      tabGroups: this.buildHeadlessMobileSessionTabGroups(
+        worktreeId,
+        terminalTabs,
+        activeTab,
+        snapshot.tabGroups
+      ),
+      tabs
+    }
+    this.persistHeadlessTerminalActiveLeaf(worktreeId, activeTab)
+    this.mobileSessionTabsByWorktree.set(worktreeId, nextSnapshot)
+    this.emitMobileSessionTabsSnapshot(nextSnapshot)
+  }
+
+  private persistHeadlessTerminalActiveLeaf(
+    worktreeId: string,
+    tab: RuntimeMobileSessionTerminalTab
+  ): void {
+    const session = this.store?.getWorkspaceSession?.()
+    if (!session || !this.store?.setWorkspaceSession) {
+      return
+    }
+    const existingLayout = session.terminalLayoutsByTabId?.[tab.parentTabId]
+    const nextLayouts = existingLayout
+      ? {
+          ...session.terminalLayoutsByTabId,
+          [tab.parentTabId]: {
+            ...this.cloneTerminalLayoutSnapshot(existingLayout),
+            activeLeafId: tab.leafId
+          }
+        }
+      : session.terminalLayoutsByTabId
+    this.store.setWorkspaceSession({
+      ...session,
+      activeTabId: tab.parentTabId,
+      activeTabIdByWorktree: {
+        ...session.activeTabIdByWorktree,
+        [worktreeId]: tab.parentTabId
+      },
+      terminalLayoutsByTabId: nextLayouts
+    })
   }
 
   async closeMobileSessionTab(worktreeSelector: string, tabId: string): Promise<{ closed: true }> {

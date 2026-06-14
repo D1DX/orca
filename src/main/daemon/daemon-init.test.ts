@@ -1032,9 +1032,9 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
     probeSocketExistsMock.mockImplementation(
       (p?: string) => p === '/fake/app/out/main/daemon-entry.js'
     )
-    checkDaemonHealthMock.mockResolvedValueOnce('unhealthy')
     const mod = await importFresh()
     getAppPathMock.mockReturnValue('/fake/app/out/main')
+    healthCheckDaemonMock.mockResolvedValue(false)
     await mod.initDaemonPtyProvider()
 
     const launcher = spawnerInstances[0].launcher as (
@@ -1075,8 +1075,8 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
   })
 
   it('removes detached daemon startup listeners after readiness', async () => {
-    checkDaemonHealthMock.mockResolvedValueOnce('unhealthy')
     const mod = await importFresh()
+    healthCheckDaemonMock.mockResolvedValue(false)
     await mod.initDaemonPtyProvider()
 
     const launcher = spawnerInstances[0].launcher as (
@@ -1130,8 +1130,8 @@ describe('daemon-init: runRestartDaemon (7-step sequence)', () => {
   })
 
   it('removes detached daemon startup listeners after startup error', async () => {
-    checkDaemonHealthMock.mockResolvedValueOnce('unhealthy')
     const mod = await importFresh()
+    healthCheckDaemonMock.mockResolvedValue(false)
     await mod.initDaemonPtyProvider()
 
     const launcher = spawnerInstances[0].launcher as (
