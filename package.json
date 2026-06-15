@@ -149,7 +149,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
-    "dompurify": "^3.4.2",
+    "dompurify": "^3.4.9",
     "electron": "^42.3.3",
     "electron-builder": "^26.8.1",
     "electron-vite": "^5.0.0",
