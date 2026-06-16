@@ -148,6 +148,11 @@ export type RuntimeBrowserCommandHost = {
   // unavailable (e.g. environment can't support it), which keeps capability
   // reporting honest.
   getOffscreenBrowserBackend(): BrowserBackend | null
+  // Why: the session-tab snapshot is the source of truth for which tab is
+  // focused. A headless browser create must mark itself active there so paired
+  // clients keep focus on the new tab instead of the reconcile snapping back to
+  // a terminal (whose activeTabType the snapshot still reports).
+  markHeadlessBrowserSessionTabActive?(worktreeId: string | undefined, browserPageId: string): void
 }
 
 export class RuntimeBrowserCommands {
@@ -1742,6 +1747,9 @@ export class RuntimeBrowserCommands {
     if (bridge && wcId != null) {
       bridge.setActiveTab(wcId, worktreeId)
     }
+    // Why: mark the new tab active in the session snapshot so paired clients
+    // keep focus on it (the reconcile is snapshot-active-driven).
+    this.host.markHeadlessBrowserSessionTabActive?.(worktreeId, browserPageId)
     return { browserPageId }
   }
 

@@ -3457,6 +3457,41 @@ export class OrcaRuntimeService {
     this.emitMobileSessionTabsSnapshot(nextSnapshot)
   }
 
+  private markHeadlessBrowserSessionTabActive(
+    worktreeId: string | undefined,
+    browserPageId: string
+  ): void {
+    if (!this.offscreenBrowserBackend || !worktreeId) {
+      return
+    }
+    // Hydrate first so the freshly created browser tab is present in the snapshot.
+    this.hydrateHeadlessMobileSessionTabsFromWorkspaceSession(worktreeId)
+    const snapshot = this.mobileSessionTabsByWorktree.get(worktreeId)
+    const tab = snapshot?.tabs.find(
+      (candidate): candidate is RuntimeMobileSessionBrowserTab =>
+        candidate.type === 'browser' && candidate.browserPageId === browserPageId
+    )
+    if (!snapshot || !tab) {
+      return
+    }
+    const nextSnapshot: RuntimeMobileSessionTabsSnapshot = {
+      ...snapshot,
+      publicationEpoch: `headless:${Date.now().toString(36)}`,
+      snapshotVersion: snapshot.snapshotVersion + 1,
+      activeTabId: tab.id,
+      activeTabType: 'browser',
+      tabs: snapshot.tabs.map((candidate) => ({
+        ...candidate,
+        isActive: candidate.id === tab.id
+      })),
+      tabGroups: (snapshot.tabGroups ?? []).map((group) =>
+        group.tabOrder.includes(tab.id) ? { ...group, activeTabId: tab.id } : group
+      )
+    }
+    this.mobileSessionTabsByWorktree.set(worktreeId, nextSnapshot)
+    this.emitMobileSessionTabsSnapshot(nextSnapshot)
+  }
+
   private closeHeadlessMobileTerminalTab(
     worktreeId: string,
     snapshot: RuntimeMobileSessionTabsSnapshot,
@@ -18067,7 +18102,9 @@ export class OrcaRuntimeService {
     resolveWorktreeSelector: (selector) => this.resolveWorktreeSelector(selector),
     getAuthoritativeWindow: () => this.getAuthoritativeWindow(),
     getAvailableAuthoritativeWindow: () => this.getAvailableAuthoritativeWindow(),
-    getOffscreenBrowserBackend: () => this.offscreenBrowserBackend
+    getOffscreenBrowserBackend: () => this.offscreenBrowserBackend,
+    markHeadlessBrowserSessionTabActive: (worktreeId, browserPageId) =>
+      this.markHeadlessBrowserSessionTabActive(worktreeId, browserPageId)
   })
 
   private readonly emulatorCommands = new RuntimeEmulatorCommands({
