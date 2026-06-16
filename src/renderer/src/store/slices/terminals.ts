@@ -41,7 +41,7 @@ import {
 } from '@/components/terminal-pane/pty-transport'
 import { normalizeTerminalLayoutSnapshot } from '@/components/terminal-pane/terminal-layout-leaf-ids'
 import { shutdownBufferCaptures } from '@/components/terminal-pane/shutdown-buffer-captures'
-import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
+import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
 import { parseRemoteRuntimePtyId } from '@/runtime/runtime-terminal-stream'
 import { toRuntimeWorktreeSelector } from '@/runtime/runtime-worktree-selector'
 import { createBrowserUuid } from '@/lib/browser-uuid'
@@ -49,6 +49,7 @@ import { getFolderWorkspaceConnectionId } from '@/lib/folder-workspace-connectio
 import { hasWorktreeSleepIntent } from '@/lib/worktree-sleep-intent'
 import { sanitizeTerminalLayoutPaneTitles } from '@/lib/terminal-pane-title-sanitization'
 import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
+import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 
 function getNextTerminalOrdinal(tabs: TerminalTab[]): number {
   const usedOrdinals = new Set<number>()
@@ -233,6 +234,13 @@ export function worktreeUsesRemoteConnection(
   return Boolean(repo?.connectionId)
 }
 
+function resolveTerminalStopRuntimeEnvironmentId(
+  state: Pick<AppState, 'repos' | 'settings' | 'worktreesByRepo'>,
+  worktreeId: string
+): string | null {
+  return getRuntimeEnvironmentIdForWorktree(state, worktreeId)
+}
+
 export type TerminalSlice = {
   tabsByWorktree: Record<string, TerminalTab[]>
   activeTabId: string | null
@@ -393,7 +401,7 @@ export type TerminalSlice = {
   clearTabPtyId: (tabId: string, ptyId?: string) => void
   shutdownWorktreeTerminals: (
     worktreeId: string,
-    opts?: { keepIdentifiers?: boolean }
+    opts?: { keepIdentifiers?: boolean; sleepingPaneKeys?: string[] }
   ) => Promise<void>
   suppressPtyExit: (ptyId: string) => void
   consumeSuppressedPtyExit: (ptyId: string) => boolean
@@ -438,6 +446,10 @@ export type TerminalSlice = {
    *  independently. null means no active timer for that pane. */
   cacheTimerByKey: Record<string, number | null>
   setCacheTimerStartedAt: (key: string, ts: number | null) => void
+  /** Wall-clock user input markers keyed by paneKey. Hibernation uses these to
+   *  avoid sleeping a completed agent pane that the user has turned into a shell. */
+  lastTerminalInputAtByPaneKey: Record<string, number>
+  recordTerminalInput: (paneKey: string, timestamp?: number) => void
   /** Scan all tabs and seed cache timers for any idle Claude sessions that don't
    *  already have a timer. Called when the feature is enabled mid-session. */
   seedCacheTimersForIdleTabs: () => void
@@ -502,6 +514,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
   deferredSshReconnectTargets: [],
   deferredSshSessionIdsByTabId: {},
   cacheTimerByKey: {},
+  lastTerminalInputAtByPaneKey: {},
   recentQuickCommandIdByGroup: {},
 
   setRecentQuickCommandForGroup: (groupId, quickCommandId) => {
@@ -509,6 +522,18 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       recentQuickCommandIdByGroup: {
         ...s.recentQuickCommandIdByGroup,
         [groupId]: quickCommandId
+      }
+    }))
+  },
+
+  recordTerminalInput: (paneKey, timestamp = Date.now()) => {
+    if (!paneKey || !Number.isFinite(timestamp)) {
+      return
+    }
+    set((s) => ({
+      lastTerminalInputAtByPaneKey: {
+        ...s.lastTerminalInputAtByPaneKey,
+        [paneKey]: timestamp
       }
     }))
   },
@@ -757,15 +782,12 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
     if (!worktreeId) {
       return
     }
-    const pairedWebRuntimeEnvironmentId = (globalThis as { __ORCA_WEB_CLIENT__?: boolean })
-      .__ORCA_WEB_CLIENT__
-      ? state.settings?.activeRuntimeEnvironmentId?.trim()
-      : null
-    if (pairedWebRuntimeEnvironmentId) {
+    const runtimeEnvironmentId = getRuntimeEnvironmentIdForWorktree(state, worktreeId)
+    if (runtimeEnvironmentId) {
       const { createWebRuntimeSessionTerminal } = await import('@/runtime/web-runtime-session')
       await createWebRuntimeSessionTerminal({
         worktreeId,
-        environmentId: pairedWebRuntimeEnvironmentId,
+        environmentId: runtimeEnvironmentId,
         targetGroupId: groupId,
         activate: true
       })
@@ -850,6 +872,12 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
           delete nextUnreadAgentCompletionPanes[paneKey]
         }
       }
+      const nextLastTerminalInputAtByPaneKey = { ...s.lastTerminalInputAtByPaneKey }
+      for (const paneKey of Object.keys(nextLastTerminalInputAtByPaneKey)) {
+        if (paneKey.startsWith(`${tabId}:`)) {
+          delete nextLastTerminalInputAtByPaneKey[paneKey]
+        }
+      }
       const nextPendingStartupByTabId = { ...s.pendingStartupByTabId }
       delete nextPendingStartupByTabId[tabId]
       const nextPendingSetupSplitByTabId = { ...s.pendingSetupSplitByTabId }
@@ -921,6 +949,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
         ...(nextUnreadAgentCompletionPanes !== s.unreadAgentCompletionPanes
           ? { unreadAgentCompletionPanes: nextUnreadAgentCompletionPanes }
           : {}),
+        lastTerminalInputAtByPaneKey: nextLastTerminalInputAtByPaneKey,
         expandedPaneByTabId: nextExpanded,
         canExpandPaneByTabId: nextCanExpand,
         terminalLayoutsByTabId: nextLayouts,
@@ -1669,6 +1698,7 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       let nextUnreadTerminalTabs = s.unreadTerminalTabs
       let nextUnreadTerminalPanes = s.unreadTerminalPanes
       let nextUnreadAgentCompletionPanes = s.unreadAgentCompletionPanes
+      let nextLastTerminalInputAtByPaneKey = s.lastTerminalInputAtByPaneKey
       for (const tab of tabs) {
         if (!keepIdentifiers) {
           delete nextRuntimePaneTitlesByTabId[tab.id]
@@ -1695,6 +1725,14 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
               nextUnreadAgentCompletionPanes = { ...s.unreadAgentCompletionPanes }
             }
             delete nextUnreadAgentCompletionPanes[paneKey]
+          }
+        }
+        for (const paneKey of Object.keys(nextLastTerminalInputAtByPaneKey)) {
+          if (paneKey.startsWith(`${tab.id}:`)) {
+            if (nextLastTerminalInputAtByPaneKey === s.lastTerminalInputAtByPaneKey) {
+              nextLastTerminalInputAtByPaneKey = { ...s.lastTerminalInputAtByPaneKey }
+            }
+            delete nextLastTerminalInputAtByPaneKey[paneKey]
           }
         }
         if (!keepIdentifiers) {
@@ -1744,12 +1782,15 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
           : {}),
         ...(nextUnreadAgentCompletionPanes !== s.unreadAgentCompletionPanes
           ? { unreadAgentCompletionPanes: nextUnreadAgentCompletionPanes }
+          : {}),
+        ...(nextLastTerminalInputAtByPaneKey !== s.lastTerminalInputAtByPaneKey
+          ? { lastTerminalInputAtByPaneKey: nextLastTerminalInputAtByPaneKey }
           : {})
       }
     })
 
     if (keepIdentifiers) {
-      get().captureSleepingAgentSessionsByWorktree(worktreeId)
+      get().captureSleepingAgentSessionsByWorktree(worktreeId, opts?.sleepingPaneKeys)
     } else {
       get().clearSleepingAgentSessionsByWorktree(worktreeId)
     }
@@ -1765,10 +1806,10 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       return
     }
 
-    const target = getActiveRuntimeTarget(get().settings)
-    if (target.kind === 'environment') {
+    const runtimeEnvironmentId = resolveTerminalStopRuntimeEnvironmentId(get(), worktreeId)
+    if (runtimeEnvironmentId) {
       await callRuntimeRpc(
-        target,
+        { kind: 'environment', environmentId: runtimeEnvironmentId },
         'terminal.stop',
         { worktree: toRuntimeWorktreeSelector(worktreeId) },
         { timeoutMs: 15_000 }

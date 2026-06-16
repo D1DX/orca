@@ -77,6 +77,7 @@ describe('GitHandler', () => {
     expect(methods).toContain('git.branchCompare')
     expect(methods).toContain('git.upstreamStatus')
     expect(methods).toContain('git.fetch')
+    expect(methods).toContain('git.forkSync')
     expect(methods).toContain('git.fetchRemoteTrackingRef')
     expect(methods).toContain('git.push')
     expect(methods).toContain('git.pull')
@@ -90,6 +91,7 @@ describe('GitHandler', () => {
     expect(methods).toContain('git.refreshLocalBaseRefForWorktreeCreate')
     expect(methods).toContain('git.renameCurrentBranch')
     expect(methods).toContain('git.exec')
+    expect(methods).toContain('git.clone')
     expect(methods).toContain('git.isGitRepo')
   })
 
@@ -992,6 +994,37 @@ describe('GitHandler', () => {
         await fs.rm(bareDir, { recursive: true, force: true })
         await fs.rm(producerParent, { recursive: true, force: true })
       }
+    })
+
+    it('rejects malformed fork sync expected upstream metadata', async () => {
+      await expect(
+        dispatcher.callRequest('git.forkSync', {
+          worktreePath: tmpDir,
+          expectedUpstream: { owner: '   ', repo: 'orca' }
+        })
+      ).rejects.toThrow('Invalid expected upstream.')
+    })
+
+    it('rejects fork sync requests without expected upstream metadata', async () => {
+      await expect(
+        dispatcher.callRequest('git.forkSync', {
+          worktreePath: tmpDir
+        })
+      ).rejects.toThrow('Expected upstream is required.')
+    })
+
+    it('aborts fork sync when the relay request is canceled', async () => {
+      gitInit(tmpDir)
+      const controller = new AbortController()
+      controller.abort()
+
+      await expect(
+        dispatcher.callRequest(
+          'git.forkSync',
+          { worktreePath: tmpDir, expectedUpstream: { owner: 'stablyai', repo: 'orca' } },
+          { isStale: () => false, signal: controller.signal }
+        )
+      ).rejects.toThrow(/abort/i)
     })
 
     it('refreshes one remote-tracking ref from a configured remote', async () => {
