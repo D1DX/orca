@@ -198,6 +198,42 @@ describe('getUpstreamStatus', () => {
     })
   })
 
+  it('uses a fork head branch even when its name matches the base branch', async () => {
+    gitExecFileAsyncMock.mockImplementation((args: string[]) => {
+      if (args[0] === 'symbolic-ref') {
+        return Promise.resolve({ stdout: 'review/pr-1\n' })
+      }
+      if (args[0] === 'rev-parse' && args.includes('HEAD@{u}')) {
+        return Promise.reject(new Error('fatal: no upstream configured'))
+      }
+      if (args[0] === 'config' && args.includes('branch.review/pr-1.remote')) {
+        return Promise.resolve({ stdout: 'fork\n' })
+      }
+      if (args[0] === 'config' && args.includes('branch.review/pr-1.merge')) {
+        return Promise.resolve({ stdout: 'refs/heads/main\n' })
+      }
+      if (args[0] === 'config' && args.includes('branch.review/pr-1.base')) {
+        return Promise.resolve({ stdout: 'refs/remotes/origin/main\n' })
+      }
+      if (args[0] === 'rev-parse' && args.includes('refs/remotes/fork/main')) {
+        return Promise.resolve({ stdout: 'fork-head\n' })
+      }
+      if (args[0] === 'rev-list') {
+        return Promise.resolve({ stdout: '3\t0\n' })
+      }
+      throw new Error(`unexpected git args: ${args.join(' ')}`)
+    })
+
+    const result = await getUpstreamStatus('/repo')
+
+    expect(result).toEqual({
+      hasUpstream: true,
+      upstreamName: 'fork/main',
+      ahead: 3,
+      behind: 0
+    })
+  })
+
   it('marks a URL-valued branch push target when no matching remote is configured', async () => {
     gitExecFileAsyncMock.mockImplementation((args: string[]) => {
       if (args[0] === 'symbolic-ref') {
@@ -229,6 +265,48 @@ describe('getUpstreamStatus', () => {
       }
       if (args[0] === 'rev-parse' && args.includes('refs/remotes/origin/imp/chinese-translation')) {
         return Promise.reject(new Error('missing origin tracking ref'))
+      }
+      throw new Error(`unexpected git args: ${args.join(' ')}`)
+    })
+
+    const result = await getUpstreamStatus('/repo')
+
+    expect(result).toEqual({
+      hasUpstream: false,
+      ahead: 0,
+      behind: 0,
+      hasConfiguredPushTarget: true
+    })
+  })
+
+  it('marks a fork head push target when the same-named base branch is on another remote', async () => {
+    gitExecFileAsyncMock.mockImplementation((args: string[]) => {
+      if (args[0] === 'symbolic-ref') {
+        return Promise.resolve({ stdout: 'review/pr-1\n' })
+      }
+      if (args[0] === 'rev-parse' && args.includes('HEAD@{u}')) {
+        return Promise.reject(new Error('fatal: no upstream configured'))
+      }
+      if (args[0] === 'config' && args.includes('branch.review/pr-1.pushRemote')) {
+        return Promise.resolve({ stdout: 'fork\n' })
+      }
+      if (args[0] === 'config' && args.includes('remote.pushDefault')) {
+        return Promise.reject(new Error('missing pushDefault'))
+      }
+      if (args[0] === 'config' && args.includes('branch.review/pr-1.remote')) {
+        return Promise.resolve({ stdout: 'fork\n' })
+      }
+      if (args[0] === 'config' && args.includes('branch.review/pr-1.merge')) {
+        return Promise.resolve({ stdout: 'refs/heads/main\n' })
+      }
+      if (args[0] === 'config' && args.includes('branch.review/pr-1.base')) {
+        return Promise.resolve({ stdout: 'refs/remotes/origin/main\n' })
+      }
+      if (args[0] === 'rev-parse' && args.includes('refs/remotes/fork/main')) {
+        return Promise.reject(new Error('missing fork tracking ref'))
+      }
+      if (args[0] === 'rev-parse' && args.includes('refs/remotes/origin/review/pr-1')) {
+        return Promise.reject(new Error('missing origin review branch'))
       }
       throw new Error(`unexpected git args: ${args.join(' ')}`)
     })

@@ -1,5 +1,5 @@
 import { assertGitPushTargetShape } from '../shared/git-push-target-validation'
-import { gitRefTargetsBranchName } from '../shared/git-remote-branch-name'
+import { gitRefTargetsBranchOnRemote } from '../shared/git-remote-branch-name'
 import type { GitPushTarget } from '../shared/types'
 
 type RelayGit = (args: string[], cwd: string) => Promise<{ stdout: string; stderr: string }>
@@ -32,7 +32,7 @@ async function getConfiguredPushTarget(
     if (!remote || !branchRef || remote === '.' || branchRef === mergeRef) {
       return null
     }
-    if (await branchMergeTargetsConfiguredBase(git, worktreePath, branch, branchRef)) {
+    if (await branchMergeTargetsConfiguredBase(git, worktreePath, branch, remote, branchRef)) {
       return null
     }
     if (!canPushConfiguredMergeBranch(pushRemote, branch, branchRef)) {
@@ -130,10 +130,12 @@ async function branchMergeTargetsConfiguredBase(
   git: RelayGit,
   worktreePath: string,
   branch: string,
+  remote: string,
   branchRef: string
 ): Promise<boolean> {
-  return gitRefTargetsBranchName(
+  return gitRefTargetsBranchOnRemote(
     await getConfigValue(git, worktreePath, `branch.${branch}.base`),
+    remote,
     branchRef
   )
 }

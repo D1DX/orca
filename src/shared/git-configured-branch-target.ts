@@ -1,4 +1,4 @@
-import { gitRefTargetsBranchName } from './git-remote-branch-name'
+import { gitRefTargetsBranchOnRemote } from './git-remote-branch-name'
 
 type GitCommandRunner = (args: string[]) => Promise<{ stdout: string }>
 
@@ -62,18 +62,16 @@ export async function getConfiguredBranchRemoteUpstream(
     getGitConfigValue(runGit, `branch.${currentBranchName}.base`)
   ])
   const branchName = mergeRef?.replace(/^refs\/heads\//, '') ?? ''
-  if (
-    !remote ||
-    !branchName ||
-    branchName === mergeRef ||
-    remote === '.' ||
-    gitRefTargetsBranchName(baseRef, branchName)
-  ) {
+  if (!remote || !branchName || branchName === mergeRef || remote === '.') {
     return null
   }
 
   const remoteName = isUrlValuedRemote(remote) ? await findRemoteNameForUrl(runGit, remote) : remote
-  if (!remoteName || !(await remoteTrackingRefExists(remoteName, branchName))) {
+  if (
+    !remoteName ||
+    gitRefTargetsBranchOnRemote(baseRef, remoteName, branchName) ||
+    !(await remoteTrackingRefExists(remoteName, branchName))
+  ) {
     return null
   }
   return {
@@ -97,13 +95,7 @@ export async function hasConfiguredBranchPushTarget(
   ])
   const remote = pushRemote ?? pushDefault ?? branchRemote
   const branchName = mergeRef?.replace(/^refs\/heads\//, '') ?? ''
-  if (
-    !remote ||
-    remote === '.' ||
-    !branchName ||
-    branchName === mergeRef ||
-    gitRefTargetsBranchName(baseRef, branchName)
-  ) {
+  if (!remote || remote === '.' || !branchName || branchName === mergeRef) {
     return false
   }
   const pushRemoteName = isUrlValuedRemote(remote)
@@ -114,6 +106,9 @@ export async function hasConfiguredBranchPushTarget(
       ? ((await findRemoteNameForUrl(runGit, branchRemote)) ?? branchRemote)
       : branchRemote
     : null
+  if (gitRefTargetsBranchOnRemote(baseRef, pushRemoteName, branchName)) {
+    return false
+  }
   // Why: branch.merge belongs to branch.remote. Do not combine a user's
   // pushDefault fork with an origin/main merge target and call it pushable.
   if (

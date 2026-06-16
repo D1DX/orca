@@ -30,3 +30,31 @@ export function gitRefTargetsBranchName(
   }
   return trimmed === branchName || splitRemoteBranchName(trimmed)?.branchName === branchName
 }
+
+export function gitRefTargetsBranchOnRemote(
+  refName: string | null | undefined,
+  remoteName: string,
+  branchName: string
+): boolean {
+  const trimmed = refName?.trim()
+  if (!trimmed || !remoteName || !branchName) {
+    return false
+  }
+  // Why: fork reviews can target fork/main while the saved base is origin/main.
+  // Remote-qualified refs must match both pieces, not only the branch leaf.
+  if (
+    trimmed === `${remoteName}/${branchName}` ||
+    trimmed === `remotes/${remoteName}/${branchName}` ||
+    trimmed === `refs/remotes/${remoteName}/${branchName}`
+  ) {
+    return true
+  }
+  if (trimmed.startsWith('refs/remotes/') || trimmed.startsWith('remotes/')) {
+    return false
+  }
+  const headsPrefix = 'refs/heads/'
+  if (trimmed.startsWith(headsPrefix)) {
+    return trimmed.slice(headsPrefix.length) === branchName
+  }
+  return trimmed === branchName
+}

@@ -87,6 +87,21 @@ describe('resolveRelayPushTarget', () => {
     await expect(resolveRelayPushTarget(git, '/repo', undefined)).resolves.toBeNull()
   })
 
+  it('keeps a fork head target when the contributor branch matches the base branch name', async () => {
+    const git = gitForConfig({
+      branch: 'review/pr-1',
+      pushRemote: 'fork',
+      branchRemote: 'fork',
+      merge: 'refs/heads/main',
+      base: 'refs/remotes/origin/main'
+    })
+
+    await expect(resolveRelayPushTarget(git, '/repo', undefined)).resolves.toEqual({
+      remote: 'fork',
+      refspec: 'HEAD:main'
+    })
+  })
+
   it('uses remote.pushDefault when branch pushRemote is missing', async () => {
     const git = gitForConfig({
       pushRemote: new Error('missing pushRemote'),

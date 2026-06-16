@@ -94,6 +94,34 @@ describe('git remote operations', () => {
     )
   })
 
+  it('keeps a fork head target when the contributor branch matches the base branch name', async () => {
+    gitExecFileAsyncMock.mockImplementation(async (args: string[]) => {
+      if (args[0] === 'symbolic-ref') {
+        return { stdout: 'review/pr-1\n', stderr: '' }
+      }
+      if (args[0] === 'config' && args.includes('branch.review/pr-1.remote')) {
+        return { stdout: 'fork\n', stderr: '' }
+      }
+      if (args[0] === 'config' && args.includes('branch.review/pr-1.pushRemote')) {
+        return { stdout: 'fork\n', stderr: '' }
+      }
+      if (args[0] === 'config' && args.includes('branch.review/pr-1.merge')) {
+        return { stdout: 'refs/heads/main\n', stderr: '' }
+      }
+      if (args[0] === 'config' && args.includes('branch.review/pr-1.base')) {
+        return { stdout: 'refs/remotes/origin/main\n', stderr: '' }
+      }
+      return { stdout: '', stderr: '' }
+    })
+
+    await gitPush('/repo', false)
+
+    expect(gitExecFileAsyncMock).toHaveBeenLastCalledWith(
+      ['push', '--set-upstream', 'fork', 'HEAD:main'],
+      { cwd: '/repo' }
+    )
+  })
+
   it('pushes to a URL-valued branch pushRemote when no named remote exists', async () => {
     gitExecFileAsyncMock.mockImplementation(async (args: string[]) => {
       if (args[0] === 'symbolic-ref') {

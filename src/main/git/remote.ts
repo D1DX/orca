@@ -1,6 +1,6 @@
 import { normalizeGitErrorMessage } from '../../shared/git-remote-error'
 import { resolveEffectiveGitUpstream } from '../../shared/git-effective-upstream'
-import { gitRefTargetsBranchName } from '../../shared/git-remote-branch-name'
+import { gitRefTargetsBranchOnRemote } from '../../shared/git-remote-branch-name'
 import { resolveGitRemoteRebaseSource } from '../../shared/git-rebase-source'
 import type { GitPushTarget } from '../../shared/types'
 import { validateGitPushTarget } from './push-target-validation'
@@ -29,7 +29,7 @@ async function getConfiguredPushTarget(
     if (!remote || !branchRef || remote === '.' || branchRef === mergeRef) {
       return null
     }
-    if (await branchMergeTargetsConfiguredBase(worktreePath, branch, branchRef)) {
+    if (await branchMergeTargetsConfiguredBase(worktreePath, branch, remote, branchRef)) {
       return null
     }
     if (!canPushConfiguredMergeBranch(pushRemote, branch, branchRef)) {
@@ -116,10 +116,12 @@ async function getConfiguredPushRemote(
 async function branchMergeTargetsConfiguredBase(
   worktreePath: string,
   branch: string,
+  remote: string,
   branchRef: string
 ): Promise<boolean> {
-  return gitRefTargetsBranchName(
+  return gitRefTargetsBranchOnRemote(
     await getConfigValue(worktreePath, `branch.${branch}.base`),
+    remote,
     branchRef
   )
 }
