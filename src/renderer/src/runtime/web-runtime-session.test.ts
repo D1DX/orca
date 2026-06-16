@@ -131,6 +131,9 @@ describe('createWebRuntimeSessionBrowserTab', () => {
         worktree: `id:${WORKTREE_ID}`,
         url: 'https://example.com/',
         profileId: undefined,
+        // Why: a user-initiated "New Browser Tab" focuses the new tab, which on a
+        // headless host marks it active in the session snapshot.
+        activate: true,
         waitForRegistration: false
       },
       timeoutMs: 15_000
