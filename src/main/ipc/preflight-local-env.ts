@@ -1,20 +1,20 @@
 import { mergePersistedWindowsPath } from '../pty/windows-environment-path'
 
-function cloneProcessEnv(): Record<string, string> {
-  const env: Record<string, string> = {}
-  for (const [key, value] of Object.entries(process.env)) {
+function stringOnlyProcessEnv(env: NodeJS.ProcessEnv): Record<string, string> {
+  const result: Record<string, string> = {}
+  for (const [key, value] of Object.entries(env)) {
     if (value !== undefined) {
-      env[key] = value
+      result[key] = value
     }
   }
-  return env
+  return result
 }
 
-export function buildLocalPreflightEnv(): NodeJS.ProcessEnv | undefined {
+export function buildLocalPreflightEnv(): Record<string, string> | undefined {
   if (process.platform !== 'win32') {
     return undefined
   }
-  const env = cloneProcessEnv()
+  const env = stringOnlyProcessEnv(process.env)
   // Why: newly installed CLIs update persisted Windows Path, but the running
   // Electron process keeps its old environment until we merge it explicitly.
   mergePersistedWindowsPath(env)

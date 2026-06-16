@@ -6,6 +6,8 @@ import type {
   GitCommitCompareResult,
   GitConflictOperation,
   GitDiffResult,
+  GitForkSyncExpectedUpstream,
+  GitForkSyncResult,
   GitPushTarget,
   GitStatusResult,
   GitUpstreamStatus,
@@ -329,6 +331,29 @@ export async function fetchRuntimeGit(
       ...(pushTarget ? { pushTarget } : {})
     },
     { timeoutMs: 30_000 }
+  )
+}
+
+export async function syncRuntimeGitForkDefaultBranch(
+  context: RuntimeGitContext,
+  expectedUpstream: GitForkSyncExpectedUpstream
+): Promise<GitForkSyncResult> {
+  const target = getActiveRuntimeTarget(context.settings)
+  if (target.kind === 'local' || !context.worktreeId) {
+    return window.api.git.syncFork({
+      worktreePath: context.worktreePath,
+      connectionId: context.connectionId,
+      expectedUpstream
+    })
+  }
+  return callRuntimeRpc<GitForkSyncResult>(
+    target,
+    'git.forkSync',
+    {
+      worktree: toRuntimeWorktreeSelector(context.worktreeId),
+      expectedUpstream
+    },
+    { timeoutMs: 60_000 }
   )
 }
 
