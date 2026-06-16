@@ -1535,9 +1535,6 @@ function RemoteBrowserPagePane({
               return
             }
             streamSubscriptionRef.current = subscription
-            // Why: the stored subscription is the authoritative "live" signal; clear
-            // busy here so a generation bump racing ready/frame can't wedge the pane.
-            setBusy(false)
           })
           .catch((error: unknown) => {
             if (!isCurrentRemoteStreamOperation(token)) {
@@ -1744,9 +1741,6 @@ function RemoteBrowserPagePane({
             return
           }
           streamSubscriptionRef.current = subscription
-          // Why: the stored subscription is the authoritative "live" signal; clear
-          // busy here so a generation bump racing ready/frame can't wedge the pane.
-          setBusy(false)
         })
         .catch((error: unknown) => {
           if (!mountedRef.current || !isActiveRef.current || remotePageIdRef.current !== pageId) {
@@ -1814,11 +1808,6 @@ function RemoteBrowserPagePane({
           return
         }
         streamSubscriptionRef.current = subscription
-        // Why: a viewport-resize restart can bump the stream generation between
-        // subscribe and the first ready/frame, orphaning their token so neither
-        // clears busy. The stored subscription is the authoritative "live" signal;
-        // clear the loading placeholder here so the pane can't wedge on it.
-        setBusy(false)
       })
       .catch((error: unknown) => {
         if (!cancelled) {
