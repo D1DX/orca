@@ -3057,30 +3057,55 @@ export class OrcaRuntimeService {
     return order
   }
 
+  // Why: the group tab order must follow actual creation/insertion order across
+  // both terminals and browsers, not list terminals first. A terminal's top-level
+  // id is its parentTabId (split leaves share one); a browser's is its own id.
+  private collectHeadlessTopLevelTabOrder(
+    tabs: readonly RuntimeMobileSessionSnapshotTab[]
+  ): string[] {
+    const order: string[] = []
+    const seen = new Set<string>()
+    for (const tab of tabs) {
+      const topLevelId = tab.type === 'terminal' ? tab.parentTabId : tab.id
+      if (!seen.has(topLevelId)) {
+        seen.add(topLevelId)
+        order.push(topLevelId)
+      }
+    }
+    return order
+  }
+
   private getHeadlessMobileSessionGroupId(worktreeId: string): string {
     return `headless-terminals:${worktreeId}`
   }
 
   private buildHeadlessMobileSessionTabGroups(
     worktreeId: string,
-    tabs: readonly RuntimeMobileSessionTerminalTab[],
-    activeTab: RuntimeMobileSessionTerminalTab | null,
+    tabs: readonly RuntimeMobileSessionSnapshotTab[],
+    activeTab: RuntimeMobileSessionSnapshotTab | null,
     existingGroups?: readonly RuntimeMobileSessionTabGroup[]
   ): RuntimeMobileSessionTabGroup[] {
     const groupId = existingGroups?.[0]?.id ?? this.getHeadlessMobileSessionGroupId(worktreeId)
-    const tabOrder = this.collectHeadlessParentTabOrder(tabs)
-    const activeParentTabId =
-      activeTab?.parentTabId ??
+    // Why: order across terminals and browsers in their actual array order so a
+    // tab opened after a browser tab lands to its right, not regrouped before it.
+    const tabOrder = this.collectHeadlessTopLevelTabOrder(tabs)
+    const topLevelOf = (tab: RuntimeMobileSessionSnapshotTab): string =>
+      tab.type === 'terminal' ? tab.parentTabId : tab.id
+    const activeTopLevelId =
+      (activeTab ? topLevelOf(activeTab) : null) ??
       existingGroups?.[0]?.activeTabId ??
-      tabs.find((tab) => tab.isActive)?.parentTabId ??
+      (() => {
+        const active = tabs.find((tab) => tab.isActive)
+        return active ? topLevelOf(active) : null
+      })() ??
       tabOrder[0] ??
       null
     return [
       {
         id: groupId,
         activeTabId:
-          activeParentTabId && tabOrder.includes(activeParentTabId)
-            ? activeParentTabId
+          activeTopLevelId && tabOrder.includes(activeTopLevelId)
+            ? activeTopLevelId
             : (tabOrder[0] ?? null),
         tabOrder
       }
@@ -3310,9 +3335,6 @@ export class OrcaRuntimeService {
       ...candidate,
       isActive: candidate.id === activeTab.id
     }))
-    const terminalTabs = tabs.filter(
-      (candidate): candidate is RuntimeMobileSessionTerminalTab => candidate.type === 'terminal'
-    )
     const nextSnapshot: RuntimeMobileSessionTabsSnapshot = {
       ...snapshot,
       publicationEpoch: `headless:${Date.now().toString(36)}`,
@@ -3321,7 +3343,7 @@ export class OrcaRuntimeService {
       activeTabType: 'terminal',
       tabGroups: this.buildHeadlessMobileSessionTabGroups(
         worktreeId,
-        terminalTabs,
+        tabs,
         activeTab,
         snapshot.tabGroups
       ),
@@ -3468,10 +3490,8 @@ export class OrcaRuntimeService {
       activeTabType: active?.type ?? null,
       tabGroups: this.buildHeadlessMobileSessionTabGroups(
         worktreeId,
-        nextTabs.filter(
-          (candidate): candidate is RuntimeMobileSessionTerminalTab => candidate.type === 'terminal'
-        ),
-        active?.type === 'terminal' ? active : null,
+        nextTabs,
+        active,
         snapshot.tabGroups
       ),
       tabs: nextTabs
@@ -12691,9 +12711,7 @@ export class OrcaRuntimeService {
       activeTabType: activate ? 'terminal' : (existing?.activeTabType ?? null),
       tabGroups: this.buildHeadlessMobileSessionTabGroups(
         worktreeId,
-        tabs.filter(
-          (candidate): candidate is RuntimeMobileSessionTerminalTab => candidate.type === 'terminal'
-        ),
+        tabs,
         activate ? tab : null,
         existing?.tabGroups
       ),
