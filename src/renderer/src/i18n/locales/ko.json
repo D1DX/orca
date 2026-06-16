@@ -8953,7 +8953,10 @@
             "hideEmptySessions": "Hide empty sessions",
             "workspaceScope": "Workspace",
             "worktreeScope": "Worktree",
-            "globalScope": "Global"
+            "globalScope": "Global",
+            "projectScope": "프로젝트",
+            "currentProjectLower": "현재 프로젝트",
+            "project": "프로젝트"
           },
           "AiVaultSessionDetails": {
             "updated": "Updated",
@@ -11390,7 +11393,15 @@
           "openReviewExternally": "{{value0}} 외부에서 열기",
           "summary": "{{value0}}개 연결됨 · PR/MR 있음 {{value1}}개 · 주의 필요 {{value2}}개 · 대기 중 {{value3}}개 · 통과 {{value4}}개 · PR 없음 {{value5}}개 · 알 수 없음 {{value6}}개",
           "showDetails": "{{value0}} PR 검사 세부 정보 표시",
-          "hideDetails": "{{value0}} PR 검사 세부 정보 숨기기"
+          "hideDetails": "{{value0}} PR 검사 세부 정보 숨기기",
+          "reviewChecks": "검토 검사",
+          "allChecksPassing": "모든 검사 통과",
+          "oneWorktree": "워크트리 1개",
+          "worktreeCount": "워크트리 {{value0}}개",
+          "oneFailing": "1개 실패",
+          "failingCount": "{{value0}}개 실패",
+          "onePending": "1개 대기 중",
+          "pendingCount": "{{value0}}개 대기 중"
         },
         "parentPrChecks": {
           "rowSummary": {

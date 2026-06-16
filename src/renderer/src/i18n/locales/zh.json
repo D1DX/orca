@@ -8953,7 +8953,10 @@
             "hideEmptySessions": "隐藏空会话",
             "workspaceScope": "工作区",
             "worktreeScope": "工作树",
-            "globalScope": "全局"
+            "globalScope": "全局",
+            "projectScope": "项目",
+            "currentProjectLower": "当前项目",
+            "project": "项目"
           },
           "AiVaultSessionDetails": {
             "updated": "更新时间",
@@ -11390,7 +11393,15 @@
           "openReviewExternally": "在外部打开 {{value0}}",
           "summary": "已附加 {{value0}} 个 · 有 PR/MR {{value1}} 个 · 需注意 {{value2}} 个 · 等待中 {{value3}} 个 · 通过 {{value4}} 个 · 无 PR {{value5}} 个 · 未知 {{value6}} 个",
           "showDetails": "显示 {{value0}} 的 PR 检查详情",
-          "hideDetails": "隐藏 {{value0}} 的 PR 检查详情"
+          "hideDetails": "隐藏 {{value0}} 的 PR 检查详情",
+          "reviewChecks": "评审检查",
+          "allChecksPassing": "所有检查均通过",
+          "oneWorktree": "1 个工作树",
+          "worktreeCount": "{{value0}} 个工作树",
+          "oneFailing": "1 个失败",
+          "failingCount": "{{value0}} 个失败",
+          "onePending": "1 个等待中",
+          "pendingCount": "{{value0}} 个等待中"
         },
         "parentPrChecks": {
           "rowSummary": {
