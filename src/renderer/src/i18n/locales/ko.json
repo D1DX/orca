@@ -8373,7 +8373,14 @@
             "e283b50179": "커밋 메시지",
             "f394c6128a": "이 커밋을 설명할 에이전트가 없습니다",
             "04a5d7239b": "이 저장소에는 지원되는 웹 원격이 없습니다",
-            "15b6e834ac": "브라우저에서 커밋을 열지 못했습니다"
+            "15b6e834ac": "브라우저에서 커밋을 열지 못했습니다",
+            "d37e68f61d": "Preparing branch for review…",
+            "8d8f5c6c94": "Generating commit message…",
+            "fda060d6ce": "Review the commit message, then retry Create PR.",
+            "b75cb1fd0c": "Committing changes…",
+            "995c5e67ec": "Review setup needs attention.",
+            "d7492cafce": "Could not refresh Source Control. Retry Create PR.",
+            "473f18758e": "Source Control AI settings"
           },
           "SourceControlAgentActionDialog": {
             "8e856842d1": "선택한 agent를 시작할 수 없습니다.",
@@ -8659,7 +8666,10 @@
                   "484f45c439": "{{value0}} 진행 중…",
                   "74fc171e99": "강제 푸시 진행 중…",
                   "16aee3a5c1": "Commit 진행 중…",
-                  "e61b0d7a3c": "Check out a branch before publishing commits."
+                  "e61b0d7a3c": "Check out a branch before publishing commits.",
+                  "8c6d15a07d": "Create PR",
+                  "d37e68f61d": "Preparing branch for review…",
+                  "c72e5e65d1": "Prepare this branch and create a {{value0}}"
                 }
               }
             }

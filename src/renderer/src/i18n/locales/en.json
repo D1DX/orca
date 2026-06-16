@@ -8373,7 +8373,14 @@
             "e283b50179": "Commit message",
             "f394c6128a": "No agent available to explain this commit",
             "04a5d7239b": "This repository has no supported web remote",
-            "15b6e834ac": "Failed to open commit in browser"
+            "15b6e834ac": "Failed to open commit in browser",
+            "d37e68f61d": "Preparing branch for review…",
+            "8d8f5c6c94": "Generating commit message…",
+            "fda060d6ce": "Review the commit message, then retry Create PR.",
+            "b75cb1fd0c": "Committing changes…",
+            "995c5e67ec": "Review setup needs attention.",
+            "d7492cafce": "Could not refresh Source Control. Retry Create PR.",
+            "473f18758e": "Source Control AI settings"
           },
           "SourceControlAgentActionDialog": {
             "8e856842d1": "Could not start the selected agent.",
@@ -8659,7 +8666,10 @@
                   "484f45c439": "{{value0}} in progress…",
                   "74fc171e99": "Force Push in progress…",
                   "16aee3a5c1": "Commit in progress…",
-                  "e61b0d7a3c": "Check out a branch before publishing commits."
+                  "e61b0d7a3c": "Check out a branch before publishing commits.",
+                  "8c6d15a07d": "Create PR",
+                  "d37e68f61d": "Preparing branch for review…",
+                  "c72e5e65d1": "Prepare this branch and create a {{value0}}"
                 }
               }
             }
