@@ -255,6 +255,7 @@ import type {
 } from '../../shared/runtime-types'
 import type { AutomationService } from '../automations/service'
 import { RuntimeBrowserCommands } from './orca-runtime-browser'
+import { buildHeadlessTerminalSplitLayout } from './headless-terminal-split-layout'
 import { RuntimeEmulatorCommands, setEmulatorBridge } from './orca-runtime-emulator'
 import { serveSimStateWatcher } from '../emulator/serve-sim-state-watcher'
 import type { EmulatorBridge } from '../emulator/emulator-bridge'
@@ -3367,6 +3368,36 @@ export class OrcaRuntimeService {
     this.persistHeadlessTerminalActiveLeaf(worktreeId, activeTab)
     this.mobileSessionTabsByWorktree.set(worktreeId, nextSnapshot)
     this.emitMobileSessionTabsSnapshot(nextSnapshot)
+  }
+
+  // Why: a headless split only updated the LIVE session snapshot, never the
+  // persisted workspace session layout. So a later snapshot rebuild (e.g. on the
+  // next terminal create) re-derived from the stale single-leaf persisted layout
+  // and collapsed the split. Persist the new split leaf into the workspace
+  // session's terminalLayoutsByTabId so the split survives rebuilds.
+  private persistHeadlessTerminalSplit(args: {
+    tabId: string
+    leafId: string
+    ptyId: string
+    splitFromLeafId: string
+    direction: 'horizontal' | 'vertical'
+  }): void {
+    const session = this.store?.getWorkspaceSession?.()
+    if (!session || !this.store?.setWorkspaceSession) {
+      return
+    }
+    const existing = session.terminalLayoutsByTabId?.[args.tabId]
+    const nextLayout = buildHeadlessTerminalSplitLayout(
+      existing ? this.cloneTerminalLayoutSnapshot(existing) : undefined,
+      args
+    )
+    this.store.setWorkspaceSession({
+      ...session,
+      terminalLayoutsByTabId: {
+        ...session.terminalLayoutsByTabId,
+        [args.tabId]: nextLayout
+      }
+    })
   }
 
   private persistHeadlessTerminalActiveLeaf(
@@ -13232,6 +13263,15 @@ export class OrcaRuntimeService {
         leafId,
         title: null,
         activate: opts.activate !== false
+      })
+      // Why: persist the split into the workspace session so a later snapshot
+      // rebuild keeps it instead of collapsing back to a single pane.
+      this.persistHeadlessTerminalSplit({
+        tabId: parentTabId,
+        leafId,
+        ptyId: createdPty.ptyId,
+        splitFromLeafId: parsedPaneKey.leafId,
+        direction
       })
     }
 
