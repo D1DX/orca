@@ -3535,11 +3535,15 @@ function SourceControlInner(): React.JSX.Element {
   ])
   const directCreatePrAction =
     createPrHeaderAction?.kind === 'create_pr' ? createPrHeaderAction : null
+  const hasBranchChanges =
+    hasUncommittedEntries || branchEntries.length > 0 || branchSummary?.status !== 'ready'
   const visibleCreatePrHeaderAction = resolveVisibleCreatePrHeaderAction({
     createPrHeaderAction,
     directCreatePrAction,
     isCreatePrIntentInFlight,
-    primaryActionKind: primaryAction.kind
+    primaryActionKind: primaryAction.kind,
+    hasBranchChanges,
+    hostedReviewCreation
   })
 
   const dropdownItems: DropdownEntry[] = useMemo(

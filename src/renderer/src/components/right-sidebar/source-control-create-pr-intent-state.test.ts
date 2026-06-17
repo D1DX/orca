@@ -23,9 +23,34 @@ describe('resolveVisibleCreatePrHeaderAction', () => {
         createPrHeaderAction: createPrAction,
         directCreatePrAction: createPrAction,
         isCreatePrIntentInFlight: false,
-        primaryActionKind: 'create_pr'
+        primaryActionKind: 'create_pr',
+        hasBranchChanges: true
       })
     ).toBeNull()
+  })
+
+  it('shows a disabled header when direct Create PR is available but the branch has no changes', () => {
+    expect(
+      resolveVisibleCreatePrHeaderAction({
+        createPrHeaderAction: createPrAction,
+        directCreatePrAction: createPrAction,
+        isCreatePrIntentInFlight: false,
+        primaryActionKind: 'create_pr',
+        hasBranchChanges: false,
+        hostedReviewCreation: {
+          provider: 'github',
+          review: null,
+          canCreate: true,
+          blockedReason: null,
+          nextAction: null
+        }
+      })
+    ).toEqual({
+      kind: 'create_pr',
+      label: 'Create PR',
+      title: 'No changes on this branch to include in a pull request.',
+      disabled: true
+    })
   })
 
   it('hides the header while Create PR intent is in flight on the commit-area primary', () => {
