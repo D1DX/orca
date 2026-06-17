@@ -16,6 +16,7 @@ import { useAppStore } from '../store'
 import { unwrapRuntimeRpcResult } from './runtime-rpc-client'
 import { parseRemoteRuntimePtyId } from './runtime-terminal-stream'
 import { toRuntimeWorktreeSelector } from './runtime-worktree-selector'
+import { recordWebSessionFocusIntent } from './web-session-focus-intent'
 import { isWebTerminalSurfaceTabId, toHostSessionTabId } from './web-terminal-surface-id'
 
 export {
@@ -73,7 +74,14 @@ export async function createWebRuntimeSessionTerminal(args: {
       },
       timeoutMs: 15_000
     })
-    unwrapRuntimeRpcResult(response as RuntimeRpcResponse<RuntimeMobileSessionCreateTerminalResult>)
+    const createdTerminal = unwrapRuntimeRpcResult(
+      response as RuntimeRpcResponse<RuntimeMobileSessionCreateTerminalResult>
+    )
+    if (args.activate !== false) {
+      // Why: record focus intent so the reconcile follows the snapshot's active
+      // tab to THIS new terminal, instead of sticky-keeping the prior tab.
+      recordWebSessionFocusIntent(args.worktreeId, createdTerminal.tab.id)
+    }
     await refreshWebRuntimeSessionTabsSnapshot(environmentId, args.worktreeId)
     return true
   } catch (error) {
@@ -126,6 +134,10 @@ export async function createWebRuntimeSessionBrowserTab(args: {
       timeoutMs: 15_000
     })
     const created = unwrapRuntimeRpcResult(response as RuntimeRpcResponse<BrowserTabCreateResult>)
+    // Why: record focus intent (browser session tab id === browserPageId on a
+    // headless host) so the reconcile follows the snapshot's active tab to this
+    // new browser tab rather than sticky-keeping the prior one.
+    recordWebSessionFocusIntent(args.worktreeId, created.browserPageId)
     stageWebRuntimeBrowserTab({
       environmentId,
       worktreeId: args.worktreeId,

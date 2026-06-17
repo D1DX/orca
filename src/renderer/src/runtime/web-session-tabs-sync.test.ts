@@ -4,6 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-types'
 import { makePaneKey } from '../../../shared/stable-pane-id'
 import { toWebTerminalSurfaceTabId } from '../../../shared/terminal-surface-id'
+import {
+  recordWebSessionFocusIntent,
+  resetWebSessionFocusIntentForTests
+} from './web-session-focus-intent'
 import type { BrowserPage, BrowserWorkspace, Tab, TerminalTab } from '../../../shared/types'
 import type { OpenFile } from '../store/slices/editor'
 import {
@@ -84,6 +88,7 @@ function makeSnapshot(
 describe('applyWebSessionTabsSnapshot', () => {
   beforeEach(() => {
     resetWebSessionTabsSnapshotFreshnessForTests()
+    resetWebSessionFocusIntentForTests()
   })
 
   it('ignores stale or duplicate same-epoch snapshots after a newer version was applied', () => {
@@ -1550,6 +1555,105 @@ describe('applyWebSessionTabsSnapshot', () => {
       activeTabId: shellTabId,
       tabOrder: [agentTabId, shellTabId]
     })
+  })
+
+  it('focuses a brand-new remote terminal that the snapshot marks active', () => {
+    // Why: opening a new terminal must take focus. Distinct from the #5435 case
+    // above (existing tab echoed active = keep focus); here the active tab is new.
+    const existingTabId = toWebTerminalSurfaceTabId('host-tab-1')
+    const newTabId = toWebTerminalSurfaceTabId('host-tab-2')
+    // Simulate createWebRuntimeSessionTerminal recording focus intent for the new tab.
+    recordWebSessionFocusIntent(WT, `host-tab-2::${SECOND_LEAF_ID}`)
+    const existingUnifiedTab: Tab = {
+      id: existingTabId,
+      entityId: existingTabId,
+      groupId: 'host-group-1',
+      worktreeId: WT,
+      contentType: 'terminal',
+      label: 'shell',
+      customLabel: null,
+      color: null,
+      sortOrder: 0,
+      createdAt: NOW,
+      isPreview: false,
+      isPinned: false
+    }
+
+    const patch = applyWebSessionTabsSnapshot(
+      makeState({
+        activeTabId: existingTabId,
+        activeTabIdByWorktree: { [WT]: existingTabId },
+        activeTabType: 'terminal',
+        activeTabTypeByWorktree: { [WT]: 'terminal' },
+        tabsByWorktree: {
+          [WT]: [
+            {
+              id: existingTabId,
+              ptyId: 'remote:web-env-1@@terminal-1',
+              worktreeId: WT,
+              title: 'shell',
+              customTitle: null,
+              color: null,
+              sortOrder: 0,
+              createdAt: NOW
+            }
+          ]
+        },
+        unifiedTabsByWorktree: { [WT]: [existingUnifiedTab] },
+        tabBarOrderByWorktree: { [WT]: [existingTabId] },
+        groupsByWorktree: {
+          [WT]: [
+            {
+              id: 'host-group-1',
+              worktreeId: WT,
+              activeTabId: existingTabId,
+              tabOrder: [existingTabId],
+              recentTabIds: [existingTabId]
+            }
+          ]
+        }
+      }),
+      makeSnapshot(
+        [
+          {
+            type: 'terminal',
+            id: `host-tab-1::${LEAF_ID}`,
+            title: 'shell',
+            parentTabId: 'host-tab-1',
+            leafId: LEAF_ID,
+            isActive: false,
+            status: 'ready',
+            terminal: 'terminal-1'
+          },
+          {
+            type: 'terminal',
+            id: `host-tab-2::${SECOND_LEAF_ID}`,
+            title: 'new shell',
+            parentTabId: 'host-tab-2',
+            leafId: SECOND_LEAF_ID,
+            isActive: true,
+            status: 'ready',
+            terminal: 'terminal-2'
+          }
+        ],
+        {
+          activeTabId: `host-tab-2::${SECOND_LEAF_ID}`,
+          activeTabType: 'terminal',
+          tabGroups: [
+            {
+              id: 'host-group-1',
+              activeTabId: 'host-tab-2',
+              tabOrder: ['host-tab-1', 'host-tab-2']
+            }
+          ]
+        }
+      ),
+      ENV,
+      NOW + 10
+    ) as Partial<WebSessionTabsSyncState>
+
+    expect(patch.activeTabIdByWorktree?.[WT]).toBe(newTabId)
+    expect(patch.groupsByWorktree?.[WT]?.[0]?.activeTabId).toBe(newTabId)
   })
 
   it('does not let repeated remote split status snapshots steal local pane focus', () => {
