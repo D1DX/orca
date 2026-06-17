@@ -3696,7 +3696,9 @@
           "93aebe4529": "Folder",
           "0d224eff10": "Primary worktree",
           "ca74db7550": "Project on SSH host",
-          "021538e1d1": "SSH disconnected"
+          "021538e1d1": "SSH disconnected",
+          "runtimeHostDisconnected": "Server disconnected",
+          "runtimeHostProject": "Project on Orca server"
         },
         "WorktreeCardAgents": {
           "1b0a156717": "Agents"

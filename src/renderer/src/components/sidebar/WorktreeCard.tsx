@@ -65,6 +65,7 @@ import { getWorktreeGitIdentityDisplay } from '@/lib/worktree-git-identity-displ
 import { getFlushWorktreeCardPaddingLeft } from './worktree-list-indentation'
 import { translate } from '@/i18n/i18n'
 import { folderWorkspaceKey, parseWorkspaceKey } from '../../../../shared/workspace-scope'
+import { parseExecutionHostId } from '../../../../shared/execution-host'
 
 type WorktreeRenameRequest = {
   worktreeId: string
@@ -262,6 +263,17 @@ const WorktreeCard = React.memo(function WorktreeCard({
     return state?.status ?? 'disconnected'
   })
   const isSshDisconnected = sshStatus != null && sshStatus !== 'connected'
+
+  // Why: runtime ("Orca server") hosts get the same disconnected treatment as
+  // SSH — when the host's runtime environment has no live status, its worktrees
+  // are dimmed and marked disconnected instead of looking fully available.
+  const isRuntimeDisconnected = useAppStore((s) => {
+    const parsed = parseExecutionHostId(repo?.executionHostId)
+    if (parsed?.kind !== 'runtime') {
+      return false
+    }
+    return !s.runtimeStatusByEnvironmentId.get(parsed.environmentId)?.status
+  })
   const [showDisconnectedDialog, setShowDisconnectedDialog] = useState(false)
   const sshDisconnectedPromptKey = isActive && isSshDisconnected ? worktree.id : null
   const [lastSshDisconnectedPromptKey, setLastSshDisconnectedPromptKey] = useState<string | null>(
@@ -1013,7 +1025,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
         ],
         titleRenaming && '!border-transparent !bg-transparent !shadow-none !ring-0',
         isDeleting && 'opacity-50 grayscale cursor-not-allowed',
-        isSshDisconnected && !isDeleting && 'opacity-60'
+        (isSshDisconnected || isRuntimeDisconnected) && !isDeleting && 'opacity-60'
       )}
       data-worktree-card-surface="true"
       data-worktree-card-active={isActiveSurface ? activeSurfaceVariant : undefined}
@@ -1101,6 +1113,32 @@ const WorktreeCard = React.memo(function WorktreeCard({
                 </TooltipContent>
               </Tooltip>
             )}
+
+            {!repo?.connectionId &&
+              parseExecutionHostId(repo?.executionHostId)?.kind === 'runtime' && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="shrink-0 inline-flex items-center">
+                      {isRuntimeDisconnected ? (
+                        <ServerOff className="size-3 text-red-400" />
+                      ) : (
+                        <Server className="size-3 text-muted-foreground" />
+                      )}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={8}>
+                    {isRuntimeDisconnected
+                      ? translate(
+                          'auto.components.sidebar.WorktreeCard.runtimeHostDisconnected',
+                          'Server disconnected'
+                        )
+                      : translate(
+                          'auto.components.sidebar.WorktreeCard.runtimeHostProject',
+                          'Project on Orca server'
+                        )}
+                  </TooltipContent>
+                </Tooltip>
+              )}
 
             {showInlineRepoBadge && (
               <RepoIdentityChip repo={repo}>

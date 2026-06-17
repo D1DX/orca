@@ -3663,7 +3663,9 @@
           "93aebe4529": "フォルダ",
           "0d224eff10": "プライマリワークツリー",
           "ca74db7550": "SSH経由のリモートプロジェクト",
-          "021538e1d1": "SSHが切断されました"
+          "021538e1d1": "SSHが切断されました",
+          "runtimeHostDisconnected": "Server disconnected",
+          "runtimeHostProject": "Project on Orca server"
         },
         "WorktreeCardAgents": {
           "1b0a156717": "Agents"
