@@ -1360,7 +1360,7 @@ describe('createUISlice hydratePersistedUI', () => {
     const store = createUIStore()
     store.setState({
       settings: { compactWorktreeCards: true } as AppState['settings'],
-      worktreeCardProperties: ['status', 'unread', 'branch']
+      worktreeCardProperties: ['status', 'branch']
     })
 
     store.getState().setWorktreeCardMode('Default')
@@ -1384,7 +1384,7 @@ describe('createUISlice hydratePersistedUI', () => {
     const store = createUIStore()
     store.setState({
       settings: { compactWorktreeCards: false } as AppState['settings'],
-      worktreeCardProperties: ['status', 'unread', 'branch', 'inline-agents']
+      worktreeCardProperties: ['status', 'branch', 'inline-agents']
     })
 
     store.getState().setWorktreeCardMode('Compact')
@@ -1406,7 +1406,7 @@ describe('createUISlice hydratePersistedUI', () => {
     vi.stubGlobal('window', { api: { ui: { set: setUI } } })
     const store = createUIStore()
 
-    store.getState().setWorktreeCardProperties(['inline-agents', 'pr', 'pr'])
+    store.getState().setWorktreeCardProperties(['inline-agents', 'inline-agents'])
 
     expect(store.getState().worktreeCardProperties).toEqual(['inline-agents'])
     expect(store.getState()._worktreeCardModeDefaulted).toBe(false)

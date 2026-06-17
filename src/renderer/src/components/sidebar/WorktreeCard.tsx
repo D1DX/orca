@@ -835,10 +835,10 @@ const WorktreeCard = React.memo(function WorktreeCard({
     []
   )
 
-  // Why: the 'unread' card property is the user's opt-out. When off, we render
-  // as if the workspace is read so bold emphasis never appears. The persisted
+  // Why: unread is part of the left status lane, so the Status display toggle
+  // owns both the dot/PR slot and unread emphasis. The persisted
   // `worktree.isUnread` flag is unchanged; only the rendering changes.
-  const showUnreadEmphasis = cardProps.includes('unread') && worktree.isUnread
+  const showUnreadEmphasis = showStatus && worktree.isUnread
   const hoverIssue = issueDisplay
   const hoverLinearIssue = linearIssueDisplay
   const hoverReview = prDisplay
@@ -953,11 +953,10 @@ const WorktreeCard = React.memo(function WorktreeCard({
   const showConflictOperationBadge =
     !!conflictOperation && conflictOperation !== 'unknown' && conflictOperation !== 'rebase'
   const hasMetadataBadge = showConflictOperationBadge
-  const showUnreadQuickAction = !affiliateListMode && cardProps.includes('unread')
+  const showUnreadQuickAction = !affiliateListMode && showStatus
   // Why: the activity dot and unread bell compete for the same tiny sidebar
   // lane. Keep one slot, and let an active unread bell visually win.
-  const showCombinedStatusSlot = showStatus || (!compactCards && showUnreadQuickAction)
-  const showTitleRowUnread = compactCards && showUnreadQuickAction && !showStatus
+  const showCombinedStatusSlot = showStatus
   const showTitleRowPrimary = compactCards && worktree.isMainWorktree && !isFolder
   const showMetaRowDetails = !compactCards && (hasDetails || hasPorts)
   // Why: detailed cards need a stable metadata lane only when it has content.
@@ -976,7 +975,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
   const hasMetaRow = compactCards
     ? hasMetadataBadge || cacheStartedAt != null
     : hasDetailedMetaRowContent
-  const showHeaderActions = showTitleRowUnread || showTitleRowPrimary || showDeleteQuickAction
+  const showHeaderActions = showTitleRowPrimary || showDeleteQuickAction
   const showBranchIdentityHover =
     !isFolder && branch.length > 0 && !cardProps.includes('branch') && branch !== cardTitleDisplay
   const showInlineAgentList = cardProps.includes('inline-agents')
@@ -1279,18 +1278,6 @@ const WorktreeCard = React.memo(function WorktreeCard({
 
           {showHeaderActions && (
             <div className="ml-auto flex shrink-0 items-center justify-center gap-1 pr-1.5">
-              {showTitleRowUnread && (
-                <WorktreeCardStatusSlot
-                  worktreeId={worktree.id}
-                  showStatus={false}
-                  showUnreadAction
-                  isUnread={worktree.isUnread}
-                  unreadTooltip={unreadTooltip}
-                  onPointerDown={stopQuickActionPointerPropagation}
-                  onToggleUnread={handleToggleUnreadQuick}
-                />
-              )}
-
               {showTitleRowPrimary && (
                 <Tooltip>
                   <TooltipTrigger asChild>

@@ -9,7 +9,6 @@ export const TASK_WORKTREE_CARD_PROPERTIES: WorktreeCardProperty[] = ['issue', '
 
 export const DEFAULT_WORKTREE_CARD_PROPERTIES: WorktreeCardProperty[] = [
   'status',
-  'unread',
   ...TASK_WORKTREE_CARD_PROPERTIES,
   'comment',
   'ports',
@@ -19,11 +18,10 @@ export const DEFAULT_WORKTREE_CARD_PROPERTIES: WorktreeCardProperty[] = [
   'inline-agents'
 ]
 
-export const COMPACT_WORKTREE_CARD_PROPERTIES: WorktreeCardProperty[] = ['status', 'unread']
+export const COMPACT_WORKTREE_CARD_PROPERTIES: WorktreeCardProperty[] = ['status']
 
 const WORKTREE_CARD_PROPERTY_ORDER: WorktreeCardProperty[] = [
   'status',
-  'unread',
   'branch',
   'issue',
   'linear-issue',
@@ -33,7 +31,7 @@ const WORKTREE_CARD_PROPERTY_ORDER: WorktreeCardProperty[] = [
 ]
 
 export function normalizeWorktreeCardProperties(
-  properties: readonly WorktreeCardProperty[] | null | undefined
+  properties: readonly unknown[] | null | undefined
 ): WorktreeCardProperty[] {
   const normalized: WorktreeCardProperty[] = []
   const source = properties ?? DEFAULT_WORKTREE_CARD_PROPERTIES

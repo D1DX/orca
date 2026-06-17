@@ -4829,7 +4829,6 @@ describe('Store', () => {
     const store = await createStore()
     expect(store.getUI().worktreeCardProperties).toEqual([
       'status',
-      'unread',
       'branch',
       'issue',
       'linear-issue',
@@ -4838,6 +4837,7 @@ describe('Store', () => {
       'inline-agents'
     ])
     expect(store.getUI().worktreeCardProperties).not.toContain('ci')
+    expect(store.getUI().worktreeCardProperties).not.toContain('unread')
     expect(store.getUI()._worktreeCardModeDefaulted).toBe(true)
   })
 
@@ -4862,9 +4862,10 @@ describe('Store', () => {
       workspaceSession: {}
     })
     const store = await createStore()
-    expect(store.getUI().worktreeCardProperties).toEqual(['status', 'unread'])
+    expect(store.getUI().worktreeCardProperties).toEqual(['status'])
     expect(store.getUI().worktreeCardProperties).not.toContain('branch')
     expect(store.getUI().worktreeCardProperties).not.toContain('inline-agents')
+    expect(store.getUI().worktreeCardProperties).not.toContain('unread')
     expect(store.getUI()._worktreeCardModeDefaulted).toBe(true)
   })
 
@@ -4882,7 +4883,6 @@ describe('Store', () => {
 
     expect(store.getUI().worktreeCardProperties).toEqual([
       'status',
-      'unread',
       'issue',
       'linear-issue',
       'comment',
@@ -4908,9 +4908,10 @@ describe('Store', () => {
     })
     const store = await createStore()
 
-    expect(store.getUI().worktreeCardProperties).toEqual(['status', 'unread', 'issue'])
+    expect(store.getUI().worktreeCardProperties).toEqual(['status', 'issue'])
     expect(store.getUI().worktreeCardProperties).not.toContain('ci')
     expect(store.getUI().worktreeCardProperties).not.toContain('branch')
+    expect(store.getUI().worktreeCardProperties).not.toContain('unread')
   })
 
   it('preserves custom card properties after the mode marker exists', async () => {
@@ -4959,6 +4960,7 @@ describe('Store', () => {
 
     expect(store.getUI().worktreeCardProperties).not.toContain('branch')
     expect(store.getUI().worktreeCardProperties).not.toContain('pr')
+    expect(store.getUI().worktreeCardProperties).not.toContain('unread')
     expect(store.getUI().worktreeCardProperties).toContain('inline-agents')
   })
 
@@ -4986,9 +4988,10 @@ describe('Store', () => {
     const store = await createStore()
 
     expect(store.getSettings().compactWorktreeCards).toBe(true)
-    expect(store.getUI().worktreeCardProperties).toEqual(['status', 'unread'])
+    expect(store.getUI().worktreeCardProperties).toEqual(['status'])
     expect(store.getUI().worktreeCardProperties).not.toContain('branch')
     expect(store.getUI().worktreeCardProperties).not.toContain('inline-agents')
+    expect(store.getUI().worktreeCardProperties).not.toContain('unread')
   })
 
   it('derives missing marked card properties from explicit Compact mode', async () => {
@@ -5006,7 +5009,7 @@ describe('Store', () => {
     const store = await createStore()
 
     expect(store.getSettings().compactWorktreeCards).toBe(true)
-    expect(store.getUI().worktreeCardProperties).toEqual(['status', 'unread'])
+    expect(store.getUI().worktreeCardProperties).toEqual(['status'])
     expect(store.getUI().worktreeCardProperties).not.toContain('inline-agents')
   })
 

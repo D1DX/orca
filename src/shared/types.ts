@@ -2862,9 +2862,6 @@ export type NotificationPermissionStatusResult = {
 
 export type WorktreeCardProperty =
   | 'status'
-  | 'unread'
-  // Legacy persisted preference. CI status is now represented by linked PR metadata.
-  | 'ci'
   // Internal migration-only property for legacy detailed cards that showed
   // branch identity as a visible row.
   | 'branch'
@@ -2872,7 +2869,6 @@ export type WorktreeCardProperty =
   // persisted values so older profiles and provider-specific fetch paths work.
   | 'issue'
   | 'linear-issue'
-  | 'pr'
   | 'comment'
   | 'ports'
   // Why: inline list of agent activity rendered directly inside each

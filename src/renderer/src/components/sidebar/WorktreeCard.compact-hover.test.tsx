@@ -220,7 +220,7 @@ describe('WorktreeCard compact hover details', () => {
   }, 20_000)
 
   it('shows hidden task, notes, and port details from the compact worktree card hover', async () => {
-    worktreeCardProperties = ['status', 'unread']
+    worktreeCardProperties = ['status']
     const worktree = makeWorktree({
       linkedIssue: 123,
       linkedLinearIssue: 'ENG-123',
@@ -271,7 +271,7 @@ describe('WorktreeCard compact hover details', () => {
 
   it('keeps hidden branch identity available from a fresh Default card hover', async () => {
     settings = { compactWorktreeCards: false }
-    worktreeCardProperties = ['status', 'unread', 'issue', 'linear-issue', 'comment', 'ports']
+    worktreeCardProperties = ['status', 'issue', 'linear-issue', 'comment', 'ports']
     const { default: WorktreeCard } = await import('./WorktreeCard')
 
     const markup = renderToStaticMarkup(
@@ -290,7 +290,7 @@ describe('WorktreeCard compact hover details', () => {
 
   it('uses one whole-card hover even when detailed metadata icons are visible', async () => {
     settings = { compactWorktreeCards: false }
-    worktreeCardProperties = ['status', 'unread', 'issue', 'linear-issue', 'comment', 'ports']
+    worktreeCardProperties = ['status', 'issue', 'linear-issue', 'comment', 'ports']
     const { default: WorktreeCard } = await import('./WorktreeCard')
 
     const markup = renderToStaticMarkup(
@@ -314,7 +314,7 @@ describe('WorktreeCard compact hover details', () => {
 
   it('shows the branch row for migrated Default cards with branch enabled', async () => {
     settings = { compactWorktreeCards: false }
-    worktreeCardProperties = ['status', 'unread', 'branch']
+    worktreeCardProperties = ['status', 'branch']
     const { default: WorktreeCard } = await import('./WorktreeCard')
 
     const markup = renderToStaticMarkup(

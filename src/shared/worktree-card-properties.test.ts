@@ -29,13 +29,9 @@ describe('worktree card properties', () => {
     expect(props).not.toContain('pr')
   })
 
-  it('keeps status and unread enabled in both presets', () => {
-    expect(getWorktreeCardModeProperties('Default')).toEqual(
-      expect.arrayContaining(['status', 'unread'])
-    )
-    expect(getWorktreeCardModeProperties('Compact')).toEqual(
-      expect.arrayContaining(['status', 'unread'])
-    )
+  it('keeps status enabled in both presets', () => {
+    expect(getWorktreeCardModeProperties('Default')).toEqual(expect.arrayContaining(['status']))
+    expect(getWorktreeCardModeProperties('Compact')).toEqual(expect.arrayContaining(['status']))
   })
 
   it('keeps provider-specific task metadata together in Default mode', () => {
@@ -44,8 +40,8 @@ describe('worktree card properties', () => {
     )
   })
 
-  it('normalizes legacy ci and pr away while preserving selected properties', () => {
-    expect(normalizeWorktreeCardProperties(['ci', 'branch', 'pr'])).toEqual(['branch'])
+  it('normalizes legacy ci, pr, and unread away while preserving selected properties', () => {
+    expect(normalizeWorktreeCardProperties(['ci', 'branch', 'pr', 'unread'])).toEqual(['branch'])
   })
 
   it('returns combined mode update payloads', () => {

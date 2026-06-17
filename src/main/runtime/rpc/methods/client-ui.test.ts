@@ -287,6 +287,27 @@ describe('client UI RPC methods', () => {
     expect(runtime.updateUIState).not.toHaveBeenCalled()
   })
 
+  it('strips retired worktree card properties from legacy clients', async () => {
+    const updated: PersistedUIState = {
+      ...getDefaultUIState(),
+      worktreeCardProperties: ['status', 'issue']
+    }
+    const runtime = {
+      getRuntimeId: () => 'test-runtime',
+      updateUIState: vi.fn(() => updated)
+    } as unknown as OrcaRuntimeService
+    const dispatcher = new RpcDispatcher({ runtime, methods: CLIENT_UI_METHODS })
+
+    const response = await dispatcher.dispatch(
+      makeRequest('ui.set', { worktreeCardProperties: ['status', 'unread', 'ci', 'pr', 'issue'] })
+    )
+
+    expect(runtime.updateUIState).toHaveBeenCalledWith({
+      worktreeCardProperties: ['status', 'issue']
+    })
+    expect(response).toMatchObject({ ok: true, result: { ui: updated } })
+  })
+
   it('rejects unknown feature interaction ids', async () => {
     const runtime = {
       getRuntimeId: () => 'test-runtime',

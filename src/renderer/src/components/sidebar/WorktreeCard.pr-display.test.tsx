@@ -330,7 +330,7 @@ describe('WorktreeCard linked PR display', () => {
   })
 
   it('renders linked PR status in the left status slot instead of the right metadata list', async () => {
-    worktreeCardProperties = ['status', 'ci']
+    worktreeCardProperties = ['status']
     hostedReviewCache = {
       'local::repo-1::feature/local-branch': {
         data: makeHostedReview({ status: 'failure' }),

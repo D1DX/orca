@@ -38,9 +38,7 @@ export type WorktreeCardPropertyOption = {
 export const WORKTREE_CARD_PROPERTY_OPTIONS: WorktreeCardPropertyOption[] = [
   {
     id: 'status',
-    // Why: unread is rendered in the same tiny status lane, so users should
-    // only have one Status display decision instead of a separate Unread knob.
-    properties: ['status', 'unread'],
+    properties: ['status'],
     get label() {
       return translate('auto.components.sidebar.SidebarWorkspaceOptionsMenu.1a0eec0d35', 'Status')
     }

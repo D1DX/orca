@@ -11,6 +11,7 @@ import {
 import { isTuiAgent } from '../../../../shared/tui-agent-config'
 import { isTaskProvider } from '../../../../shared/task-providers'
 import { normalizeDisabledTuiAgents } from '../../../../shared/tui-agent-selection'
+import { normalizeWorktreeCardProperties } from '../../../../shared/worktree-card-properties'
 import type { PersistedUIState, TaskProvider } from '../../../../shared/types'
 import { defineMethod, type RpcMethod } from '../core'
 
@@ -22,7 +23,7 @@ const TaskProviderParam = z.custom<TaskProvider>(isTaskProvider, {
 const FeatureTipIds = z.array(z.custom(isFeatureTipId, { message: 'Unknown feature tip id' }))
 const UnknownRecord = z.record(z.string(), z.unknown())
 const UnknownRecordArray = z.array(UnknownRecord)
-const WorktreeCardProperty = z.enum([
+const LegacyWorktreeCardProperty = z.enum([
   'status',
   'unread',
   'ci',
@@ -34,6 +35,9 @@ const WorktreeCardProperty = z.enum([
   'ports',
   'inline-agents'
 ])
+const WorktreeCardProperties = z
+  .array(LegacyWorktreeCardProperty)
+  .transform((value) => normalizeWorktreeCardProperties(value))
 const AgentActivityDisplayMode = z.enum(['compact', 'full'])
 const StatusBarItem = z.enum(['claude', 'codex', 'gemini', 'opencode-go', 'ssh', 'resource-usage'])
 const WorkspaceStatusDefinition = z.object({
@@ -169,7 +173,7 @@ const UiUpdate = z
     collapsedGroups: StringArray.optional(),
     uiZoomLevel: z.number().finite().optional(),
     editorFontZoomLevel: z.number().finite().optional(),
-    worktreeCardProperties: z.array(WorktreeCardProperty).optional(),
+    worktreeCardProperties: WorktreeCardProperties.optional(),
     _worktreeCardModeDefaulted: z.boolean().optional(),
     agentActivityDisplayMode: AgentActivityDisplayMode.optional(),
     workspaceStatuses: z.array(WorkspaceStatusDefinition).optional(),
