@@ -175,18 +175,17 @@ describe('RuntimeEnvironmentsPane host details', () => {
     ).toBe('Host model support: update server for task source context, workspace run context')
   })
 
-  it('only reports a reachable host as Connected when it is the active server', () => {
-    // Why: row Connect probes reachability only; the status bar reserves
-    // "connected" for the active runtime. A reachable-but-not-active host must
-    // read 'available' here so the two surfaces agree (regression: it showed
-    // "Connected" while the status bar showed the host as not connected).
-    expect(getRuntimeServerConnectionState(details({ status: 'ready' }), false)).toBe('available')
-    expect(getRuntimeServerConnectionState(details({ status: 'ready' }), true)).toBe('connected')
-    expect(getRuntimeServerConnectionState(undefined, true)).toBe('checking')
-    expect(getRuntimeServerConnectionState(details({ status: 'loading' }), true)).toBe('checking')
-    expect(
-      getRuntimeServerConnectionState(details({ status: 'error', error: 'offline' }), true)
-    ).toBe('disconnected')
+  it('reports an attached, ready, compatible host as Connected regardless of active-ness', () => {
+    // Why: the row tracks attachment (reachable + ready), which exposes Disconnect.
+    // Whether the host is the default *active* server is a separate concept, so it
+    // must NOT change this label — otherwise the dot/label/button disagree (a host
+    // showed "Available" with a grey dot yet offered Disconnect).
+    expect(getRuntimeServerConnectionState(details({ status: 'ready' }))).toBe('connected')
+    expect(getRuntimeServerConnectionState(undefined)).toBe('checking')
+    expect(getRuntimeServerConnectionState(details({ status: 'loading' }))).toBe('checking')
+    expect(getRuntimeServerConnectionState(details({ status: 'error', error: 'offline' }))).toBe(
+      'disconnected'
+    )
     expect(
       getRuntimeServerConnectionState(
         details({
@@ -198,8 +197,7 @@ describe('RuntimeEnvironmentsPane host details', () => {
             serverProtocolVersion: MIN_COMPATIBLE_RUNTIME_SERVER_VERSION - 1,
             requiredServerProtocolVersion: MIN_COMPATIBLE_RUNTIME_SERVER_VERSION
           }
-        }),
-        true
+        })
       )
     ).toBe('disconnected')
   })

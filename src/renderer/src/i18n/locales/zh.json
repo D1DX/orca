@@ -2642,13 +2642,11 @@
             "runtime_checking": "检查中",
             "runtime_online": "已连接",
             "runtime_unavailable": "已断开",
-            "runtime_available": "可用",
             "runtime_connect_unavailable": "远程主机不可达",
             "runtime_disconnect_failed": "断开连接失败",
             "runtime_reconnecting": "重新连接中",
             "runtime_last_close_reason": "Closed: {{value0}}",
-            "runtime_reconnect_attempt": "Attempt {{value0}}",
-            "runtime_channel_counts": "{{value0}} pending · {{value1}} streams"
+            "runtime_reconnect_attempt": "Attempt {{value0}}"
           },
           "StatusBar": {
             "9659e38343": "端口",

@@ -190,11 +190,10 @@ export function getActiveServerModeDescription(allowLocalRuntime: boolean): stri
       )
 }
 
-type RuntimeServerConnectionState = 'connected' | 'available' | 'checking' | 'disconnected'
+type RuntimeServerConnectionState = 'connected' | 'checking' | 'disconnected'
 
 export function getRuntimeServerConnectionState(
-  details: RuntimeHostDetails | undefined,
-  active: boolean
+  details: RuntimeHostDetails | undefined
 ): RuntimeServerConnectionState {
   if (!details || details.status === 'loading') {
     return 'checking'
@@ -202,10 +201,11 @@ export function getRuntimeServerConnectionState(
   if (details.status !== 'ready' || details.compatibility?.kind === 'blocked') {
     return 'disconnected'
   }
-  // Why: row Connect only probes reachability; the persistent control connection
-  // is established by the Active Server selector. Only the active host is truly
-  // "Connected" (matching the status bar) — reachable-but-not-active is "Available".
-  return active ? 'connected' : 'available'
+  // Why: an attached, reachable, compatible host is "Connected" (and exposes
+  // Disconnect). Whether it is the default *active* server is a separate concept,
+  // surfaced by the Advanced > Active Server selector and the row's help text —
+  // it must not change this connection label, or the dot/label/button disagree.
+  return 'connected'
 }
 
 function getRuntimeServerConnectionLabel(state: RuntimeServerConnectionState): string {
@@ -214,11 +214,6 @@ function getRuntimeServerConnectionLabel(state: RuntimeServerConnectionState): s
       return translate(
         'auto.components.settings.RuntimeEnvironmentsPane.serverConnected',
         'Connected'
-      )
-    case 'available':
-      return translate(
-        'auto.components.settings.RuntimeEnvironmentsPane.serverAvailable',
-        'Available'
       )
     case 'checking':
       return translate(
@@ -239,7 +234,6 @@ function getRuntimeServerDotClass(state: RuntimeServerConnectionState): string {
       return 'bg-emerald-500'
     case 'checking':
       return 'bg-yellow-500'
-    case 'available':
     case 'disconnected':
       return 'bg-muted-foreground/40'
   }
@@ -873,11 +867,9 @@ export function RuntimeEnvironmentsPane({
                     const details = detailsByEnvironmentId[environment.id]
                     const detailsDescription = getHostDetailsDescription(details)
                     const isActive = settings.activeRuntimeEnvironmentId === environment.id
-                    const connectionState = getRuntimeServerConnectionState(details, isActive)
-                    // Reachable covers both the active host ('connected') and a
-                    // probed-but-not-active host ('available'); both expose Disconnect.
-                    const isReachable =
-                      connectionState === 'connected' || connectionState === 'available'
+                    const connectionState = getRuntimeServerConnectionState(details)
+                    // A connected host exposes Disconnect; otherwise Connect.
+                    const isReachable = connectionState === 'connected'
                     const actionBusy =
                       connectingId === environment.id ||
                       switchingValue === environment.id ||
