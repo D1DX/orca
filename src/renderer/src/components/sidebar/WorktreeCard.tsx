@@ -1064,7 +1064,7 @@ const WorktreeCard = React.memo(function WorktreeCard({
       {showCombinedStatusSlot ? (
         <div
           className={cn(
-            'flex shrink-0 items-start justify-center pt-[2px]',
+            'mr-1 flex shrink-0 items-start justify-center pt-[2px]',
             affiliateListMode && 'px-1'
           )}
           data-worktree-card-status-slot=""
