@@ -17,4 +17,7 @@ export type BrowserBackend = {
   createTab(params: BrowserBackendCreateTab): Promise<{ browserPageId: string }>
   /** Tear down a browser page created by this backend. */
   closeTab(browserPageId: string): Promise<void>
+  /** Tear down every page this backend owns (process shutdown). Optional —
+   *  renderer-hosted backends are torn down with their window. */
+  destroyAll?(): void
 }

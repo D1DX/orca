@@ -1704,6 +1704,9 @@ app.on('will-quit', (e) => {
   // Why: agent-browser daemon processes would otherwise linger after Orca quits,
   // holding ports and leaving stale session state on disk.
   runtime?.getAgentBrowserBridge()?.destroyAllSessions()
+  // Why: headless offscreen browser windows are main-process owned; tear them
+  // down explicitly on quit alongside the other browser/session shutdowns.
+  runtime?.getOffscreenBrowserBackend()?.destroyAll?.()
   const emulatorShutdown = runtime?.getEmulatorBridge()?.destroyAllSessions() ?? Promise.resolve()
   serveSimStateWatcher.stop()
   killAllPty()

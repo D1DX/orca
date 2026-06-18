@@ -13025,6 +13025,19 @@ export class OrcaRuntimeService {
     advertisedUrlWatcher.forgetWorktree(worktreeId)
     serveSimStateWatcher.forgetWorktree(worktreeId)
     deleteWorktreeHistoryDir(worktreeId)
+    this.closeHeadlessBrowserPagesForWorktree(worktreeId)
+  }
+
+  // Why: headless offscreen browser pages are main-process BrowserWindows that
+  // outlive a worktree unless explicitly closed — removing a worktree without
+  // closing its open panes leaks the windows for the life of the serve process.
+  private closeHeadlessBrowserPagesForWorktree(worktreeId: string): void {
+    if (!this.offscreenBrowserBackend || !this.agentBrowserBridge?.tabList) {
+      return
+    }
+    for (const tab of this.agentBrowserBridge.tabList(worktreeId).tabs) {
+      void this.offscreenBrowserBackend.closeTab(tab.browserPageId).catch(() => {})
+    }
   }
 
   private rememberPreservedBranchCleanupTarget(

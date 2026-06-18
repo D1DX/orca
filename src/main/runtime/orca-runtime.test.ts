@@ -1229,6 +1229,25 @@ describe('OrcaRuntimeService', () => {
     expect(runtime.getStatus().capabilities).not.toContain('browser.headless.v1')
   })
 
+  it('closes a worktree’s offscreen browser pages when its metadata is removed (leak fix)', () => {
+    const runtime = createRuntime()
+    const closeTab = vi.fn().mockResolvedValue(undefined)
+    runtime.setOffscreenBrowserBackend({ createTab: vi.fn(), closeTab })
+    runtime.setAgentBrowserBridge({
+      tabList: vi.fn((worktreeId: string) =>
+        worktreeId === TEST_WORKTREE_ID
+          ? { tabs: [{ browserPageId: 'page-a' }, { browserPageId: 'page-b' }] }
+          : { tabs: [] }
+      )
+    } as never)
+
+    runtime['removeWorktreeMetadataAndHistory'](store as never, TEST_WORKTREE_ID)
+
+    expect(closeTab).toHaveBeenCalledWith('page-a')
+    expect(closeTab).toHaveBeenCalledWith('page-b')
+    expect(closeTab).toHaveBeenCalledTimes(2)
+  })
+
   it('claims the first window as authoritative and ignores later windows', () => {
     const runtime = createRuntime()
 
