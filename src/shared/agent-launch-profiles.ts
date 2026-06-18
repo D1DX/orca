@@ -6,7 +6,7 @@ import {
   resolveTuiAgentLaunchArgs,
   resolveTuiAgentLaunchEnv
 } from './tui-agent-launch-defaults'
-import type { AgentLaunchProfile, AgentLaunchProfileManagedAccount, TuiAgent } from './types'
+import type { AgentLaunchProfile, TuiAgent } from './types'
 
 export type AgentLaunchProfileSelectionKind = 'explicit' | 'stored-default'
 
@@ -21,21 +21,10 @@ export type AgentLaunchProfileStartupOptions =
       cmdOverrides: Partial<Record<TuiAgent, string>>
       agentArgs: string
       agentEnv: Record<string, string>
-      managedAccount?: AgentLaunchProfileManagedAccount
       profile: AgentLaunchProfile
       isDefaultProfile: boolean
     }
   | { ok: false; error: string }
-
-const CODEX_MANAGED_ACCOUNT_ENV_KEYS = new Set(['CODEX_HOME', 'ORCA_CODEX_HOME'])
-
-const CLAUDE_MANAGED_ACCOUNT_ENV_KEYS = new Set([
-  'CLAUDE_CONFIG_DIR',
-  'ANTHROPIC_API_KEY',
-  'ANTHROPIC_AUTH_TOKEN',
-  'ANTHROPIC_CUSTOM_HEADERS',
-  'CLAUDE_CODE_OAUTH_TOKEN'
-])
 
 const SHELL_CONTROL_PATTERN = /[;&|<>()`$\n\r]/
 
@@ -112,10 +101,6 @@ export function resolveAgentLaunchProfileStartupOptions(args: {
   if (!resolved.ok) {
     return resolved
   }
-  const conflict = getManagedAccountEnvConflict(resolved.profile)
-  if (conflict) {
-    return { ok: false, error: conflict }
-  }
   const cmdOverrides = resolved.profile.commandOverride
     ? { [args.agent]: resolved.profile.commandOverride }
     : {}
@@ -125,7 +110,6 @@ export function resolveAgentLaunchProfileStartupOptions(args: {
     cmdOverrides,
     agentArgs: resolved.profile.args ?? '',
     agentEnv: { ...resolved.profile.env },
-    ...(resolved.profile.managedAccount ? { managedAccount: resolved.profile.managedAccount } : {}),
     profile: resolved.profile,
     isDefaultProfile: resolved.isDefaultProfile
   }
@@ -141,48 +125,17 @@ function normalizeAgentLaunchProfile(value: unknown): AgentLaunchProfile | null 
   if (!id || !name || !isTuiAgent(record.agentId)) {
     return null
   }
-  const managedAccount = normalizeManagedAccount(record.managedAccount, record.agentId)
-  if (managedAccount === 'invalid') {
-    return null
-  }
   const env = normalizeProfileEnv(record.env)
   return {
     id,
     agentId: record.agentId,
     name,
-    ...(managedAccount ? { managedAccount } : {}),
     ...normalizeStringField('commandOverride', record.commandOverride),
     ...normalizeProfileArgs(record.agentId, record.args),
     ...(Object.keys(env).length > 0 ? { env } : {}),
     ...(record.disabled === true ? { disabled: true } : {}),
     ...(record.protected === true ? { protected: true } : {})
   }
-}
-
-function normalizeManagedAccount(
-  value: unknown,
-  agent: TuiAgent
-): AgentLaunchProfileManagedAccount | 'invalid' | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return null
-  }
-  const record = value as Record<string, unknown>
-  if (record.kind !== 'codex' && record.kind !== 'claude') {
-    return 'invalid'
-  }
-  if (record.kind !== agent) {
-    return 'invalid'
-  }
-  const accountId =
-    typeof record.accountId === 'string'
-      ? record.accountId.trim() || null
-      : record.accountId === null
-        ? null
-        : undefined
-  if (accountId === undefined) {
-    return 'invalid'
-  }
-  return { kind: record.kind, accountId }
 }
 
 function normalizeStringField(
@@ -269,23 +222,6 @@ function handleUnavailableProfile(
     }
   }
   return { ok: false, error }
-}
-
-function getManagedAccountEnvConflict(profile: AgentLaunchProfile): string | null {
-  if (!profile.managedAccount || !profile.env) {
-    return null
-  }
-  const reserved =
-    profile.managedAccount.kind === 'codex'
-      ? CODEX_MANAGED_ACCOUNT_ENV_KEYS
-      : CLAUDE_MANAGED_ACCOUNT_ENV_KEYS
-  const conflict = Object.keys(profile.env).find((key) => reserved.has(key.toUpperCase()))
-  if (!conflict) {
-    return null
-  }
-  // Why: managed account materialization owns auth paths and tokens on the
-  // execution target; profile env must not silently redirect those credentials.
-  return `Agent launch profile "${profile.name}" sets managed-account env "${conflict}".`
 }
 
 function getProfileCommandOverrideError(profile: AgentLaunchProfile): string | null {

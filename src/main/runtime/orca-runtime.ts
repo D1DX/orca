@@ -13049,6 +13049,7 @@ export class OrcaRuntimeService {
         afterTabId: afterDesktopTabId,
         targetGroupId: opts.targetGroupId,
         command,
+        launchAgent: opts.agent,
         activate: opts.activate
       })
     })

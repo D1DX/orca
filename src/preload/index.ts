@@ -43,6 +43,7 @@ import type {
   FloatingTerminalCwdRequest,
   MarkdownDocument,
   SearchResult,
+  TuiAgent,
   UpdateStatus,
   WorktreeBaseStatusEvent,
   WorktreeDefaultTabsLaunch,
@@ -1697,7 +1698,7 @@ const api = {
     copilotStatus: (): Promise<AgentHookInstallStatus> =>
       ipcRenderer.invoke('agentHooks:copilotStatus'),
     hermesStatus: (): Promise<AgentHookInstallStatus> =>
-      ipcRenderer.invoke('agentHooks:hermesStatus'),
+      ipcRenderer.invoke('agentHooks:hermesStatus')
   },
 
   agentTrust: {
@@ -3003,6 +3004,7 @@ const api = {
         targetGroupId?: string
         command?: string
         title?: string
+        launchAgent?: TuiAgent
         activate?: boolean
       }) => void
     ): (() => void) => {
@@ -3015,6 +3017,7 @@ const api = {
           targetGroupId?: string
           command?: string
           title?: string
+          launchAgent?: TuiAgent
           activate?: boolean
         }
       ) => callback(data)

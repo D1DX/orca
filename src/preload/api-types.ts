@@ -2386,6 +2386,7 @@ export type PreloadApi = {
         targetGroupId?: string
         command?: string
         title?: string
+        launchAgent?: TuiAgent
         activate?: boolean
       }) => void
     ) => () => void

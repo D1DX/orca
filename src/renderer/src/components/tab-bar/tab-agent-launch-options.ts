@@ -1,10 +1,12 @@
 import { getAgentCatalog } from '@/lib/agent-catalog'
-import type { TuiAgent } from '../../../../shared/types'
+import { normalizeAgentLaunchProfiles } from '../../../../shared/agent-launch-profiles'
+import type { AgentLaunchProfile, TuiAgent } from '../../../../shared/types'
 
 export type TabAgentLaunchOption = {
   agent: TuiAgent
   aliases: readonly string[]
   label: string
+  profileId?: string
 }
 
 function normalizeAgentAlias(value: string): string {
@@ -34,9 +36,13 @@ export function orderTabLaunchAgents(
 
 export function buildTabAgentLaunchOptions(
   agents: readonly TuiAgent[],
-  commandOverrides: Partial<Record<TuiAgent, string>> = {}
+  commandOverrides: Partial<Record<TuiAgent, string>> = {},
+  profiles: readonly AgentLaunchProfile[] = []
 ): TabAgentLaunchOption[] {
-  return agents.map((agent) => {
+  const normalizedProfiles = normalizeAgentLaunchProfiles(profiles).filter(
+    (profile) => !profile.disabled
+  )
+  return agents.flatMap((agent) => {
     const entry = getCatalogEntry(agent)
     const label = entry?.label ?? agent
     const aliases = new Set<string>([
@@ -54,7 +60,41 @@ export function buildTabAgentLaunchOptions(
       aliases.add(normalizeAgentAlias(commandOverride))
       aliases.add(compactAgentAlias(commandOverride))
     }
-    return { agent, aliases: [...aliases], label }
+    const baseOption: TabAgentLaunchOption = { agent, aliases: [...aliases], label }
+    const profileOptions = normalizedProfiles
+      .filter((profile) => profile.agentId === agent)
+      .map((profile): TabAgentLaunchOption => {
+        const profileLabel = `${label}: ${profile.name}`
+        const profileAliases = new Set<string>([
+          normalizeAgentAlias(profile.id),
+          compactAgentAlias(profile.id),
+          normalizeAgentAlias(profile.name),
+          compactAgentAlias(profile.name),
+          normalizeAgentAlias(profileLabel),
+          compactAgentAlias(profileLabel),
+          normalizeAgentAlias(`${label} ${profile.name}`),
+          compactAgentAlias(`${label} ${profile.name}`)
+        ])
+        const profileCommandOverride = profile.commandOverride?.trim() || commandOverride
+        if (profileCommandOverride) {
+          profileAliases.add(normalizeAgentAlias(profileCommandOverride))
+          profileAliases.add(compactAgentAlias(profileCommandOverride))
+        }
+        const profileArgs = profile.args?.trim()
+        if (profileArgs) {
+          profileAliases.add(normalizeAgentAlias(profileArgs))
+          profileAliases.add(compactAgentAlias(profileArgs))
+          profileAliases.add(normalizeAgentAlias(`${label} ${profileArgs}`))
+          profileAliases.add(compactAgentAlias(`${label} ${profileArgs}`))
+        }
+        return {
+          agent,
+          profileId: profile.id,
+          aliases: [...profileAliases],
+          label: profileLabel
+        }
+      })
+    return [baseOption, ...profileOptions]
   })
 }
 

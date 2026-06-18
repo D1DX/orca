@@ -37,19 +37,6 @@ describe('agent launch profiles', () => {
     ])
   })
 
-  it('drops profiles with managed-account selectors that do not match the built-in agent', () => {
-    expect(
-      normalizeAgentLaunchProfiles([
-        {
-          id: 'mixed',
-          agentId: 'codex',
-          name: 'Mixed',
-          managedAccount: { kind: 'claude', accountId: 'claude-1' }
-        }
-      ])
-    ).toEqual([])
-  })
-
   it('synthesizes the default profile from compatibility settings', () => {
     const result = resolveAgentLaunchProfileStartupOptions({
       agent: 'codex',
@@ -81,8 +68,7 @@ describe('agent launch profiles', () => {
           name: 'Personal',
           commandOverride: 'claude-beta',
           args: '--model opus',
-          env: { CLAUDE_VERBOSE: '1' },
-          managedAccount: { kind: 'claude', accountId: 'account-1' }
+          env: { CLAUDE_VERBOSE: '1' }
         }
       ]
     })
@@ -93,15 +79,13 @@ describe('agent launch profiles', () => {
       cmdOverrides: { claude: 'claude-beta' },
       agentArgs: '--model opus',
       agentEnv: { CLAUDE_VERBOSE: '1' },
-      managedAccount: { kind: 'claude', accountId: 'account-1' },
       profile: {
         id: 'personal',
         agentId: 'claude',
         name: 'Personal',
         commandOverride: 'claude-beta',
         args: '--model opus',
-        env: { CLAUDE_VERBOSE: '1' },
-        managedAccount: { kind: 'claude', accountId: 'account-1' }
+        env: { CLAUDE_VERBOSE: '1' }
       },
       isDefaultProfile: false
     })
@@ -186,67 +170,6 @@ describe('agent launch profiles', () => {
         profiles: [{ id: 'work', agentId: 'codex', name: 'Work', disabled: true }]
       })
     ).toEqual({ ok: false, error: 'Agent launch profile "Work" is disabled.' })
-  })
-
-  it('rejects profile env that would override managed Codex account materialization', () => {
-    expect(
-      resolveAgentLaunchProfileStartupOptions({
-        agent: 'codex',
-        profileId: 'work',
-        profiles: [
-          {
-            id: 'work',
-            agentId: 'codex',
-            name: 'Work',
-            env: { CODEX_HOME: '/tmp/other' },
-            managedAccount: { kind: 'codex', accountId: 'account-1' }
-          }
-        ]
-      })
-    ).toEqual({
-      ok: false,
-      error: 'Agent launch profile "Work" sets managed-account env "CODEX_HOME".'
-    })
-
-    expect(
-      resolveAgentLaunchProfileStartupOptions({
-        agent: 'codex',
-        profileId: 'work',
-        profiles: [
-          {
-            id: 'work',
-            agentId: 'codex',
-            name: 'Work',
-            env: { codex_home: '/tmp/other' },
-            managedAccount: { kind: 'codex', accountId: 'account-1' }
-          }
-        ]
-      })
-    ).toEqual({
-      ok: false,
-      error: 'Agent launch profile "Work" sets managed-account env "codex_home".'
-    })
-  })
-
-  it('rejects profile env that would override managed Claude account materialization', () => {
-    expect(
-      resolveAgentLaunchProfileStartupOptions({
-        agent: 'claude',
-        profileId: 'personal',
-        profiles: [
-          {
-            id: 'personal',
-            agentId: 'claude',
-            name: 'Personal',
-            env: { ANTHROPIC_CUSTOM_HEADERS: 'x-api-key: secret' },
-            managedAccount: { kind: 'claude', accountId: null }
-          }
-        ]
-      })
-    ).toEqual({
-      ok: false,
-      error: 'Agent launch profile "Personal" sets managed-account env "ANTHROPIC_CUSTOM_HEADERS".'
-    })
   })
 
   it('rejects named profile command overrides that are shell recipes', () => {

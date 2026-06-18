@@ -2208,15 +2208,10 @@ export type TuiAgent =
   | 'devin' // Devin CLI
   | 'ante' // Ante (Antigma Labs)
 
-export type AgentLaunchProfileManagedAccount =
-  | { kind: 'codex'; accountId: string | null }
-  | { kind: 'claude'; accountId: string | null }
-
 export type AgentLaunchProfile = {
   id: string
   agentId: TuiAgent
   name: string
-  managedAccount?: AgentLaunchProfileManagedAccount
   commandOverride?: string
   args?: string
   env?: Record<string, string>
