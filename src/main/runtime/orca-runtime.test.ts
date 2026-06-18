@@ -10715,6 +10715,50 @@ describe('OrcaRuntimeService', () => {
     expect(listed.activeTabId).toBe('host-tab::pane:2')
   })
 
+  it('keeps a headless tab-group split alive when a new tab is created', async () => {
+    // Regression: drag-to-split-group was a client-only change the headless host
+    // rejected (renderer_unavailable), so creating a new tab coalesced the
+    // groups back into one. The host must model + persist the split.
+    let ptyCounter = 0
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn(async () => ({ id: `split-group-pty-${++ptyCounter}` })),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+
+    const first = await runtime.createTerminal(`id:${TEST_WORKTREE_ID}`, { activate: true })
+    const second = await runtime.createTerminal(`id:${TEST_WORKTREE_ID}`, { activate: true })
+
+    const beforeSplit = await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)
+    expect(beforeSplit.tabGroups).toHaveLength(1)
+    const sourceGroupId = beforeSplit.tabGroups![0]!.id
+    const secondHostTabId = second.tabId
+
+    await runtime.moveMobileSessionTab(`id:${TEST_WORKTREE_ID}`, {
+      kind: 'split',
+      tabId: secondHostTabId,
+      targetGroupId: sourceGroupId,
+      splitDirection: 'right'
+    })
+
+    const afterSplit = await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)
+    expect(afterSplit.tabGroups).toHaveLength(2)
+    expect(afterSplit.tabGroupLayout).toMatchObject({ type: 'split', direction: 'horizontal' })
+
+    // The actual bug: creating a new tab must NOT collapse the split.
+    await runtime.createTerminal(`id:${TEST_WORKTREE_ID}`, { activate: true })
+
+    const afterNewTab = await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)
+    expect(afterNewTab.tabGroups).toHaveLength(2)
+    expect(afterNewTab.tabGroupLayout).toMatchObject({ type: 'split' })
+    // The split-off group keeps exactly its one tab; the new tab joins the other.
+    const splitOffGroup = afterNewTab.tabGroups!.find((group) => group.id !== sourceGroupId)!
+    expect(splitOffGroup.tabOrder).toEqual([secondHostTabId])
+    expect(first.tabId).toBeTruthy()
+  })
+
   it('keeps preserved headless mobile session publication epochs idempotent', async () => {
     const runtime = new OrcaRuntimeService(store)
     runtime.syncWindowGraph(0, {

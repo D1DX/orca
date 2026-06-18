@@ -259,6 +259,7 @@ import type {
 import type { AutomationService } from '../automations/service'
 import { RuntimeBrowserCommands } from './orca-runtime-browser'
 import { buildHeadlessTerminalSplitLayout } from './headless-terminal-split-layout'
+import { buildHeadlessTabGroupSplit } from './headless-tab-group-split-layout'
 import { RuntimeEmulatorCommands, setEmulatorBridge } from './orca-runtime-emulator'
 import { serveSimStateWatcher } from '../emulator/serve-sim-state-watcher'
 import type { EmulatorBridge } from '../emulator/emulator-bridge'
@@ -3187,7 +3188,6 @@ export class OrcaRuntimeService {
     activeTab: RuntimeMobileSessionSnapshotTab | null,
     existingGroups?: readonly RuntimeMobileSessionTabGroup[]
   ): RuntimeMobileSessionTabGroup[] {
-    const groupId = existingGroups?.[0]?.id ?? this.getHeadlessMobileSessionGroupId(worktreeId)
     // Why: order across terminals and browsers in their actual array order so a
     // tab opened after a browser tab lands to its right, not regrouped before it.
     const tabOrder = this.collectHeadlessTopLevelTabOrder(tabs)
@@ -3202,6 +3202,18 @@ export class OrcaRuntimeService {
       })() ??
       tabOrder[0] ??
       null
+
+    // Why: when the user has split tabs into multiple groups, preserve that
+    // assignment across rebuilds instead of coalescing back to one group.
+    if (existingGroups && existingGroups.length > 1) {
+      return this.distributeHeadlessTabsAcrossGroups(
+        existingGroups,
+        tabOrder,
+        activeTopLevelId
+      )
+    }
+
+    const groupId = existingGroups?.[0]?.id ?? this.getHeadlessMobileSessionGroupId(worktreeId)
     return [
       {
         id: groupId,
@@ -3212,6 +3224,45 @@ export class OrcaRuntimeService {
         tabOrder
       }
     ]
+  }
+
+  // Distribute live top-level tabs into the existing multi-group structure,
+  // keeping each tab in its group; tabs new since the last snapshot join the
+  // active group. Emptied groups are dropped so a closed split collapses.
+  private distributeHeadlessTabsAcrossGroups(
+    existingGroups: readonly RuntimeMobileSessionTabGroup[],
+    tabOrder: readonly string[],
+    activeTopLevelId: string | null
+  ): RuntimeMobileSessionTabGroup[] {
+    const groupIdByTabId = new Map<string, string>()
+    for (const group of existingGroups) {
+      for (const tabId of group.tabOrder) {
+        groupIdByTabId.set(tabId, group.id)
+      }
+    }
+    const activeGroupId =
+      (activeTopLevelId ? groupIdByTabId.get(activeTopLevelId) : undefined) ??
+      existingGroups[0]!.id
+    const orderByGroup = new Map<string, string[]>(existingGroups.map((group) => [group.id, []]))
+    for (const tabId of tabOrder) {
+      const groupId = groupIdByTabId.get(tabId) ?? activeGroupId
+      orderByGroup.get(groupId)?.push(tabId)
+    }
+    return existingGroups
+      .map((group) => {
+        const nextOrder = orderByGroup.get(group.id) ?? []
+        return {
+          ...group,
+          tabOrder: nextOrder,
+          activeTabId:
+            activeTopLevelId && nextOrder.includes(activeTopLevelId)
+              ? activeTopLevelId
+              : group.activeTabId && nextOrder.includes(group.activeTabId)
+                ? group.activeTabId
+                : (nextOrder[0] ?? null)
+        }
+      })
+      .filter((group) => group.tabOrder.length > 0)
   }
 
   private buildMaterializedHeadlessParentLayout(
@@ -3731,6 +3782,9 @@ export class OrcaRuntimeService {
     snapshot: RuntimeMobileSessionTabsSnapshot,
     move: RuntimeMobileSessionTabMove
   ): RuntimeMobileSessionTabMoveResult {
+    if (move.kind === 'split') {
+      return this.splitHeadlessMobileSessionTabGroup(worktreeId, snapshot, move)
+    }
     if (move.kind !== 'reorder') {
       throw new Error('renderer_unavailable')
     }
@@ -3777,6 +3831,74 @@ export class OrcaRuntimeService {
     this.mobileSessionTabsByWorktree.set(worktreeId, nextSnapshot)
     this.emitMobileSessionTabsSnapshot(nextSnapshot)
     return { moved: true }
+  }
+
+  // Why: a drag-to-split-group used to be a client-only change the headless host
+  // never modeled, so the next snapshot coalesced every tab back into one group.
+  // Model + persist the multi-group layout so the split survives rebuilds.
+  private splitHeadlessMobileSessionTabGroup(
+    worktreeId: string,
+    snapshot: RuntimeMobileSessionTabsSnapshot,
+    move: Extract<RuntimeMobileSessionTabMove, { kind: 'split' }>
+  ): RuntimeMobileSessionTabMoveResult {
+    const hostTabId = this.resolveMobileSessionHostTabId(snapshot, move.tabId)
+    if (!hostTabId) {
+      throw new Error('tab_not_found')
+    }
+    const split = buildHeadlessTabGroupSplit({
+      groups: snapshot.tabGroups ?? [],
+      layout: snapshot.tabGroupLayout,
+      tabId: hostTabId,
+      targetGroupId: move.targetGroupId,
+      splitDirection: move.splitDirection,
+      newGroupId: randomUUID()
+    })
+    if (!split) {
+      // Renderer treats an unsplittable drop (e.g. last tab onto its own group)
+      // as a no-op; mirror that instead of churning the snapshot.
+      return { moved: true }
+    }
+    const nextSnapshot: RuntimeMobileSessionTabsSnapshot = {
+      ...snapshot,
+      publicationEpoch: `headless:${Date.now().toString(36)}`,
+      snapshotVersion: snapshot.snapshotVersion + 1,
+      activeGroupId: split.newGroupId,
+      tabGroups: split.groups,
+      tabGroupLayout: split.layout
+    }
+    this.persistHeadlessTabGroups(worktreeId, split.groups, split.layout)
+    this.mobileSessionTabsByWorktree.set(worktreeId, nextSnapshot)
+    this.emitMobileSessionTabsSnapshot(nextSnapshot)
+    return { moved: true }
+  }
+
+  // Persist the headless tab-GROUP layout so snapshot rebuilds keep the split.
+  private persistHeadlessTabGroups(
+    worktreeId: string,
+    groups: readonly RuntimeMobileSessionTabGroup[],
+    layout: TabGroupLayoutNode
+  ): void {
+    const session = this.store?.getWorkspaceSession?.()
+    if (!session || !this.store?.setWorkspaceSession) {
+      return
+    }
+    this.store.setWorkspaceSession({
+      ...session,
+      tabGroups: {
+        ...session.tabGroups,
+        [worktreeId]: groups.map((group) => ({
+          id: group.id,
+          worktreeId,
+          activeTabId: group.activeTabId,
+          tabOrder: [...group.tabOrder],
+          ...(group.recentTabIds ? { recentTabIds: [...group.recentTabIds] } : {})
+        }))
+      },
+      tabGroupLayouts: {
+        ...session.tabGroupLayouts,
+        [worktreeId]: layout
+      }
+    })
   }
 
   private normalizeMobileSessionTabOrder(
