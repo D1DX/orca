@@ -9,6 +9,7 @@ import type {
   TabContentType,
   TabGroup,
   TabGroupLayoutNode,
+  TerminalTab,
   WorkspaceSessionState,
   WorkspaceVisibleTabType
 } from '../../../../shared/types'
@@ -163,6 +164,27 @@ export type TabsSlice = {
     activeRenderableTabId: string | null
   }
   hydrateTabsSession: (session: WorkspaceSessionState) => void
+}
+
+// Why: keep the TerminalTab (tabsByWorktree) pin in sync with the unified-tab
+// pin so reconcile's `existing.isPinned` fallback stays authoritative locally.
+// Returns an empty patch when the tab isn't a persisted TerminalTab.
+function patchTerminalTabPinned(
+  tabsByWorktree: Record<string, TerminalTab[]>,
+  worktreeId: string,
+  tabId: string,
+  isPinned: boolean
+): Partial<Pick<AppState, 'tabsByWorktree'>> {
+  const tabs = tabsByWorktree[worktreeId]
+  if (!tabs?.some((tab) => tab.id === tabId)) {
+    return {}
+  }
+  return {
+    tabsByWorktree: {
+      ...tabsByWorktree,
+      [worktreeId]: tabs.map((tab) => (tab.id === tabId ? { ...tab, isPinned } : tab))
+    }
+  }
 }
 
 function buildSplitNode(
@@ -996,6 +1018,10 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
           ...state.unifiedTabsByWorktree,
           [worktreeId]: applyTabOrderSortValues(tabs, tabOrder)
         },
+        // Why: reconcile derives a tab's pin from the TerminalTab (tabsByWorktree),
+        // so mirror the pin there too — otherwise an unrelated host snapshot
+        // recomputes isPinned:false and visually un-pins during the echo window.
+        ...patchTerminalTabPinned(state.tabsByWorktree, worktreeId, tabId, true),
         groupsByWorktree: {
           ...state.groupsByWorktree,
           [worktreeId]: updateGroup(groups, { ...group, tabOrder })
@@ -1031,6 +1057,7 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
           ...state.unifiedTabsByWorktree,
           [worktreeId]: applyTabOrderSortValues(tabs, tabOrder)
         },
+        ...patchTerminalTabPinned(state.tabsByWorktree, worktreeId, tabId, false),
         groupsByWorktree: {
           ...state.groupsByWorktree,
           [worktreeId]: updateGroup(groups, { ...group, tabOrder })

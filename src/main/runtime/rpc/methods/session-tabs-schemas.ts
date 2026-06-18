@@ -21,7 +21,7 @@ export const ActivateTab = WorktreeTabSelector.extend({
   leafId: z.string().max(128).optional()
 })
 
-type TerminalPaneLayoutNodeInput =
+export type TerminalPaneLayoutNodeInput =
   | { type: 'leaf'; leafId: string }
   | {
       type: 'split'
@@ -31,27 +31,65 @@ type TerminalPaneLayoutNodeInput =
       ratio?: number
     }
 
-const TerminalPaneLayoutNodeSchema: z.ZodType<TerminalPaneLayoutNodeInput> = z.lazy(() =>
-  z.discriminatedUnion('type', [
-    z.object({ type: z.literal('leaf'), leafId: z.string().min(1).max(128) }).strict(),
-    z
-      .object({
-        type: z.literal('split'),
-        direction: z.enum(['horizontal', 'vertical']),
-        first: TerminalPaneLayoutNodeSchema,
-        second: TerminalPaneLayoutNodeSchema,
-        ratio: z.number().min(0).max(1).optional()
-      })
-      .strict()
-  ])
-)
+// Why: this schema parses UNTRUSTED remote-client input. A recursive zod parse
+// of a deeply-nested tree would overflow the main-process stack, so validate
+// iteratively with hard depth + node-count caps before building the typed value.
+const MAX_PANE_LAYOUT_DEPTH = 64
+const MAX_PANE_LAYOUT_NODES = 1024
+
+function parseTerminalPaneLayoutNode(value: unknown): TerminalPaneLayoutNodeInput | null {
+  // Iterative validate-then-build: first walk the raw tree with an explicit
+  // stack (no recursion) enforcing caps, then build bottom-up.
+  let nodeCount = 0
+  const stack: { raw: unknown; depth: number }[] = [{ raw: value, depth: 0 }]
+  while (stack.length > 0) {
+    const { raw, depth } = stack.pop()!
+    if (depth > MAX_PANE_LAYOUT_DEPTH || ++nodeCount > MAX_PANE_LAYOUT_NODES) {
+      return null
+    }
+    if (typeof raw !== 'object' || raw === null) {
+      return null
+    }
+    const node = raw as Record<string, unknown>
+    if (node.type === 'leaf') {
+      if (typeof node.leafId !== 'string' || node.leafId.length < 1 || node.leafId.length > 128) {
+        return null
+      }
+      continue
+    }
+    if (node.type === 'split') {
+      if (node.direction !== 'horizontal' && node.direction !== 'vertical') {
+        return null
+      }
+      if (
+        node.ratio !== undefined &&
+        (typeof node.ratio !== 'number' || node.ratio < 0 || node.ratio > 1)
+      ) {
+        return null
+      }
+      stack.push({ raw: node.first, depth: depth + 1 }, { raw: node.second, depth: depth + 1 })
+      continue
+    }
+    return null
+  }
+  return value as TerminalPaneLayoutNodeInput
+}
+
+const TerminalPaneLayoutNodeSchema = z
+  .unknown()
+  .transform((value) => parseTerminalPaneLayoutNode(value))
+  .pipe(
+    z.custom<TerminalPaneLayoutNodeInput>((value) => value !== null, {
+      message: 'Invalid or too-deep pane layout tree'
+    })
+  )
 
 export const UpdatePaneLayout = WorktreeTabSelector.extend({
   tabId: z
     .unknown()
     .transform((v) => (typeof v === 'string' ? v : ''))
     .pipe(z.string().min(1, 'Missing tab id')),
-  root: TerminalPaneLayoutNodeSchema.nullable(),
+  root: z.union([z.null(), TerminalPaneLayoutNodeSchema]),
   expandedLeafId: z.string().max(128).nullable().optional(),
   titlesByLeafId: z.record(z.string(), z.string()).optional()
 })

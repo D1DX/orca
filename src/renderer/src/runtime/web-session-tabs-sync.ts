@@ -497,13 +497,16 @@ function buildMirroredTerminalTabs(
       activeSurface.launchAgent ??
       surfaces.find((surface) => surface.launchAgent)?.launchAgent ??
       existing?.launchAgent
-    // Why: tab color/pin are host-authoritative for remote tabs. Prefer the host
-    // value (any surface of this tab carries it) and fall back to the prior
-    // client value, instead of hardcoding null/false which wiped pins.
+    // Why: tab color/pin echo back through host snapshots, so prefer the client's
+    // own record (kept authoritative in tabsByWorktree by the pin/color setters)
+    // and fall back to the host value only when this client has no prior tab —
+    // e.g. first reconcile or a change made on another client. Mirrors how
+    // customTitle always prefers the client value to avoid echo-window reverts.
     const hostColorSurface = surfaces.find((surface) => surface.color != null)
-    const color = hostColorSurface ? hostColorSurface.color! : (existing?.color ?? null)
-    const isPinned =
-      surfaces.some((surface) => surface.isPinned) || existing?.isPinned === true
+    const color = existing ? (existing.color ?? null) : (hostColorSurface?.color ?? null)
+    const isPinned = existing
+      ? existing.isPinned === true
+      : surfaces.some((surface) => surface.isPinned)
     return {
       tab: {
         id: localTabId,

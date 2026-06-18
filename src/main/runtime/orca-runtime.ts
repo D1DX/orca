@@ -3851,8 +3851,15 @@ export class OrcaRuntimeService {
     const explicitWorktreeId = getExplicitWorktreeIdSelector(worktreeSelector)
     const worktreeId =
       explicitWorktreeId ?? (await this.resolveWorktreeSelector(worktreeSelector)).id
-    this.persistHeadlessTerminalPaneLayout(args)
-    this.applyHeadlessTerminalPaneLayoutToSnapshot(worktreeId, args)
+    // Why: resolve to the host tab id (older/raw-id clients) so the persisted
+    // layout entry matches, matching setMobileSessionTabProps.
+    const snapshot = this.mobileSessionTabsByWorktree.get(worktreeId)
+    const hostTabId = snapshot
+      ? (this.resolveMobileSessionHostTabId(snapshot, args.tabId) ?? args.tabId)
+      : args.tabId
+    const resolvedArgs = { ...args, tabId: hostTabId }
+    this.persistHeadlessTerminalPaneLayout(resolvedArgs)
+    this.applyHeadlessTerminalPaneLayoutToSnapshot(worktreeId, resolvedArgs)
     return { updated: true }
   }
 
@@ -3914,10 +3921,12 @@ export class OrcaRuntimeService {
     if (!snapshot) {
       return
     }
+    // Why: only terminal tabs persist color/pin today (browser/editor are
+    // tracked in #5729). Applying to a browser surface here would show a
+    // transient that reverts on the next rebuild — apply only what we persist.
     let changed = false
     const tabs = snapshot.tabs.map((tab) => {
-      const topLevelId = tab.type === 'terminal' ? tab.parentTabId : tab.id
-      if (topLevelId !== tabId || (tab.type !== 'terminal' && tab.type !== 'browser')) {
+      if (tab.type !== 'terminal' || tab.parentTabId !== tabId) {
         return tab
       }
       changed = true
