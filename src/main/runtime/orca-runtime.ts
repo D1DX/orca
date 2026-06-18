@@ -2821,7 +2821,13 @@ export class OrcaRuntimeService {
   private publishPtyBackedMobileSessionTerminal(
     worktreeId: string,
     pty: RuntimePtyWorktreeRecord,
-    args: { tabId: string; leafId: string; title: string | null; activate: boolean }
+    args: {
+      tabId: string
+      leafId: string
+      title: string | null
+      activate: boolean
+      split?: { splitFromLeafId: string; direction: 'horizontal' | 'vertical' }
+    }
   ): void {
     const existing = this.mobileSessionTabsByWorktree.get(worktreeId)
     const title = args.title ?? getLatestPtyTitle(pty) ?? 'Terminal'
@@ -2831,10 +2837,21 @@ export class OrcaRuntimeService {
         candidate.parentTabId === args.tabId &&
         candidate.leafId === args.leafId
     )
+    // Why: a split inserts into the parent tab's layout, which lives on the
+    // sibling surface, not this new leaf's (empty) existing surface.
+    const baseLayout = args.split
+      ? (existing?.tabs.find(
+          (candidate): candidate is RuntimeMobileSessionTerminalTab =>
+            candidate.type === 'terminal' &&
+            candidate.parentTabId === args.tabId &&
+            candidate.leafId === args.split!.splitFromLeafId
+        )?.parentLayout ?? existingTab?.parentLayout)
+      : existingTab?.parentLayout
     const parentLayout = this.buildMaterializedHeadlessParentLayout(
       args.leafId,
       pty.ptyId,
-      existingTab?.parentLayout
+      baseLayout,
+      args.split
     )
     const tab: RuntimeMobileSessionTerminalTab = {
       type: 'terminal',
@@ -3131,7 +3148,8 @@ export class OrcaRuntimeService {
   private buildMaterializedHeadlessParentLayout(
     leafId: string,
     ptyId: string,
-    existingLayout: TerminalLayoutSnapshot | undefined
+    existingLayout: TerminalLayoutSnapshot | undefined,
+    split?: { splitFromLeafId: string; direction: 'horizontal' | 'vertical' }
   ): TerminalLayoutSnapshot {
     if (!existingLayout) {
       return {
@@ -3140,6 +3158,18 @@ export class OrcaRuntimeService {
         expandedLeafId: null,
         ptyIdsByLeafId: { [leafId]: ptyId }
       }
+    }
+    // Why: a split must insert the new leaf into the live layout tree with the
+    // requested direction, or the published snapshot keeps the old single-leaf
+    // root and the split renders with a fallback direction ("Split Right" lands
+    // as a top/bottom split). Reuse the persisted-split builder for parity.
+    if (split) {
+      return buildHeadlessTerminalSplitLayout(this.cloneTerminalLayoutSnapshot(existingLayout), {
+        leafId,
+        ptyId,
+        splitFromLeafId: split.splitFromLeafId,
+        direction: split.direction
+      })
     }
     return {
       ...this.cloneTerminalLayoutSnapshot(existingLayout),
@@ -13262,7 +13292,8 @@ export class OrcaRuntimeService {
         tabId: parentTabId,
         leafId,
         title: null,
-        activate: opts.activate !== false
+        activate: opts.activate !== false,
+        split: { splitFromLeafId: parsedPaneKey.leafId, direction }
       })
       // Why: persist the split into the workspace session so a later snapshot
       // rebuild keeps it instead of collapsing back to a single pane.
