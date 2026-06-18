@@ -29,7 +29,6 @@ import type {
   TabGroup,
   TabGroupLayoutNode,
   TerminalLayoutSnapshot,
-  TerminalPaneLayoutNode,
   TerminalTab
 } from '../../../shared/types'
 import { resolveTerminalTabTitle } from '../../../shared/tab-title-resolution'
@@ -38,6 +37,7 @@ import {
   getGroupVisibleTabOrder,
   type VisibleTabRef
 } from '../components/tab-bar/group-tab-order'
+import { resolveTerminalLayoutRoot } from './remote-terminal-layout-resolution'
 import { parseRemoteRuntimePtyId } from './runtime-terminal-stream'
 
 type RegisteredTerminalTab = {
@@ -605,7 +605,14 @@ async function syncRuntimeGraph(): Promise<void> {
         worktreeId,
         title,
         activeLeafId: layout?.activeLeafId ?? liveLeaves[0][0],
-        layout: layout?.root ?? fallbackLayoutForLeafIds(liveLeaves.map(([leafId]) => leafId))
+        layout: resolveTerminalLayoutRoot({
+          authoritativeRoot: layout?.root,
+          leafIds: liveLeaves.map(([leafId]) => leafId),
+          onSynthesize: (leafCount) =>
+            console.warn(
+              `[sync-runtime-graph] synthesized layout for ${leafCount} unmounted leaves with no saved tree`
+            )
+        })
       })
       liveLeaves.forEach(([leafId, ptyId], index) => {
         graph.leaves.push({
@@ -981,22 +988,6 @@ function resolveMobileTerminalTheme(
   return { mode: appearance.mode, theme: theme as RuntimeMobileTerminalTheme['theme'] }
 }
 
-function fallbackLayoutForLeafIds(leafIds: readonly string[]): TerminalPaneLayoutNode | null {
-  const leaves = leafIds.filter(isTerminalLeafId)
-  if (leaves.length === 0) {
-    return null
-  }
-  return leaves.slice(1).reduce<TerminalPaneLayoutNode>(
-    (root, leafId) => ({
-      type: 'split',
-      direction: 'horizontal',
-      first: root,
-      second: { type: 'leaf', leafId }
-    }),
-    { type: 'leaf', leafId: leaves[0]! }
-  )
-}
-
 function getRuntimeLeafIdsForTerminal(tabId: string, state: AppState): string[] {
   const registered = registeredTabs.get(tabId)
   const manager = registered?.getManager()
@@ -1053,7 +1044,18 @@ function buildMobileTerminalSurfaceTabs(
     typeof HTMLElement !== 'undefined' && firstChild instanceof HTMLElement ? firstChild : null
   )
   const parentLayout = normalizeTerminalLayoutSnapshot({
-    root: liveLayoutRoot ?? sanitizedSavedLayout?.root ?? fallbackLayoutForLeafIds(leafIds),
+    // Why: the live DOM tree (when mounted) is authoritative; otherwise the
+    // saved tree. Both carry the real direction — only synthesize as a last
+    // resort, never re-guess. Shared with the client-ingest path.
+    root: resolveTerminalLayoutRoot({
+      authoritativeRoot: liveLayoutRoot,
+      existingRoot: sanitizedSavedLayout?.root,
+      leafIds,
+      onSynthesize: (leafCount) =>
+        console.warn(
+          `[sync-runtime-graph] synthesized parentLayout for ${leafCount} leaves with no live or saved tree`
+        )
+    }),
     activeLeafId,
     expandedLeafId: sanitizedSavedLayout?.expandedLeafId ?? null,
     ...(Object.keys(savedPtyIdsByLeafId).length > 0 ? { ptyIdsByLeafId: savedPtyIdsByLeafId } : {}),

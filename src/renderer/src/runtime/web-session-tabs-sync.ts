@@ -39,6 +39,7 @@ import {
   toWebTerminalSurfaceTabId,
   WEB_TERMINAL_SURFACE_TAB_PREFIX
 } from './web-runtime-session'
+import { resolveTerminalLayoutRoot } from './remote-terminal-layout-resolution'
 import { toRuntimeWorktreeSelector } from './runtime-worktree-selector'
 import { clearWebSessionFocusIntent, peekWebSessionFocusIntent } from './web-session-focus-intent'
 import {
@@ -359,37 +360,6 @@ function isMirroredTerminalSurfaceId(tabId: string): boolean {
   )
 }
 
-function fallbackLayoutForLeafIds(leafIds: readonly string[]): TerminalPaneLayoutNode | null {
-  if (leafIds.length === 0) {
-    return null
-  }
-  return leafIds.slice(1).reduce<TerminalPaneLayoutNode>(
-    (root, leafId) => ({
-      type: 'split',
-      direction: 'horizontal',
-      first: root,
-      second: { type: 'leaf', leafId }
-    }),
-    { type: 'leaf', leafId: leafIds[0]! }
-  )
-}
-
-function collectLayoutLeafIds(
-  node: TerminalPaneLayoutNode | null | undefined,
-  leafIds = new Set<string>()
-): Set<string> {
-  if (!node) {
-    return leafIds
-  }
-  if (node.type === 'leaf') {
-    leafIds.add(node.leafId)
-    return leafIds
-  }
-  collectLayoutLeafIds(node.first, leafIds)
-  collectLayoutLeafIds(node.second, leafIds)
-  return leafIds
-}
-
 function chooseRemoteTerminalLayout(
   surfaces: readonly TerminalSurface[],
   ptyIdsByLeafId: Record<string, string>,
@@ -403,11 +373,6 @@ function chooseRemoteTerminalLayout(
         parentLayoutSource.title
       ])
     : undefined
-  const parentLayoutLeafIds = collectLayoutLeafIds(parentLayout?.root)
-  const canReuseParentLayout =
-    parentLayout?.root &&
-    leafIds.every((leafId) => parentLayoutLeafIds.has(leafId)) &&
-    [...parentLayoutLeafIds].every((leafId) => knownLeafIds.has(leafId))
   const activeLeafId =
     // Why: host title/status snapshots may still mark an agent pane active
     // after this client selected a different split pane.
@@ -425,7 +390,18 @@ function chooseRemoteTerminalLayout(
       ? parentLayout.expandedLeafId
       : null
   return {
-    root: canReuseParentLayout ? parentLayout.root : fallbackLayoutForLeafIds(leafIds),
+    // Why: the host's parentLayout is authoritative (carries the real split
+    // direction); only if it doesn't cover the current leaves do we keep the
+    // prior client tree, then degenerate — never re-guess a direction.
+    root: resolveTerminalLayoutRoot({
+      authoritativeRoot: parentLayout?.root,
+      existingRoot: existingLayout?.root,
+      leafIds,
+      onSynthesize: (leafCount) =>
+        console.warn(
+          `[web-session-tabs-sync] synthesized layout for ${leafCount} leaves; no authoritative or prior tree covered them`
+        )
+    }),
     activeLeafId,
     expandedLeafId,
     ptyIdsByLeafId,
