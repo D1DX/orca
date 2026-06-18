@@ -2874,6 +2874,13 @@ export class OrcaRuntimeService {
     const tabs = this.mergeMobileSessionSnapshotTabs(
       existingTabs.map((candidate) => ({
         ...candidate,
+        // Why: the client picks one sibling's parentLayout to render the whole
+        // tab; a split must update every sibling surface to the new tree, or a
+        // stale single-leaf sibling makes the client fall back to a default
+        // direction ("Split Right" renders as down).
+        ...(args.split && candidate.type === 'terminal' && candidate.parentTabId === args.tabId
+          ? { parentLayout }
+          : {}),
         isActive: tab.isActive ? false : candidate.isActive
       })),
       [tab]
