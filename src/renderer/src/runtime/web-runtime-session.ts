@@ -10,8 +10,9 @@ import type {
   RuntimeTerminalSplit
 } from '../../../shared/runtime-types'
 import type { TerminalPaneSplitSource } from '../../../shared/feature-education-telemetry'
-import type { TuiAgent } from '../../../shared/types'
+import type { TerminalPaneLayoutNode, TuiAgent } from '../../../shared/types'
 import type { AppState } from '../store/types'
+import { getRuntimeEnvironmentIdForWorktree } from '../lib/worktree-runtime-owner'
 import { useAppStore } from '../store'
 import { unwrapRuntimeRpcResult } from './runtime-rpc-client'
 import { parseRemoteRuntimePtyId } from './runtime-terminal-stream'
@@ -607,6 +608,49 @@ export function closeWebRuntimeTerminal(ptyId: string | null | undefined): boole
       )
     })
   return true
+}
+
+// Why: pane geometry inside a tab (split ratios, expanded pane, pane titles) is
+// host-authoritative for remote-server tabs, so a local-only divider drag /
+// expand / pane-rename reverts on the next snapshot. Push the structure to the
+// host so it persists. tabId is the local web tab id; we resolve the host id.
+export async function updateWebRuntimePaneLayout(args: {
+  worktreeId: string
+  tabId: string
+  root: TerminalPaneLayoutNode | null
+  expandedLeafId: string | null
+  titlesByLeafId?: Record<string, string>
+}): Promise<boolean> {
+  const environmentId =
+    getRuntimeEnvironmentIdForWorktree(useAppStore.getState(), args.worktreeId) ?? null
+  if (!environmentId || !isWebRuntimeSessionActive(environmentId)) {
+    return false
+  }
+  const hostTabId = isWebTerminalSurfaceTabId(args.tabId)
+    ? toHostSessionTabId(args.tabId)
+    : args.tabId
+  try {
+    const response = await window.api.runtimeEnvironments.call({
+      selector: environmentId,
+      method: 'session.tabs.updatePaneLayout',
+      params: {
+        worktree: toRuntimeWorktreeSelector(args.worktreeId),
+        tabId: hostTabId,
+        root: args.root,
+        expandedLeafId: args.expandedLeafId,
+        ...(args.titlesByLeafId ? { titlesByLeafId: args.titlesByLeafId } : {})
+      },
+      timeoutMs: 15_000
+    })
+    unwrapRuntimeRpcResult(response as RuntimeRpcResponse<{ updated: true }>)
+    return true
+  } catch (error) {
+    console.warn(
+      '[web-runtime-session] failed to update pane layout:',
+      error instanceof Error ? error.message : String(error)
+    )
+    return false
+  }
 }
 
 // Why: clearing scrollback locally (pane.terminal.clear()) is undone by the next

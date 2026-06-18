@@ -73,10 +73,14 @@ import {
 import { resolvePaneKeyForManager } from '@/lib/pane-manager/pane-key-resolution'
 import { safeFit } from '@/lib/pane-manager/pane-tree-ops'
 import { captureTerminalShutdownLayout } from './terminal-shutdown-layout-capture'
-import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-inspection'
+import {
+  inspectRuntimeTerminalProcess,
+  isRemoteRuntimePtyId
+} from '@/runtime/runtime-terminal-inspection'
 import {
   clearWebRuntimeTerminalBuffer,
-  closeWebRuntimeTerminal
+  closeWebRuntimeTerminal,
+  updateWebRuntimePaneLayout
 } from '@/runtime/web-runtime-session'
 import { isPrimarySelectionEnabled, readPrimarySelectionText } from '@/lib/primary-selection'
 import { WORKSPACE_FILE_PATH_MIME } from '@/lib/workspace-file-drag'
@@ -679,10 +683,25 @@ export default function TerminalPane({
       layout.titlesByLeafId = titlesByLeafId
     }
     setTabLayout(tabId, layout)
+    // Why: pane geometry is host-authoritative for remote-server tabs, so push
+    // ratios/expand/titles to the host or they revert on the next snapshot.
+    // Gate on a remote pty to avoid an RPC for purely-local tabs.
+    const hasRemotePane = Object.values(mergedPtyIds).some(
+      (ptyId) => typeof ptyId === 'string' && isRemoteRuntimePtyId(ptyId)
+    )
+    if (hasRemotePane) {
+      void updateWebRuntimePaneLayout({
+        worktreeId,
+        tabId,
+        root: layout.root,
+        expandedLeafId: layout.expandedLeafId,
+        ...(layout.titlesByLeafId ? { titlesByLeafId: layout.titlesByLeafId } : {})
+      })
+    }
     for (const leafId of currentLeafIds) {
       clearedScrollbackLeafIds.delete(leafId)
     }
-  }, [tabId, setTabLayout])
+  }, [tabId, setTabLayout, worktreeId])
 
   const clearPaneScrollback = useCallback(
     (pane: ManagedPane): void => {

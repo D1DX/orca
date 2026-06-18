@@ -95,6 +95,7 @@ import type {
   MemorySnapshot,
   TabGroupLayoutNode,
   TerminalLayoutSnapshot,
+  TerminalPaneLayoutNode,
   TerminalTab,
   TuiAgent,
   WorkspaceCreateTelemetrySource,
@@ -3829,6 +3830,103 @@ export class OrcaRuntimeService {
       tabId: hostTabId
     })
     return { moved: true }
+  }
+
+  // Why: pane geometry inside a tab (split ratios, expanded pane, pane titles)
+  // is host-authoritative for remote-server tabs but had no push path, so a
+  // client divider-drag / expand / pane-rename reverted on the next snapshot.
+  // Persist the structural fields onto the tab's layout, keeping host-owned
+  // pty bindings and active leaf.
+  async updateMobileSessionPaneLayout(
+    worktreeSelector: string,
+    args: {
+      tabId: string
+      root: TerminalPaneLayoutNode | null
+      expandedLeafId: string | null
+      titlesByLeafId?: Record<string, string>
+    }
+  ): Promise<{ updated: true }> {
+    const explicitWorktreeId = getExplicitWorktreeIdSelector(worktreeSelector)
+    const worktreeId =
+      explicitWorktreeId ?? (await this.resolveWorktreeSelector(worktreeSelector)).id
+    this.persistHeadlessTerminalPaneLayout(args)
+    this.applyHeadlessTerminalPaneLayoutToSnapshot(worktreeId, args)
+    return { updated: true }
+  }
+
+  // Merge the client's pane structure into the persisted tab layout. PTY
+  // bindings and active leaf stay host-owned; only ratios/expand/titles change.
+  // terminalLayoutsByTabId is keyed by tab id (worktree-independent).
+  private persistHeadlessTerminalPaneLayout(
+    args: {
+      tabId: string
+      root: TerminalPaneLayoutNode | null
+      expandedLeafId: string | null
+      titlesByLeafId?: Record<string, string>
+    }
+  ): void {
+    const session = this.store?.getWorkspaceSession?.()
+    if (!session || !this.store?.setWorkspaceSession) {
+      return
+    }
+    const existing = session.terminalLayoutsByTabId?.[args.tabId]
+    if (!existing) {
+      return
+    }
+    this.store.setWorkspaceSession({
+      ...session,
+      terminalLayoutsByTabId: {
+        ...session.terminalLayoutsByTabId,
+        [args.tabId]: {
+          ...this.cloneTerminalLayoutSnapshot(existing),
+          root: args.root ?? existing.root,
+          expandedLeafId: args.expandedLeafId,
+          ...(args.titlesByLeafId ? { titlesByLeafId: args.titlesByLeafId } : {})
+        }
+      }
+    })
+  }
+
+  private applyHeadlessTerminalPaneLayoutToSnapshot(
+    worktreeId: string,
+    args: {
+      tabId: string
+      root: TerminalPaneLayoutNode | null
+      expandedLeafId: string | null
+      titlesByLeafId?: Record<string, string>
+    }
+  ): void {
+    const snapshot = this.mobileSessionTabsByWorktree.get(worktreeId)
+    if (!snapshot) {
+      return
+    }
+    let changed = false
+    const tabs = snapshot.tabs.map((tab) => {
+      if (tab.type !== 'terminal' || tab.parentTabId !== args.tabId || !tab.parentLayout) {
+        return tab
+      }
+      changed = true
+      return {
+        ...tab,
+        parentLayout: {
+          ...tab.parentLayout,
+          root: args.root ?? tab.parentLayout.root,
+          expandedLeafId: args.expandedLeafId,
+          ...(args.titlesByLeafId ? { titlesByLeafId: args.titlesByLeafId } : {})
+        }
+      }
+    })
+    if (!changed) {
+      return
+    }
+    const nextSnapshot: RuntimeMobileSessionTabsSnapshot = {
+      ...snapshot,
+      publicationEpoch: `headless:${Date.now().toString(36)}`,
+      snapshotVersion: snapshot.snapshotVersion + 1,
+      tabs
+    }
+    this.mobileSessionTabsByWorktree.set(worktreeId, nextSnapshot)
+    this.emitMobileSessionTabsSnapshot(nextSnapshot)
   }
 
   private moveHeadlessMobileSessionTab(

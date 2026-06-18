@@ -10867,6 +10867,42 @@ describe('OrcaRuntimeService', () => {
     expect(renamed?.title).toBe('My Title')
   })
 
+  it('persists a headless pane layout (ratio/expand) so it survives a cold rehydrate', async () => {
+    const session = makeWorkspaceSessionWithHeadlessTerminal()
+    const { runtimeStore, getSession } = makeRuntimeStoreWithWorkspaceSession(session)
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+
+    await runtime.updateMobileSessionPaneLayout(`id:${TEST_WORKTREE_ID}`, {
+      tabId: 'host-tab',
+      root: {
+        type: 'split',
+        direction: 'vertical',
+        first: { type: 'leaf', leafId: HEADLESS_LEAF_ID },
+        second: { type: 'leaf', leafId: 'leaf-2' },
+        ratio: 0.7
+      },
+      expandedLeafId: null,
+      titlesByLeafId: { [HEADLESS_LEAF_ID]: 'Pane A' }
+    })
+
+    const persisted = getSession().terminalLayoutsByTabId['host-tab']!
+    expect(persisted.root).toMatchObject({ type: 'split', direction: 'vertical', ratio: 0.7 })
+    expect(persisted.titlesByLeafId).toMatchObject({ [HEADLESS_LEAF_ID]: 'Pane A' })
+    // Host-owned pty bindings must be preserved through the structural update.
+    expect(persisted.ptyIdsByLeafId).toMatchObject({ [HEADLESS_LEAF_ID]: 'persisted-pty' })
+
+    runtime['mobileSessionTabsByWorktree'].delete(TEST_WORKTREE_ID)
+    runtime['hydrateHeadlessMobileSessionTabsFromWorkspaceSession'](TEST_WORKTREE_ID)
+    const rehydrated = await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)
+    const surface = rehydrated.tabs.find(
+      (tab) => tab.type === 'terminal' && tab.parentTabId === 'host-tab'
+    )
+    expect(surface?.type === 'terminal' && surface.parentLayout?.root).toMatchObject({
+      type: 'split',
+      ratio: 0.7
+    })
+  })
+
   it('moves a headless tab into an existing group without renderer_unavailable', async () => {
     let ptyCounter = 0
     const runtime = new OrcaRuntimeService(store)
