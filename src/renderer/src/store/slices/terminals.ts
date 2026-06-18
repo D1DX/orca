@@ -53,7 +53,11 @@ import { sanitizeTerminalLayoutPaneTitles } from '@/lib/terminal-pane-title-sani
 import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { getLocalProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
-import { collectSleepingAgentSessionRecordsForWorktree } from './agent-status'
+import {
+  collectHibernatedCompletionEvidenceForWorktree,
+  collectSleepingAgentSessionRecordsForWorktree,
+  type AgentStatusWorktreeShutdownReason
+} from './agent-status'
 
 function getNextTerminalOrdinal(tabs: TerminalTab[]): number {
   const usedOrdinals = new Set<number>()
@@ -424,6 +428,7 @@ export type TerminalSlice = {
     worktreeId: string,
     opts?: {
       keepIdentifiers?: boolean
+      shutdownReason?: AgentStatusWorktreeShutdownReason
       sleepingPaneKeys?: string[]
       expectedRuntimePtyIds?: string[]
     }
@@ -1678,6 +1683,8 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
 
   shutdownWorktreeTerminals: async (worktreeId, opts) => {
     const keepIdentifiers = opts?.keepIdentifiers ?? false
+    const shutdownReason: AgentStatusWorktreeShutdownReason =
+      opts?.shutdownReason ?? (keepIdentifiers ? 'manual-sleep' : 'remove-worktree')
     const tabs = get().tabsByWorktree[worktreeId] ?? []
     const ptyIds = tabs.flatMap((tab) => get().ptyIdsByTabId[tab.id] ?? [])
     const expectedRuntimePtyIds = sortedUniquePtyIds(opts?.expectedRuntimePtyIds)
@@ -1685,6 +1692,10 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
     const sleepingAgentSessionRecords = keepIdentifiers
       ? collectSleepingAgentSessionRecordsForWorktree(get(), worktreeId, opts?.sleepingPaneKeys)
       : {}
+    const retainedCompletionEvidence =
+      shutdownReason === 'auto-hibernate-completed-agent'
+        ? collectHibernatedCompletionEvidenceForWorktree(get(), worktreeId, opts?.sleepingPaneKeys)
+        : []
 
     // Why: the main process flushes any remaining batched PTY data before
     // sending the exit event (pty.ts onExit handler). Without this, that
@@ -1955,12 +1966,13 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       get().clearSleepingAgentSessionsByWorktree(worktreeId)
     }
 
-    // Why: sleep/remove fold the whole worktree surface. The live PTY bindings
-    // were cleared above and kill is about to run, so live rows are stale;
-    // retained rows are folded too so a grey slept card does not keep a green
-    // "done" row. Sweep by worktreeId because retained snapshots can outlive
-    // their original tab.
-    get().dropAgentStatusByWorktree(worktreeId)
+    // Why: only automatic completed-agent hibernation keeps passive completion
+    // evidence; manual sleep/remove still fold the entire worktree surface.
+    get().dropAgentStatusByWorktree(worktreeId, {
+      shutdownReason,
+      sleepingPaneKeys: opts?.sleepingPaneKeys,
+      retainedCompletionEvidence
+    })
 
     if (ptyIds.length === 0 && expectedRuntimePtyIds.length === 0) {
       return
