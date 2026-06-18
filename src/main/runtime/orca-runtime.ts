@@ -3851,6 +3851,12 @@ export class OrcaRuntimeService {
     const explicitWorktreeId = getExplicitWorktreeIdSelector(worktreeSelector)
     const worktreeId =
       explicitWorktreeId ?? (await this.resolveWorktreeSelector(worktreeSelector)).id
+    // Why: when a renderer is authoritative (desktop host reached via shared
+    // control), it owns pane geometry and republishes it — a headless write here
+    // would be overwritten and could fight the renderer. Persist only headlessly.
+    if (this.getAvailableAuthoritativeWindow()) {
+      return { updated: true }
+    }
     // Why: resolve to the host tab id (older/raw-id clients) so the persisted
     // layout entry matches, matching setMobileSessionTabProps.
     const snapshot = this.mobileSessionTabsByWorktree.get(worktreeId)
@@ -3873,6 +3879,11 @@ export class OrcaRuntimeService {
     const explicitWorktreeId = getExplicitWorktreeIdSelector(worktreeSelector)
     const worktreeId =
       explicitWorktreeId ?? (await this.resolveWorktreeSelector(worktreeSelector)).id
+    // Why: a renderer-authoritative host owns + republishes tab props, so a
+    // headless write would be overwritten. Persist only when headless.
+    if (this.getAvailableAuthoritativeWindow()) {
+      return { updated: true }
+    }
     const snapshot = this.mobileSessionTabsByWorktree.get(worktreeId)
     const hostTabId = snapshot
       ? (this.resolveMobileSessionHostTabId(snapshot, args.tabId) ?? args.tabId)

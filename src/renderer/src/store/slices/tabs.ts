@@ -29,6 +29,7 @@ import {
 import { buildHydratedTabState, pruneTabGroupLayoutForGroups } from './tabs-hydration'
 import { buildOrphanTerminalCleanupPatch, getOrphanTerminalIds } from './terminal-orphan-helpers'
 import { createBrowserUuid } from '@/lib/browser-uuid'
+import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
 import { folderWorkspaceKey } from '../../../../shared/workspace-scope'
 
@@ -185,6 +186,20 @@ function patchTerminalTabPinned(
       [worktreeId]: tabs.map((tab) => (tab.id === tabId ? { ...tab, isPinned } : tab))
     }
   }
+}
+
+// Why: pin is host-authoritative for remote-server tabs, so mirror it to the
+// host (like setTabColor) or it's lost on reconnect/restart/other clients.
+// Dynamic import keeps this store slice off the runtime layer.
+function mirrorTabPinnedToHost(state: AppState, tabId: string, isPinned: boolean): void {
+  const found = findTabAndWorktree(state.unifiedTabsByWorktree, tabId)
+  if (!found || !getRuntimeEnvironmentIdForWorktree(state, found.worktreeId)) {
+    return
+  }
+  const worktreeId = found.worktreeId
+  void import('@/runtime/web-runtime-session').then(({ setWebRuntimeTabProps }) =>
+    setWebRuntimeTabProps({ worktreeId, tabId, isPinned })
+  )
 }
 
 function buildSplitNode(
@@ -1028,6 +1043,7 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
         }
       }
     })
+    mirrorTabPinnedToHost(get(), tabId, true)
     if (exists) {
       get().recordFeatureInteraction?.('terminal-tabs')
     }
@@ -1064,6 +1080,7 @@ export const createTabsSlice: StateCreator<AppState, [], [], TabsSlice> = (set, 
         }
       }
     })
+    mirrorTabPinnedToHost(get(), tabId, false)
     if (exists) {
       get().recordFeatureInteraction?.('terminal-tabs')
     }
