@@ -48,7 +48,11 @@ function getWorktreeCreationIndeterminate(request: WorktreeCreationRequest): boo
   return getActiveRuntimeTarget(useAppStore.getState().settings).kind !== 'local'
 }
 
-async function preflightAgentTrust(request: WorktreeCreationRequest, path: string): Promise<void> {
+async function preflightAgentTrust(
+  request: WorktreeCreationRequest,
+  path: string,
+  connectionId?: string | null
+): Promise<void> {
   // Why: trust-gated agents (cursor-agent, copilot) consume the bracketed paste
   // as menu input on first launch. Pre-write the trust artifact before any
   // terminal spawns. Best-effort — the worktree already exists, so a failure
@@ -61,7 +65,11 @@ async function preflightAgentTrust(request: WorktreeCreationRequest, path: strin
     return
   }
   try {
-    await window.api.agentTrust.markTrusted({ preset: preflight, workspacePath: path })
+    await window.api.agentTrust.markTrusted({
+      preset: preflight,
+      workspacePath: path,
+      ...(connectionId ? { connectionId } : {})
+    })
   } catch {
     // Best-effort: continue with launch.
   }
@@ -137,7 +145,9 @@ async function executeWorktreeCreation(
   const startupOpt = buildStartupOpt(request, backendSpawned)
 
   if (worktree.path) {
-    await preflightAgentTrust(request, worktree.path)
+    const repoConnectionId =
+      useAppStore.getState().repos.find((repo) => repo.id === worktree.repoId)?.connectionId ?? null
+    await preflightAgentTrust(request, worktree.path, repoConnectionId)
   }
 
   // `createWorktree` already inserted the real worktree row. Whether we steal

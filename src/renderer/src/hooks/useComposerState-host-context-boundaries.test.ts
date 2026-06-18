@@ -383,4 +383,20 @@ describe('useComposerState host-context boundaries', () => {
     expect(quickSubmit).toContain('platform: selectedRepoAgentLaunchPlatform')
     expect(quickSubmit).not.toContain('platform: CLIENT_PLATFORM')
   })
+
+  it('prepares linked quick-create drafts for the selected default agent', () => {
+    const quickSubmit = sourceBetween(
+      HOOK_SOURCE,
+      'const submitQuick = useCallback',
+      'const createGateInput'
+    )
+
+    expect(quickSubmit).toContain(
+      'const promptLinkedWorkItem = agent === null ? null : submitLinkedWorkItem'
+    )
+    expect(quickSubmit).toContain('resolveQuickCreateLinkedWorkItemPrompt(promptLinkedWorkItem')
+    expect(quickSubmit).not.toContain('explicitAgentChoice')
+    expect(quickSubmit).not.toContain('shouldPrepareQuickLinkedWorkItemAgentPrompt')
+    expect(HOOK_SOURCE).not.toContain('resolveQuickWorkspaceSubmitAgent')
+  })
 })

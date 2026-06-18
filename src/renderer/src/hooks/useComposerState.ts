@@ -2681,10 +2681,6 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
       if (!selectedProjectGroup?.parentPath || folderCreateDisabled) {
         return
       }
-      const agent =
-        requestedAgent && isTuiAgentEnabled(requestedAgent, disabledTuiAgents)
-          ? requestedAgent
-          : null
       setCreateError(null)
       setCreating(true)
       try {
@@ -2696,6 +2692,10 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
           : ({ kind: 'none' } as const)
         const smartGitHubMetadata =
           smartGitHubResolution.kind === 'none' ? null : smartGitHubResolution
+        const agent =
+          requestedAgent && isTuiAgentEnabled(requestedAgent, disabledTuiAgents)
+            ? requestedAgent
+            : null
         const folderWorkspaceCreated = await submitFolderWorkspaceCreate({
           projectGroup: selectedProjectGroup,
           name: smartGitHubMetadata?.workspaceName ?? name,
@@ -3129,10 +3129,6 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         await submitFolderTarget(requestedAgent)
         return
       }
-      const agent =
-        requestedAgent && isTuiAgentEnabled(requestedAgent, disabledTuiAgents)
-          ? requestedAgent
-          : null
       const workspaceNameSeed = getWorkspaceSeedName({
         explicitName: name,
         prompt: '',
@@ -3161,6 +3157,10 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
           smartGitHubResolution.kind === 'none'
             ? linkedWorkItem
             : smartGitHubResolution.linkedWorkItem
+        const agent =
+          requestedAgent && isTuiAgentEnabled(requestedAgent, disabledTuiAgents)
+            ? requestedAgent
+            : null
         const submitLinkedIssueNumber =
           smartGitHubResolution.kind === 'none'
             ? parsedLinkedIssueNumber
@@ -3288,11 +3288,12 @@ export function useComposerState(options: UseComposerStateOptions): UseComposerS
         // Why: backend startup is safe only when the launch command is
         // self-contained. Agents that need post-ready paste/follow-up stay on
         // the renderer path so prompt delivery is not skipped.
-        const quickLinearCliAvailable = submitLinkedWorkItem?.linearIdentifier
+        const promptLinkedWorkItem = agent === null ? null : submitLinkedWorkItem
+        const quickLinearCliAvailable = promptLinkedWorkItem?.linearIdentifier
           ? await isOrcaCliAvailableForLaunch({ remote: isRemote })
           : false
         const { prompt: quickPrompt, draftPrompt: quickDraftPrompt } =
-          resolveQuickCreateLinkedWorkItemPrompt(submitLinkedWorkItem, trimmedNote, {
+          resolveQuickCreateLinkedWorkItemPrompt(promptLinkedWorkItem, trimmedNote, {
             cliAvailable: quickLinearCliAvailable
           })
         const draftLaunchPlan =
