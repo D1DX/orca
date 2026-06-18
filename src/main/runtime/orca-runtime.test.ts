@@ -10734,7 +10734,7 @@ describe('OrcaRuntimeService', () => {
     const beforeSplit = await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)
     expect(beforeSplit.tabGroups).toHaveLength(1)
     const sourceGroupId = beforeSplit.tabGroups![0]!.id
-    const secondHostTabId = second.tabId
+    const secondHostTabId = second.tabId!
 
     await runtime.moveMobileSessionTab(`id:${TEST_WORKTREE_ID}`, {
       kind: 'split',
@@ -10757,6 +10757,116 @@ describe('OrcaRuntimeService', () => {
     const splitOffGroup = afterNewTab.tabGroups!.find((group) => group.id !== sourceGroupId)!
     expect(splitOffGroup.tabOrder).toEqual([secondHostTabId])
     expect(first.tabId).toBeTruthy()
+
+    // Regression (#2): reordering one group must not delete the other group.
+    await runtime.moveMobileSessionTab(`id:${TEST_WORKTREE_ID}`, {
+      kind: 'reorder',
+      tabId: secondHostTabId,
+      targetGroupId: splitOffGroup.id,
+      tabOrder: [secondHostTabId]
+    })
+    const afterReorder = await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)
+    expect(afterReorder.tabGroups).toHaveLength(2)
+  })
+
+  it('restores a persisted multi-group split on a cold headless rehydrate', async () => {
+    // Regression (#1): hydrate must read back session.tabGroups/tabGroupLayouts,
+    // or a server restart coalesces the user's split into one group.
+    const session = makeWorkspaceSessionWithHeadlessTerminal({
+      tabsByWorktree: {
+        [TEST_WORKTREE_ID]: [
+          {
+            id: 'host-tab',
+            ptyId: 'persisted-pty',
+            worktreeId: TEST_WORKTREE_ID,
+            title: 'Left',
+            customTitle: null,
+            color: null,
+            sortOrder: 0,
+            createdAt: 1
+          },
+          {
+            id: 'host-tab-2',
+            ptyId: 'persisted-pty-2',
+            worktreeId: TEST_WORKTREE_ID,
+            title: 'Right',
+            customTitle: null,
+            color: null,
+            sortOrder: 1,
+            createdAt: 2
+          }
+        ]
+      },
+      terminalLayoutsByTabId: {
+        'host-tab': makeHeadlessTerminalLayout({ [HEADLESS_LEAF_ID]: 'persisted-pty' }),
+        'host-tab-2': makeHeadlessTerminalLayout({ [HEADLESS_LEAF_ID]: 'persisted-pty-2' })
+      },
+      tabGroups: {
+        [TEST_WORKTREE_ID]: [
+          { id: 'group-left', worktreeId: TEST_WORKTREE_ID, activeTabId: 'host-tab', tabOrder: ['host-tab'] },
+          { id: 'group-right', worktreeId: TEST_WORKTREE_ID, activeTabId: 'host-tab-2', tabOrder: ['host-tab-2'] }
+        ]
+      },
+      tabGroupLayouts: {
+        [TEST_WORKTREE_ID]: {
+          type: 'split',
+          direction: 'horizontal',
+          first: { type: 'leaf', groupId: 'group-left' },
+          second: { type: 'leaf', groupId: 'group-right' }
+        }
+      }
+    })
+    const { runtimeStore } = makeRuntimeStoreWithWorkspaceSession(session)
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+
+    runtime['hydrateHeadlessMobileSessionTabsFromWorkspaceSession'](TEST_WORKTREE_ID)
+    const rehydrated = await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)
+    expect(rehydrated.tabGroups).toHaveLength(2)
+    expect(rehydrated.tabGroupLayout).toMatchObject({ type: 'split', direction: 'horizontal' })
+    // Each persisted group keeps its own tab — no coalescing.
+    const left = rehydrated.tabGroups!.find((g) => g.id === 'group-left')!
+    const right = rehydrated.tabGroups!.find((g) => g.id === 'group-right')!
+    expect(left.tabOrder).toEqual(['host-tab'])
+    expect(right.tabOrder).toEqual(['host-tab-2'])
+  })
+
+  it('moves a headless tab into an existing group without renderer_unavailable', async () => {
+    let ptyCounter = 0
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn(async () => ({ id: `move-group-pty-${++ptyCounter}` })),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    await runtime.createTerminal(`id:${TEST_WORKTREE_ID}`, { activate: true })
+    const second = await runtime.createTerminal(`id:${TEST_WORKTREE_ID}`, { activate: true })
+    const before = await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)
+    const sourceGroupId = before.tabGroups![0]!.id
+    const secondHostTabId = second.tabId!
+
+    // Split into 2 groups, then move the tab back into the source group.
+    await runtime.moveMobileSessionTab(`id:${TEST_WORKTREE_ID}`, {
+      kind: 'split',
+      tabId: secondHostTabId,
+      targetGroupId: sourceGroupId,
+      splitDirection: 'right'
+    })
+    const split = await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)
+    expect(split.tabGroups).toHaveLength(2)
+
+    await expect(
+      runtime.moveMobileSessionTab(`id:${TEST_WORKTREE_ID}`, {
+        kind: 'move-to-group',
+        tabId: secondHostTabId,
+        targetGroupId: sourceGroupId
+      })
+    ).resolves.toEqual({ moved: true })
+
+    const merged = await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)
+    // Moving the only tab back collapses the split to a single group.
+    expect(merged.tabGroups).toHaveLength(1)
+    expect(merged.tabGroups![0]!.tabOrder).toContain(secondHostTabId)
   })
 
   it('keeps preserved headless mobile session publication epochs idempotent', async () => {

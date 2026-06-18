@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  buildHeadlessTabGroupMove,
   buildHeadlessTabGroupSplit,
   collectTabGroupLayoutGroupIds,
   removeTabGroupLayoutLeaf
@@ -133,6 +134,61 @@ describe('buildHeadlessTabGroupSplit', () => {
     })
     expect(result!.layout).toMatchObject({ type: 'split' })
     expect([...collectTabGroupLayoutGroupIds(result!.layout)].sort()).toEqual(['g1', 'g2'])
+  })
+})
+
+describe('buildHeadlessTabGroupMove', () => {
+  const twoGroupLayout = {
+    type: 'split' as const,
+    direction: 'horizontal' as const,
+    first: { type: 'leaf' as const, groupId: 'g1' },
+    second: { type: 'leaf' as const, groupId: 'g2' }
+  }
+
+  it('moves a tab into an existing group at the given index', () => {
+    const result = buildHeadlessTabGroupMove({
+      groups: [group('g1', ['a', 'b']), group('g2', ['c'])],
+      layout: twoGroupLayout,
+      tabId: 'b',
+      targetGroupId: 'g2',
+      index: 0
+    })
+    expect(result!.groups.find((g) => g.id === 'g1')!.tabOrder).toEqual(['a'])
+    expect(result!.groups.find((g) => g.id === 'g2')!.tabOrder).toEqual(['b', 'c'])
+    expect(result!.groups.find((g) => g.id === 'g2')!.activeTabId).toBe('b')
+  })
+
+  it('collapses the source group out of the layout when the move empties it', () => {
+    const result = buildHeadlessTabGroupMove({
+      groups: [group('g1', ['a']), group('g2', ['b'])],
+      layout: twoGroupLayout,
+      tabId: 'a',
+      targetGroupId: 'g2'
+    })
+    expect(result!.groups.map((g) => g.id)).toEqual(['g2'])
+    expect(result!.layout).toEqual({ type: 'leaf', groupId: 'g2' })
+  })
+
+  it('returns null for a same-group move (renderer no-op)', () => {
+    expect(
+      buildHeadlessTabGroupMove({
+        groups: [group('g1', ['a', 'b'])],
+        layout: { type: 'leaf', groupId: 'g1' },
+        tabId: 'b',
+        targetGroupId: 'g1'
+      })
+    ).toBeNull()
+  })
+
+  it('returns null when the target group does not exist', () => {
+    expect(
+      buildHeadlessTabGroupMove({
+        groups: [group('g1', ['a', 'b'])],
+        layout: { type: 'leaf', groupId: 'g1' },
+        tabId: 'b',
+        targetGroupId: 'missing'
+      })
+    ).toBeNull()
   })
 })
 

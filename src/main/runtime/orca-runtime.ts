@@ -259,7 +259,10 @@ import type {
 import type { AutomationService } from '../automations/service'
 import { RuntimeBrowserCommands } from './orca-runtime-browser'
 import { buildHeadlessTerminalSplitLayout } from './headless-terminal-split-layout'
-import { buildHeadlessTabGroupSplit } from './headless-tab-group-split-layout'
+import {
+  buildHeadlessTabGroupMove,
+  buildHeadlessTabGroupSplit
+} from './headless-tab-group-split-layout'
 import { RuntimeEmulatorCommands, setEmulatorBridge } from './orca-runtime-emulator'
 import { serveSimStateWatcher } from '../emulator/serve-sim-state-watcher'
 import type { EmulatorBridge } from '../emulator/emulator-bridge'
@@ -2690,6 +2693,20 @@ export class OrcaRuntimeService {
       const mergedBrowserOrder = mergedTabs
         .filter((tab): tab is RuntimeMobileSessionBrowserTab => tab.type === 'browser')
         .map((tab) => tab.id)
+      // Why: a persisted multi-group split must be restored on cold rebuild, or
+      // the headless serve coalesces the user's group layout back into one group
+      // (the persisted tabGroups/tabGroupLayouts would otherwise be write-only).
+      const persistedGroups = session.tabGroups?.[entryWorktreeId]
+      const persistedLayout = session.tabGroupLayouts?.[entryWorktreeId]
+      const hasPersistedSplit =
+        options.onlyServeOwnedTerminals !== true &&
+        persistedGroups !== undefined &&
+        persistedGroups.length > 1
+      const activeTopLevelId = mergedActiveTab
+        ? mergedActiveTab.type === 'terminal'
+          ? mergedActiveTab.parentTabId
+          : mergedActiveTab.id
+        : null
       this.mobileSessionTabsByWorktree.set(entryWorktreeId, {
         worktree: existing?.worktree ?? entryWorktreeId,
         publicationEpoch: `headless-hydrated:${Date.now().toString(36)}`,
@@ -2697,8 +2714,21 @@ export class OrcaRuntimeService {
         activeGroupId: existing?.activeGroupId ?? groupId,
         activeTabId: mergedActiveTab?.id ?? null,
         activeTabType: mergedActiveTab?.type ?? null,
-        tabGroups:
-          options.onlyServeOwnedTerminals === true && existing?.tabGroups
+        tabGroups: hasPersistedSplit
+          ? this.appendBrowserTabOrder(
+              this.distributeHeadlessTabsAcrossGroups(
+                persistedGroups.map((group) => ({
+                  id: group.id,
+                  activeTabId: group.activeTabId,
+                  tabOrder: [...group.tabOrder],
+                  ...(group.recentTabIds ? { recentTabIds: [...group.recentTabIds] } : {})
+                })),
+                this.collectHeadlessParentTabOrder(mergedTerminalTabs),
+                activeTopLevelId
+              ),
+              mergedBrowserOrder
+            )
+          : options.onlyServeOwnedTerminals === true && existing?.tabGroups
             ? this.appendBrowserTabOrder(
                 this.mergeMobileSessionTabGroups(
                   entryWorktreeId,
@@ -2717,6 +2747,7 @@ export class OrcaRuntimeService {
                   tabOrder
                 }
               ],
+        ...(hasPersistedSplit && persistedLayout ? { tabGroupLayout: persistedLayout } : {}),
         tabs: mergedTabs
       })
     }
@@ -2866,19 +2897,42 @@ export class OrcaRuntimeService {
               tabOrder: []
             }
           ]
-    const target = nextGroups[0]!
-    for (const tabId of parentTabOrder) {
-      if (!target.tabOrder.includes(tabId)) {
-        target.tabOrder.push(tabId)
+    // Why: keep each tab in the group that already owns it (a multi-group split
+    // must survive the merge), drop tabs no longer present, and route only
+    // genuinely-new tabs into the active group — never funnel everything into
+    // group[0], which duplicated/coalesced tabs that lived in other groups.
+    const ownerGroupId = new Map<string, string>()
+    for (const group of nextGroups) {
+      for (const tabId of group.tabOrder) {
+        ownerGroupId.set(tabId, group.id)
       }
     }
-    const activeParentId =
-      activeTab?.parentTabId ?? target.activeTabId ?? target.tabOrder[0] ?? null
-    target.activeTabId =
-      activeParentId && target.tabOrder.includes(activeParentId)
-        ? activeParentId
-        : (target.tabOrder[0] ?? null)
+    const liveTabIds = new Set(parentTabOrder)
+    const activeParentId = activeTab?.parentTabId ?? null
+    const activeGroupId =
+      (activeParentId ? ownerGroupId.get(activeParentId) : undefined) ?? nextGroups[0]!.id
+    const retainedOrder = new Map<string, string[]>(nextGroups.map((group) => [group.id, []]))
+    for (const tabId of parentTabOrder) {
+      const groupId = ownerGroupId.get(tabId) ?? activeGroupId
+      retainedOrder.get(groupId)?.push(tabId)
+    }
     return nextGroups
+      .map((group) => {
+        const tabOrder = retainedOrder.get(group.id) ?? []
+        const keptActive =
+          group.activeTabId && tabOrder.includes(group.activeTabId) && liveTabIds.has(group.activeTabId)
+            ? group.activeTabId
+            : null
+        return {
+          ...group,
+          tabOrder,
+          activeTabId:
+            activeParentId && tabOrder.includes(activeParentId)
+              ? activeParentId
+              : (keptActive ?? tabOrder[0] ?? null)
+        }
+      })
+      .filter((group) => group.tabOrder.length > 0)
   }
 
   private publishPtyBackedMobileSessionTerminal(
@@ -3785,6 +3839,9 @@ export class OrcaRuntimeService {
     if (move.kind === 'split') {
       return this.splitHeadlessMobileSessionTabGroup(worktreeId, snapshot, move)
     }
+    if (move.kind === 'move-to-group') {
+      return this.moveHeadlessMobileSessionTabToGroup(worktreeId, snapshot, move)
+    }
     if (move.kind !== 'reorder') {
       throw new Error('renderer_unavailable')
     }
@@ -3807,27 +3864,35 @@ export class OrcaRuntimeService {
       return aIndex - bIndex
     })
     const active = nextTabs.find((candidate) => candidate.isActive) ?? nextTabs[0] ?? null
+    const reorderedTargetActiveTabId =
+      active?.type === 'terminal'
+        ? active.parentTabId
+        : active
+          ? active.id
+          : (tabOrder[0] ?? null)
+    // Why: reorder only changes ONE group's order. Preserve every other group so
+    // a multi-group split isn't deleted by re-sorting tabs in one of its groups.
+    const existingGroups = snapshot.tabGroups ?? []
+    const nextGroups = existingGroups.some((group) => group.id === targetGroup.id)
+      ? existingGroups.map((group) =>
+          group.id === targetGroup.id
+            ? { ...group, tabOrder, activeTabId: reorderedTargetActiveTabId }
+            : group
+        )
+      : [{ ...targetGroup, tabOrder, activeTabId: reorderedTargetActiveTabId }]
     const nextSnapshot: RuntimeMobileSessionTabsSnapshot = {
       ...snapshot,
       publicationEpoch: `headless:${Date.now().toString(36)}`,
       snapshotVersion: snapshot.snapshotVersion + 1,
       activeTabId: active?.id ?? null,
       activeTabType: active?.type ?? null,
-      tabGroups: [
-        {
-          ...targetGroup,
-          tabOrder,
-          activeTabId:
-            active?.type === 'terminal'
-              ? active.parentTabId
-              : active
-                ? active.id
-                : (tabOrder[0] ?? null)
-        }
-      ],
+      tabGroups: nextGroups,
       tabs: nextTabs
     }
     this.persistHeadlessTerminalTabOrder(worktreeId, tabOrder)
+    if (nextGroups.length > 1 && snapshot.tabGroupLayout) {
+      this.persistHeadlessTabGroups(worktreeId, nextGroups, snapshot.tabGroupLayout)
+    }
     this.mobileSessionTabsByWorktree.set(worktreeId, nextSnapshot)
     this.emitMobileSessionTabsSnapshot(nextSnapshot)
     return { moved: true }
@@ -3867,6 +3932,42 @@ export class OrcaRuntimeService {
       tabGroupLayout: split.layout
     }
     this.persistHeadlessTabGroups(worktreeId, split.groups, split.layout)
+    this.mobileSessionTabsByWorktree.set(worktreeId, nextSnapshot)
+    this.emitMobileSessionTabsSnapshot(nextSnapshot)
+    return { moved: true }
+  }
+
+  // Move a tab into an existing group on a headless serve (non-split drop).
+  private moveHeadlessMobileSessionTabToGroup(
+    worktreeId: string,
+    snapshot: RuntimeMobileSessionTabsSnapshot,
+    move: Extract<RuntimeMobileSessionTabMove, { kind: 'move-to-group' }>
+  ): RuntimeMobileSessionTabMoveResult {
+    const hostTabId = this.resolveMobileSessionHostTabId(snapshot, move.tabId)
+    if (!hostTabId) {
+      throw new Error('tab_not_found')
+    }
+    const moved = buildHeadlessTabGroupMove({
+      groups: snapshot.tabGroups ?? [],
+      layout: snapshot.tabGroupLayout,
+      tabId: hostTabId,
+      targetGroupId: move.targetGroupId,
+      index: move.index
+    })
+    if (!moved) {
+      // Same-group / missing-target drop is a renderer no-op; mirror that.
+      return { moved: true }
+    }
+    const layout = moved.layout ?? { type: 'leaf' as const, groupId: move.targetGroupId }
+    const nextSnapshot: RuntimeMobileSessionTabsSnapshot = {
+      ...snapshot,
+      publicationEpoch: `headless:${Date.now().toString(36)}`,
+      snapshotVersion: snapshot.snapshotVersion + 1,
+      activeGroupId: move.targetGroupId,
+      tabGroups: moved.groups,
+      tabGroupLayout: layout
+    }
+    this.persistHeadlessTabGroups(worktreeId, moved.groups, layout)
     this.mobileSessionTabsByWorktree.set(worktreeId, nextSnapshot)
     this.emitMobileSessionTabsSnapshot(nextSnapshot)
     return { moved: true }
@@ -13604,6 +13705,9 @@ export class OrcaRuntimeService {
         activate ? tab : null,
         existing?.tabGroups
       ),
+      // Why: keep the group split geometry when a new tab is created, otherwise
+      // opening a terminal while split loses the groups' arrangement.
+      ...(existing?.tabGroupLayout ? { tabGroupLayout: existing.tabGroupLayout } : {}),
       tabs
     }
     this.mobileSessionTabsByWorktree.set(worktreeId, next)

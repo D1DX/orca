@@ -83,6 +83,63 @@ export function removeTabGroupLayoutLeaf(
   return { ...root, first, second }
 }
 
+export type HeadlessTabGroupMoveResult = {
+  groups: RuntimeMobileSessionTabGroup[]
+  layout: TabGroupLayoutNode | null
+}
+
+/**
+ * Move `tabId` into an EXISTING `targetGroupId` (a non-split drop), mirroring the
+ * renderer's move-to-group path. Inserts at `index` (clamped), removes the tab
+ * from its source group, and drops a source group emptied by the move (collapsing
+ * it out of the layout). Returns null when the tab/target is missing or it's a
+ * same-group no-op.
+ */
+export function buildHeadlessTabGroupMove(args: {
+  groups: readonly RuntimeMobileSessionTabGroup[]
+  layout: TabGroupLayoutNode | null | undefined
+  tabId: string
+  targetGroupId: string
+  index?: number
+}): HeadlessTabGroupMoveResult | null {
+  const sourceGroup = args.groups.find((group) => group.tabOrder.includes(args.tabId))
+  const targetGroup = args.groups.find((group) => group.id === args.targetGroupId)
+  if (!sourceGroup || !targetGroup) {
+    return null
+  }
+  if (sourceGroup.id === args.targetGroupId) {
+    return null
+  }
+
+  let groups: RuntimeMobileSessionTabGroup[] = args.groups.map((group) => {
+    if (group.id === sourceGroup.id) {
+      const tabOrder = group.tabOrder.filter((id) => id !== args.tabId)
+      return {
+        ...group,
+        tabOrder,
+        activeTabId: group.activeTabId === args.tabId ? (tabOrder[0] ?? null) : group.activeTabId
+      }
+    }
+    if (group.id === args.targetGroupId) {
+      const tabOrder = group.tabOrder.filter((id) => id !== args.tabId)
+      const at = Math.max(0, Math.min(args.index ?? tabOrder.length, tabOrder.length))
+      tabOrder.splice(at, 0, args.tabId)
+      return { ...group, tabOrder, activeTabId: args.tabId }
+    }
+    return group
+  })
+
+  groups = groups.filter((group) => group.tabOrder.length > 0)
+  const liveGroupIds = new Set(groups.map((group) => group.id))
+  let layout: TabGroupLayoutNode | null = args.layout ?? null
+  for (const groupId of collectTabGroupLayoutGroupIds(args.layout)) {
+    if (!liveGroupIds.has(groupId)) {
+      layout = removeTabGroupLayoutLeaf(layout, groupId)
+    }
+  }
+  return { groups, layout }
+}
+
 export type HeadlessTabGroupSplitResult = {
   groups: RuntimeMobileSessionTabGroup[]
   layout: TabGroupLayoutNode
