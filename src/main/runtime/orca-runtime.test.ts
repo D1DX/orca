@@ -10830,6 +10830,43 @@ describe('OrcaRuntimeService', () => {
     expect(right.tabOrder).toEqual(['host-tab-2'])
   })
 
+  it('persists a headless terminal rename so it survives a cold rehydrate', async () => {
+    const session = makeWorkspaceSessionWithHeadlessTerminal()
+    const { runtimeStore, getSession } = makeRuntimeStoreWithWorkspaceSession(session)
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+    runtime.setPtyController({
+      spawn: vi.fn(async () => ({ id: 'rename-pty' })),
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    // Bind a live pty to the persisted 'host-tab' so rename resolves by handle.
+    const created = await runtime.createTerminal(`id:${TEST_WORKTREE_ID}`, {
+      tabId: 'host-tab',
+      leafId: HEADLESS_LEAF_ID,
+      activate: true
+    })
+
+    await expect(runtime.renameTerminal(created.handle, 'My Title')).resolves.toMatchObject({
+      title: 'My Title'
+    })
+
+    // customTitle must be persisted to the workspace session (not just live pty).
+    const persistedTab = getSession().tabsByWorktree[TEST_WORKTREE_ID]!.find(
+      (tab) => tab.id === 'host-tab'
+    )!
+    expect(persistedTab.customTitle).toBe('My Title')
+
+    // A cold rehydrate keeps the renamed title.
+    runtime['mobileSessionTabsByWorktree'].delete(TEST_WORKTREE_ID)
+    runtime['hydrateHeadlessMobileSessionTabsFromWorkspaceSession'](TEST_WORKTREE_ID)
+    const rehydrated = await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)
+    const renamed = rehydrated.tabs.find(
+      (tab) => tab.type === 'terminal' && tab.parentTabId === 'host-tab'
+    )
+    expect(renamed?.title).toBe('My Title')
+  })
+
   it('moves a headless tab into an existing group without renderer_unavailable', async () => {
     let ptyCounter = 0
     const runtime = new OrcaRuntimeService(store)

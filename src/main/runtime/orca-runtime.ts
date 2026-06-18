@@ -4002,6 +4002,32 @@ export class OrcaRuntimeService {
     })
   }
 
+  // Persist a manual terminal rename so a headless rebuild keeps the title
+  // instead of reverting to the generated/default one.
+  private persistHeadlessTerminalTitle(
+    worktreeId: string,
+    tabId: string,
+    title: string | null
+  ): void {
+    const session = this.store?.getWorkspaceSession?.()
+    if (!session || !this.store?.setWorkspaceSession) {
+      return
+    }
+    const tabs = session.tabsByWorktree[worktreeId]
+    if (!tabs?.some((tab) => tab.id === tabId)) {
+      return
+    }
+    this.store.setWorkspaceSession({
+      ...session,
+      tabsByWorktree: {
+        ...session.tabsByWorktree,
+        [worktreeId]: tabs.map((tab) =>
+          tab.id === tabId ? { ...tab, customTitle: title } : tab
+        )
+      }
+    })
+  }
+
   private normalizeMobileSessionTabOrder(
     snapshot: RuntimeMobileSessionTabsSnapshot | undefined,
     targetGroup: RuntimeMobileSessionTabGroup,
@@ -13270,7 +13296,15 @@ export class OrcaRuntimeService {
     const pty = this.getLivePtyForHandle(handle)
     if (pty) {
       pty.pty.title = title
+      // Why: a manual rename must outrank later agent OSC title updates (which
+      // win by timestamp), so stamp it as the freshest title.
+      pty.pty.titleUpdatedAt = Date.now()
       this.touchMobileSessionSnapshotsForPty(pty.pty.ptyId)
+      // Why: without a renderer the rename only lived on the live pty and was
+      // lost on restart. Persist customTitle so a headless rebuild keeps it.
+      if (!this.notifier?.renameTerminal && pty.pty.tabId) {
+        this.persistHeadlessTerminalTitle(pty.pty.worktreeId, pty.pty.tabId, title)
+      }
       for (const leaf of this.leaves.values()) {
         if (leaf.ptyId === pty.pty.ptyId) {
           this.notifier?.renameTerminal(leaf.tabId, title)
