@@ -1210,7 +1210,12 @@ const WorktreeCard = React.memo(function WorktreeCard({
 
             {showInlineRepoBadge && (
               <RepoIdentityChip repo={repo}>
-                <RepoBadgeMark color={repo.badgeColor} className="size-2 rounded-[2px]" />
+                <RepoIconGlyph
+                  repoIcon={repo.repoIcon}
+                  color={resolveRepoHeaderColor(repo.badgeColor)}
+                  className="size-full"
+                  iconClassName="size-3"
+                />
               </RepoIdentityChip>
             )}
 
