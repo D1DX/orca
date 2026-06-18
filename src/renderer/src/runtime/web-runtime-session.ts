@@ -608,3 +608,34 @@ export function closeWebRuntimeTerminal(ptyId: string | null | undefined): boole
     })
   return true
 }
+
+// Why: clearing scrollback locally (pane.terminal.clear()) is undone by the next
+// host snapshot/re-subscribe, which replays the host buffer. Clear the host
+// buffer too so the clear actually sticks on a remote-server pane.
+export function clearWebRuntimeTerminalBuffer(ptyId: string | null | undefined): boolean {
+  if (!ptyId) {
+    return false
+  }
+  const remote = parseRemoteRuntimePtyId(ptyId)
+  const environmentId = remote?.environmentId?.trim()
+  if (!remote || !environmentId || !isWebRuntimeSessionActive(environmentId)) {
+    return false
+  }
+  void window.api.runtimeEnvironments
+    .call({
+      selector: environmentId,
+      method: 'terminal.clearBuffer',
+      params: { terminal: remote.handle },
+      timeoutMs: 15_000
+    })
+    .then((response) => {
+      unwrapRuntimeRpcResult(response as RuntimeRpcResponse<{ clear: unknown }>)
+    })
+    .catch((error) => {
+      console.warn(
+        '[web-runtime-session] failed to clear terminal buffer:',
+        error instanceof Error ? error.message : String(error)
+      )
+    })
+  return true
+}

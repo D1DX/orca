@@ -74,7 +74,10 @@ import { resolvePaneKeyForManager } from '@/lib/pane-manager/pane-key-resolution
 import { safeFit } from '@/lib/pane-manager/pane-tree-ops'
 import { captureTerminalShutdownLayout } from './terminal-shutdown-layout-capture'
 import { inspectRuntimeTerminalProcess } from '@/runtime/runtime-terminal-inspection'
-import { closeWebRuntimeTerminal } from '@/runtime/web-runtime-session'
+import {
+  clearWebRuntimeTerminalBuffer,
+  closeWebRuntimeTerminal
+} from '@/runtime/web-runtime-session'
 import { isPrimarySelectionEnabled, readPrimarySelectionText } from '@/lib/primary-selection'
 import { WORKSPACE_FILE_PATH_MIME } from '@/lib/workspace-file-drag'
 import { isTerminalSessionStateSaveFailure } from '../../../../shared/terminal-session-state-save-failure'
@@ -685,9 +688,13 @@ export default function TerminalPane({
     (pane: ManagedPane): void => {
       clearedScrollbackLeafIdsRef.current.add(pane.leafId)
       pane.terminal.clear()
+      // Why: also clear the host buffer for remote-server panes, or the next
+      // host snapshot replays the scrollback we just cleared locally.
+      const ptyId = paneTransportsRef.current.get(pane.id)?.getPtyId() ?? null
+      clearWebRuntimeTerminalBuffer(ptyId)
       persistLayoutSnapshot()
     },
-    [persistLayoutSnapshot]
+    [paneTransportsRef, persistLayoutSnapshot]
   )
 
   useEffect(() => {
