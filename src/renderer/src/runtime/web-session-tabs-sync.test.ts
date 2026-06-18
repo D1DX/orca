@@ -104,31 +104,32 @@ describe('applyWebSessionTabsSnapshot', () => {
     expect(applyFreshWebSessionTabsSnapshot(afterNewer, newer, ENV, NOW)).toBe(afterNewer)
   })
 
-  it('rejects an out-of-order older snapshot even when the epoch differs', () => {
-    // Why: every host mutation stamps a fresh publicationEpoch, and the active
-    // worktree is delivered on two streams (subscribe + subscribeAll) that can
-    // interleave. The version guard must hold across epochs or an older frame
-    // clobbers a newer one (lost update).
-    const newer = makeSnapshot([], {
-      publicationEpoch: 'epoch-newer',
-      snapshotVersion: 6,
+  it('applies a lower-version snapshot from a different epoch (host restart safety)', () => {
+    // Why: snapshotVersion resets when the host restarts, and a restart produces
+    // a new publicationEpoch. Since the client's freshness tracking survives a
+    // transparent transport reconnect, rejecting on version alone would
+    // permanently drop the post-restart snapshot. A different epoch must apply
+    // even at a lower version; only same-epoch non-newer frames are stale.
+    const before = makeSnapshot([], {
+      publicationEpoch: 'epoch-gen-1',
+      snapshotVersion: 10,
       activeTabType: null
     })
-    const olderDifferentEpoch = makeSnapshot([], {
-      publicationEpoch: 'epoch-older',
-      snapshotVersion: 5,
+    const afterRestart = makeSnapshot([], {
+      publicationEpoch: 'epoch-gen-2',
+      snapshotVersion: 1,
       activeTabType: null
     })
 
-    expect(shouldApplyWebSessionTabsSnapshot(newer, ENV)).toBe(true)
-    expect(shouldApplyWebSessionTabsSnapshot(olderDifferentEpoch, ENV)).toBe(false)
-    // A genuinely newer version on yet another epoch still applies.
-    const newest = makeSnapshot([], {
-      publicationEpoch: 'epoch-newest',
-      snapshotVersion: 7,
+    expect(shouldApplyWebSessionTabsSnapshot(before, ENV)).toBe(true)
+    expect(shouldApplyWebSessionTabsSnapshot(afterRestart, ENV)).toBe(true)
+    // Same-epoch non-newer frames are still rejected as stale/duplicate.
+    const sameEpochOlder = makeSnapshot([], {
+      publicationEpoch: 'epoch-gen-2',
+      snapshotVersion: 1,
       activeTabType: null
     })
-    expect(shouldApplyWebSessionTabsSnapshot(newest, ENV)).toBe(true)
+    expect(shouldApplyWebSessionTabsSnapshot(sameEpochOlder, ENV)).toBe(false)
   })
 
   it('does not bootstrap a terminal from a stale empty active-worktree snapshot', () => {

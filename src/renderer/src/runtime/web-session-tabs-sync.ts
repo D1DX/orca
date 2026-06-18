@@ -169,15 +169,20 @@ export function shouldApplyWebSessionTabsSnapshot(
   }
   rememberHostTerminalTabCount(environmentId, snapshot)
   const current = latestSessionTabsSnapshotByWorktree.get(key)
-  // Why: snapshotVersion is a per-worktree monotonic counter the host bumps on
-  // every mutation, but each mutation also stamps a fresh publicationEpoch — so
-  // gating the version check on epoch equality (the old behavior) disabled it
-  // almost always. The active worktree is delivered on TWO streams (subscribe +
-  // subscribeAll), which can interleave out of order, so an older frame could
-  // clobber a newer one. Reject any frame whose version is not newer than the
-  // last applied, regardless of epoch. (Disconnect clears tracking, so a host
-  // restart's reset version isn't wrongly rejected; `removed` is handled above.)
-  if (current && snapshot.snapshotVersion <= current.snapshotVersion) {
+  // Why: snapshotVersion is monotonic only WITHIN one host generation; it resets
+  // when the host restarts, and each restart produces a different publicationEpoch.
+  // So only treat a frame as stale when it shares the current epoch and isn't
+  // newer — a different epoch is a new generation (or a restart) and must apply,
+  // even if its version is lower. (A cross-stream out-of-order frame with a
+  // different epoch may briefly apply, but the next snapshot's higher version
+  // self-heals it; rejecting on version alone would instead permanently drop a
+  // post-restart snapshot, since the client's tracking survives transparent
+  // transport reconnects.)
+  if (
+    current &&
+    current.publicationEpoch === snapshot.publicationEpoch &&
+    snapshot.snapshotVersion <= current.snapshotVersion
+  ) {
     return false
   }
   latestSessionTabsSnapshotByWorktree.set(key, {
