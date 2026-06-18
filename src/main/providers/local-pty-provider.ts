@@ -41,6 +41,7 @@ import {
 import { WINDOWS_GIT_BASH_SHELL } from '../../shared/windows-terminal-shell'
 import { resolveAgentForegroundProcess } from './agent-foreground-process'
 import { getAgentForegroundContextPaths } from './agent-foreground-context-paths'
+import { recognizeAgentProcessFromCommandLine } from '../../shared/agent-process-recognition'
 
 const PANE_IDENTITY_ENV_KEYS = ['ORCA_PANE_KEY', 'ORCA_TAB_ID', 'ORCA_WORKTREE_ID'] as const
 
@@ -463,25 +464,31 @@ export class LocalPtyProvider implements IPtyProvider {
       }
     }
     if (!wslInfo && process.platform !== 'win32') {
-      // Why: any Orca-injected overlay env that user rc files can clobber
-      // needs the wrapper so the post-rc restore line runs.
+      // Why: OpenCode/Codex path restoration and OMP's typed-command status
+      // wrapper need shell-ready code after user startup files run.
       const needsNoMarkerWrapper =
         finalEnv.ORCA_ATTRIBUTION_SHIM_DIR ||
         finalEnv.ORCA_OPENCODE_CONFIG_DIR ||
-        finalEnv.ORCA_PI_CODING_AGENT_DIR ||
-        finalEnv.ORCA_OMP_CODING_AGENT_DIR ||
+        finalEnv.ORCA_OMP_STATUS_EXTENSION ||
         finalEnv.ORCA_CODEX_HOME ||
         finalEnv.ORCA_AGENT_TEAMS_SHIM_DIR
-      getFallbackShellReadyConfig = args.command
-        ? (shell) => getShellReadyLaunchConfig(shell)
-        : needsNoMarkerWrapper
-          ? (shell) => getAttributionShellLaunchConfig(shell)
-          : undefined
-      const shellLaunch = args.command
-        ? getShellReadyLaunchConfig(shellPath)
-        : needsNoMarkerWrapper
-          ? getAttributionShellLaunchConfig(shellPath)
-          : null
+      const isCodexStartupCommand =
+        recognizeAgentProcessFromCommandLine(args.command)?.agent === 'codex'
+      let shellLaunch: ReturnType<typeof getShellReadyLaunchConfig> | null = null
+      if (args.command && isCodexStartupCommand) {
+        // Why: Codex needs the env-restoring wrapper, but waiting for a shell
+        // marker delays the first useful TUI frame.
+        getFallbackShellReadyConfig = (shell) => getAttributionShellLaunchConfig(shell)
+        shellLaunch = getAttributionShellLaunchConfig(shellPath)
+      } else if (args.command) {
+        getFallbackShellReadyConfig = (shell) => getShellReadyLaunchConfig(shell)
+        shellLaunch = getShellReadyLaunchConfig(shellPath)
+      } else if (needsNoMarkerWrapper) {
+        getFallbackShellReadyConfig = (shell) => getAttributionShellLaunchConfig(shell)
+        shellLaunch = getAttributionShellLaunchConfig(shellPath)
+      } else {
+        getFallbackShellReadyConfig = undefined
+      }
       if (shellLaunch) {
         Object.assign(finalEnv, shellLaunch.env)
         shellArgs = shellLaunch.args ?? shellArgs
@@ -497,10 +504,15 @@ export class LocalPtyProvider implements IPtyProvider {
     const historyEnabled = worktreeId && (this.opts.isHistoryEnabled?.() ?? true)
     // Resolve the effective shell kind for history injection. For WSL, the
     // outer executable is wsl.exe but the inner login shell is bash.
-    const effectiveShellPath = wslInfo ? 'bash' : shellPath
+    const isWslTerminal =
+      Boolean(wslInfo || worktreeWslContext || preferredWslContext) ||
+      pathWin32.basename(shellPath).toLowerCase() === 'wsl.exe'
+    const effectiveShellPath = isWslTerminal ? 'bash' : shellPath
     let historyResult: ReturnType<typeof injectHistoryEnv> | null = null
     if (historyEnabled) {
-      historyResult = injectHistoryEnv(finalEnv, worktreeId, effectiveShellPath, cwd)
+      historyResult = injectHistoryEnv(finalEnv, worktreeId, effectiveShellPath, cwd, {
+        wslDistro: preferredWslContext?.distro ?? worktreeWslContext?.distro ?? null
+      })
       logHistoryInjection(worktreeId, historyResult)
     }
 

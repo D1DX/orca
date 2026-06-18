@@ -10,9 +10,13 @@ export type TerminalWebViewCommand =
       initialData?: string
       terminalTheme?: RuntimeMobileTerminalTheme
       fontScale?: number
+      // Why: width-reflow re-streams replay the same content rewrapped at new
+      // cols; preserve the reader's scroll position instead of jumping to bottom.
+      preserveScroll?: boolean
     }
   | { type: 'set-font-scale'; id?: number; fontScale: number }
   | { type: 'resize'; id?: number; cols: number; rows: number }
+  | { type: 'reflow'; id?: number; cols: number; rows: number }
   | { type: 'clear'; id?: number }
   | { type: 'measure'; id?: number; containerHeight?: number }
   | { type: 'reset-zoom'; id?: number }

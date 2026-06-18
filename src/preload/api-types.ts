@@ -12,6 +12,7 @@ import type { NativeFileDropPayload } from '../shared/native-file-drop'
 import type { AppIdentity } from '../shared/app-identity'
 import type { TerminalPaneSplitSource } from '../shared/feature-education-telemetry'
 import type { TaskSourceContext } from '../shared/task-source-context'
+import type { ProjectExecutionRuntimeResolution } from '../shared/project-execution-runtime'
 import type {
   FolderWorkspacePathStatus,
   FolderWorkspacePathStatusRequest
@@ -129,6 +130,7 @@ import type {
   PRInfo,
   PRRefreshOutcome,
   Project,
+  ProjectUpdateArgs,
   Repo,
   ProjectGroup,
   ProjectHostSetup,
@@ -303,7 +305,11 @@ import type {
   ClaudeUsageSnapshot,
   ClaudeUsageSummary
 } from '../shared/claude-usage-types'
-import type { RateLimitRuntimeTarget, RateLimitState } from '../shared/rate-limit-types'
+import type {
+  CodexRateLimitResetResult,
+  RateLimitRuntimeTarget,
+  RateLimitState
+} from '../shared/rate-limit-types'
 import type {
   SpeechErrorEvent,
   SpeechLifecycleEvent,
@@ -529,17 +535,16 @@ export type RefreshAgentsResult = {
   pathFailureReason: ShellHydrationFailureReason
 }
 
+export type PreflightRuntimeContext = {
+  wslDistro?: string | null
+  wslDefault?: boolean
+  projectRuntime?: ProjectExecutionRuntimeResolution
+}
+
 export type PreflightApi = {
-  check: (args?: {
-    force?: boolean
-    wslDistro?: string | null
-    wslDefault?: boolean
-  }) => Promise<PreflightStatus>
-  detectAgents: (args?: { wslDistro?: string | null; wslDefault?: boolean }) => Promise<string[]>
-  refreshAgents: (args?: {
-    wslDistro?: string | null
-    wslDefault?: boolean
-  }) => Promise<RefreshAgentsResult>
+  check: (args?: PreflightRuntimeContext & { force?: boolean }) => Promise<PreflightStatus>
+  detectAgents: (args?: PreflightRuntimeContext) => Promise<string[]>
+  refreshAgents: (args?: PreflightRuntimeContext) => Promise<RefreshAgentsResult>
   detectRemoteAgents: (args: { connectionId: string }) => Promise<string[]>
 }
 
@@ -589,9 +594,7 @@ export type StatsApi = {
 // renderer's view of the IPC surface.
 export type DiagnosticsStatusPayload = {
   readonly localFileEnabled: boolean
-  readonly otlpEnabled: boolean
   readonly bundleEnabled: boolean
-  readonly otlpStatus: string
   readonly traceFilePath: string
   readonly traceFamilySize: number
   readonly disabledReason?:
@@ -605,9 +608,13 @@ export type DiagnosticsBundlePayload = {
   readonly bytes: number
   readonly spanCount: number
 }
-export type DiagnosticsUploadPayload = {
-  readonly ticketId: string
-}
+export type DiagnosticsUploadPayload =
+  | {
+      readonly ticketId: string
+    }
+  | {
+      readonly canceled: true
+    }
 
 export type MemoryApi = {
   getSnapshot: () => Promise<MemorySnapshot>
@@ -826,6 +833,7 @@ export type PreloadApi = {
   }
   projects: {
     list: () => Promise<Project[]>
+    update: (args: ProjectUpdateArgs) => Promise<Project | null>
     listHostSetups: () => Promise<ProjectHostSetup[]>
     createHostSetup: (args: ProjectHostSetupCreateArgs) => Promise<ProjectHostSetupCreateResult>
     setupExistingFolder: (
@@ -1013,6 +1021,7 @@ export type PreloadApi = {
       // Preserved from the deleted index.d.ts PtyApi duplicate during the
       // single-source-of-truth collapse (see docs/preload-typecheck-hole.md §1).
       shellOverride?: string
+      projectRuntime?: ProjectExecutionRuntimeResolution
       // Why: closes the SIGKILL race documented in INVESTIGATION.md — main
       // sync-flushes the (worktreeId, tabId, leafId → ptyId) binding before
       // pty:spawn returns. Only the renderer's daemon-host path threads these.
@@ -1712,7 +1721,10 @@ export type PreloadApi = {
     listTransitions: (args: { key: string; siteId?: string }) => Promise<JiraTransition[]>
   }
   starNag: {
-    onShow: (callback: (payload?: { mode?: 'gh' | 'web' }) => void) => () => void
+    onShow: (
+      callback: (payload?: { mode?: 'gh' | 'web'; surface?: 'card' | 'toast' }) => void
+    ) => () => void
+    onHide: (callback: () => void) => () => void
     dismiss: () => Promise<void>
     later: () => Promise<void>
     complete: () => Promise<void>
@@ -1720,6 +1732,9 @@ export type PreloadApi = {
     openWeb: () => Promise<void>
     starOrca: () => Promise<boolean>
     forceShow: () => Promise<void>
+    agentValueMoment: () => Promise<{ status: 'ready'; mode: 'gh' | 'web' } | { status: 'skipped' }>
+    showAgentValueMoment: () => Promise<void>
+    onboardingCompleted: () => Promise<void>
   }
   /** Fire-and-forget track. Loose typing at the IPC boundary on purpose —
    *  the main-side validator is the single enforcement point. Renderer call
@@ -1729,15 +1744,13 @@ export type PreloadApi = {
   /** Flip the persisted opt-in preference. Subject to a per-session
    *  consent-mutation rate limit on the main side (≤5/session). */
   telemetrySetOptIn: (optedIn: boolean) => Promise<void>
-  /** Diagnostic-bundle / trace-folder controls. Surface for
-   *  telemetry-error-tracking.md §User controls. The renderer triggers
-   *  flows; main does the filesystem / network work and returns
-   *  serializable metadata. Main retains collected upload payloads so the
-   *  renderer can confirm without reading or substituting arbitrary bytes. */
+  /** Diagnostic file controls. Surface for telemetry-error-tracking.md
+   *  §User controls. The renderer triggers flows; main does the filesystem /
+   *  network work and returns serializable metadata. Main retains collected
+   *  upload payloads so the renderer can confirm without reading or
+   *  substituting arbitrary bytes. */
   diagnostics: {
     getStatus: () => Promise<DiagnosticsStatusPayload>
-    openTraceFolder: () => Promise<void>
-    clearTraces: () => Promise<void>
     collectBundle: (lookbackMinutes?: number) => Promise<DiagnosticsBundlePayload>
     openBundlePreview: (bundleSubmissionId: string) => Promise<void>
     discardBundlePreview: (bundleSubmissionId: string) => Promise<void>
@@ -1829,6 +1842,7 @@ export type PreloadApi = {
     grokStatus: () => Promise<AgentHookInstallStatus>
     copilotStatus: () => Promise<AgentHookInstallStatus>
     hermesStatus: () => Promise<AgentHookInstallStatus>
+    devinStatus: () => Promise<AgentHookInstallStatus>
   }
   agentTrust: {
     markTrusted: (args: {
@@ -2298,6 +2312,7 @@ export type PreloadApi = {
     onOpenQuickOpen: (callback: () => void) => () => void
     onOpenNewWorkspace: (callback: () => void) => () => void
     onDeleteCurrentWorkspace: (callback: () => void) => () => void
+    onOpenWorkspaceBoard: (callback: () => void) => () => void
     onOpenTasks: (callback: () => void) => () => void
     onJumpToWorktreeIndex: (callback: (index: number) => void) => () => void
     onJumpToTabIndex: (callback: (index: number) => void) => () => void
@@ -2327,6 +2342,7 @@ export type PreloadApi = {
     onFocusBrowserAddressBar: (callback: () => void) => () => void
     onFindInBrowserPage: (callback: () => void) => () => void
     onReloadBrowserPage: (callback: () => void) => () => void
+    onBrowserHistoryNavigate: (callback: (direction: 'back' | 'forward') => void) => () => void
     onZoomBrowserPage: (callback: (direction: 'in' | 'out' | 'reset') => void) => () => void
     onHardReloadBrowserPage: (callback: () => void) => () => void
     onCloseActiveTab: (callback: () => void) => () => void
@@ -2338,7 +2354,6 @@ export type PreloadApi = {
     onCtrlTabKeyUp: (callback: () => void) => () => void
     onToggleStatusBar: (callback: () => void) => () => void
     onDictationKeyDown: (callback: () => void) => () => void
-    onExportPdfRequested: (callback: () => void) => () => void
     onActivateWorktree: (
       callback: (data: {
         repoId: string
@@ -2542,6 +2557,7 @@ export type PreloadApi = {
     get: () => Promise<RateLimitState>
     refresh: () => Promise<RateLimitState>
     refreshCodexForTarget: (target: RateLimitRuntimeTarget) => Promise<RateLimitState>
+    consumeCodexResetCredit: () => Promise<CodexRateLimitResetResult>
     refreshClaudeForTarget: (target: RateLimitRuntimeTarget) => Promise<RateLimitState>
     setPollingInterval: (ms: number) => Promise<void>
     fetchInactiveClaudeAccounts: () => Promise<void>

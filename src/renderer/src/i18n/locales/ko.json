@@ -37,7 +37,6 @@
     "exploreOrca": "Orca 둘러보기",
     "gettingStarted": "Orca 시작하기",
     "reportCrash": "크래시 신고...",
-    "exportPdf": "PDF로 내보내기...",
     "file": "파일",
     "exit": "종료",
     "edit": "편집",
@@ -277,7 +276,8 @@
           "a5fc0cb622": "OpenClaude",
           "bf53f09bf8": "Claude Agent Teams",
           "0708ed89f1": "Claude",
-          "fc80296033": "Devin"
+          "fc80296033": "Devin",
+          "da41abbdd4": "Ante"
         },
         "skill": {
           "cli": {
@@ -495,6 +495,12 @@
             "unavailable": "Orca가 지금 이 폴더를 확인할 수 없습니다. 런타임 또는 SSH 연결을 확인한 후 다시 시도하세요."
           }
         }
+      },
+      "projectSkillRuntime": {
+        "wslUnavailable": "Project runtime needs WSL before this skill can be installed.",
+        "distroRequired": "Select a WSL distro for this project before installing this skill.",
+        "distroMissing": "The selected WSL distro is unavailable. Choose an available distro or switch this project to Windows.",
+        "wslDefault": "WSL default"
       }
     },
     "hooks": {
@@ -521,6 +527,7 @@
       },
       "useIpcEvents": {
         "0e3cf53060": "브라우저 탭 {{value0}}을(를) 찾을 수 없습니다",
+        "2f6637fe6c": "브라우저 탭 {{value0}}이(가) 고정되어 있습니다",
         "a8d2bf8e9e": "닫을 활성 브라우저 탭이 없습니다.",
         "291c8ed902": "원격 런타임이 활성화된 동안에는 브라우저 탭을 사용할 수 없습니다.",
         "f45fa2b03c": "원격 런타임이 활성화된 동안에는 브라우저 프로필을 사용할 수 없습니다.",
@@ -2241,11 +2248,18 @@
           },
           "MobileDriverOverlay": {
             "c6460cf584": "회수",
-            "c44659e09f": "모바일 원격 조작",
+            "c8f2e1a4b9": "이 터미널 다시 가져오기",
+            "c44659e09f": "휴대폰 조작 중",
             "7cffad954c": "접기",
             "3eed73394f": "키보드가 일시중지되었습니다.",
-            "faa367dc74": "이 terminal은 모바일 앱에 맞게 크기가 조정됩니다.",
-            "54f7d6f69d": "모든 terminal 크기 조정"
+            "faa367dc74": "휴대폰이 휴대폰 크기로 남겨 둠",
+            "54f7d6f69d": "모든 터미널 다시 가져오기",
+            "b3d8e1f42a": "이 터미널 복원",
+            "e8c4f2a91b": "모든 터미널 복원",
+            "f2a8b9c1d3": "휴대폰에서",
+            "c7e4a2b8f1": "휴대폰이 제어 중",
+            "d9f3c6e2a4": "데스크톱 키보드가 일시 중지되었습니다. 여기서 입력하려면 이 터미널을 다시 가져오거나, 휴대폰이 제어하는 모든 터미널을 다시 가져오거나, 계속 보려면 접으세요.",
+            "a6b1d8f3e2": "휴대폰 세션이 종료되었습니다. 이 터미널 또는 휴대폰이 휴대폰 크기로 남긴 모든 터미널을 데스크톱 크기로 복원하세요."
           },
           "TerminalAgentSessionForkDialog": {
             "17fc841e59": "컨텍스트 복사",
@@ -2347,6 +2361,13 @@
                 }
               }
             }
+          },
+          "PinnedTabCloseDialog": {
+            "6c190f295a": "고정된 탭을 닫을까요?",
+            "0d1963f4a6": "이 탭은 고정되어 있습니다. 정말 닫으시겠어요?",
+            "dont_ask_again": "고정된 탭에 대해 다시 묻지 않기",
+            "0b38ee2f86": "취소",
+            "c337c9d75c": "닫기"
           }
         }
       },
@@ -2689,7 +2710,15 @@
             "cd9d7b40ff": "{{value0}} 세션 다시 시작",
             "6cd6650b4c": "세션 다시 시작",
             "1446d0d8a0": "{{value0}} Codex 세션은 여전히 ​​이전 계정에 있습니다.",
-            "605901a495": "1개의 Codex 세션이 여전히 이전 계정에 있습니다."
+            "605901a495": "1개의 Codex 세션이 여전히 이전 계정에 있습니다.",
+            "5e5f9f5160": "1 rate-limit reset available",
+            "5ecae9197c": "{{value0}} rate-limit resets available",
+            "25d8bbde69": "Using reset…",
+            "e159fc1fd7": "Reset now",
+            "972a1ff497": "Reset Codex limits?",
+            "6d1042aa6f": "This uses one Codex rate-limit reset credit for the active account and resets any eligible usage windows immediately.",
+            "f077f586db": "Don't ask again",
+            "c0e972d726": "Cancel"
           },
           "StatusBarUsageEmptyCta": {
             "828c764a79": "계정 연결",
@@ -2831,7 +2860,9 @@
             "a9a318b7a3": "새로 고침 실패 - 캐시된 데이터 표시",
             "7ad719c4bf": "제한됨",
             "e740f92596": "새로 고침 실패",
-            "8418ec448d": "{{value0}} 사용량을 새로 고칠 수 없습니다. 에이전트 세션은 여전히 로그인되어 있을 수 있습니다."
+            "8418ec448d": "{{value0}} 사용량을 새로 고칠 수 없습니다. 에이전트 세션은 여전히 로그인되어 있을 수 있습니다.",
+            "45198c7d95": "1 rate-limit reset available",
+            "bce421cba3": "{{value0}} rate-limit resets available"
           },
           "SshTargetStatusRow": {
             "sshHost": "SSH Host"
@@ -3192,9 +3223,7 @@
         "AddRepoCreateStep": {
           "0ae45b8238": "내 프로젝트",
           "a8149a3a5a": "이름",
-          "038729c107": "폴더",
           "11fd2a7db8": "Git 저장소",
-          "180e9b5e48": "프로젝트 종류",
           "5e97f0c4b9": "프로젝트가 생성되었습니다.",
           "2c12db1511": "프로젝트가 이미 추가되었습니다.",
           "875dda0995": "서버 상위 경로를 입력하세요.",
@@ -3204,7 +3233,7 @@
           "b100311784": "이름을 지정하면 Orca가 적절한 기본값으로 실제 프로젝트를 만듭니다.",
           "685b5eefe1": "{{parent}}의 {{kind}}",
           "2a762f3b19": "이 호스트에서 Git 확인 중...",
-          "fe1e616c5b": "Git이 설치되어 있지 않아 일반 폴더가 기본값입니다.",
+          "fe1e616c5b": "프로젝트를 만들려면 Git이 필요합니다.",
           "c234df77f7": "만들기 전에 서버 상위 폴더를 선택하거나 입력하세요.",
           "3a13f6e88b": "위치가 선택되지 않음",
           "6ed14c0281": "서버 폴더가 선택되지 않음",
@@ -3556,6 +3585,9 @@
           "3d4b9c4997": "호버",
           "ba87080fb7": "속성 표시",
           "320b675c9a": "카드 레이아웃",
+          "newCardDisplay": {
+            "title": "카드 표시"
+          },
           "09faabd875": "프로젝트 순서",
           "7bada3b1ab": "정렬 기준",
           "dc0bb670bc": "그룹화 기준",
@@ -3578,6 +3610,8 @@
           "b8dcc6f321": "PR/MR 링크",
           "ca4d3c522e": "Linear 이슈",
           "91dfc653e8": "GitHub 티켓",
+          "bdd23b4e07": "GitHub 이슈",
+          "44713a5d04": "Linear 이슈",
           "cc17bd443b": "상세한",
           "0f9b959b31": "PR",
           "e029a2d775": "상태",
@@ -3590,7 +3624,14 @@
           "projectSshHost": "Project SSH",
           "activeRuntimeHost": "Active server",
           "projectRuntimeHost": "Project server",
-          "631b97eea9": "Host scope"
+          "631b97eea9": "Host scope",
+          "2d4f0eb933": "기본값",
+          "1a0eec0d35": "상태",
+          "b5536d5a88": "작업",
+          "8d62c68b35": "메모",
+          "2d74665a56": "포트",
+          "65a9820bd1": "Agent 상태",
+          "219ebf1961": "브랜치 이름"
         },
         "SshDisconnectedDialog": {
           "ca4a7892af": "연결 중...",
@@ -3629,7 +3670,9 @@
           "8ce44af9a8": "{{value0}} 이름 바꾸기",
           "395e541d5d": "상태",
           "34f03eb0de": "보드 설정",
-          "26cbc92150": "워크스페이스 보드 설정"
+          "26cbc92150": "워크스페이스 보드 설정",
+          "87d24a0c2f": "보드와 이슈 상태 동기화",
+          "4c2eaa78cc": "연결된 워크스페이스를 이동하면 일치하는 워크플로 상태가 있을 때 Linear 이슈 상태가 업데이트됩니다."
         },
         "WorkspaceKanbanStatusLane": {
           "8ad104642b": "비어 있는",
@@ -3649,8 +3692,6 @@
           "0f33af979b": "부분결제. 이 경로 외부의 파일은 디스크에 없습니다.",
           "4f964d5e8c": "부족한",
           "7d517f82e2": "주요한",
-          "c6833b5187": "첫 번째 agent 메시지에서 이름이 변경됩니다.",
-          "f62a3dadbc": "이름 바꾸기 보류 중",
           "4eba2ea99e": "자동 이름을 지정하지 못했습니다. 자세한 내용을 보려면 클릭하세요.",
           "74522ee457": "이름 바꾸기 실패",
           "02e19349f4": "자동 이름 바꾸기 실패: 보기 오류",
@@ -4105,6 +4146,19 @@
           "2d3e4f5a6b": "Check connection",
           "3c4d5e6f7a": "Manage host…",
           "6e7f8a9b0c": "Remove host…"
+        },
+        "WorkspaceKanbanDrawer": {
+          "1975a4e480": "작업 상태 동기화 실패",
+          "e02b0d92ff": "작업 상태 동기화 건너뜀",
+          "c1d2e3f4a5": "Linear 이슈 {{value0}}을(를) 읽을 수 없습니다.",
+          "d2e3f4a5b6": "{{value0}}에 일치하는 Linear 워크플로 상태가 없습니다.",
+          "e3f4a5b6c7": "{{value0}}에 일치하는 Linear 워크플로 상태가 여러 개입니다.",
+          "f4a5b6c7d8": "Linear 이슈 {{value0}}을(를) 업데이트할 수 없습니다.",
+          "a5b6c7d8e9": "Linear 이슈 {{value0}}을(를) 동기화할 수 없습니다.",
+          "b6c7d8e9f0": "작업 상태 동기화를 완료할 수 없습니다.",
+          "c7d8e9f0a1": "{{value0}}개 업데이트됨",
+          "d8e9f0a1b2": "{{value0}}개 건너뜀",
+          "e9f0a1b2c3": "{{value0}}개 실패"
         }
       },
       "shared": {
@@ -4638,9 +4692,9 @@
           "dac08ec03e": "작업 중..."
         },
         "ExperimentalPane": {
-          "9762364929": "생성된 작업 트리에 연결해야 하는 특정 폴더 또는 파일의 자동 심볼릭 링크를 허용합니다.",
-          "24416f42cd": "작업 트리의 심볼릭 링크",
-          "fb82ea1d7a": "구성된 파일이나 폴더를 새로 생성된 작업 트리에 자동으로 심볼릭 링크합니다.",
+          "9762364929": "가능하면 macOS에서 APFS clone-copy를 사용하고, 그렇지 않으면 구성된 폴더나 파일을 생성된 작업 트리에 심볼릭 링크합니다.",
+          "24416f42cd": "작업 트리의 공유 경로",
+          "fb82ea1d7a": "구성된 파일이나 폴더를 새로 생성된 작업 트리에 자동으로 배치합니다.",
           "a20d5ea365": "해당 패널과 상호 작용할 때까지 terminal 벨 또는 agent 완료 이벤트 후에 패널 수준 강조 표시를 유지합니다. 신호를 조정하는 동안 실험적입니다.",
           "ec897e8d89": "Terminal 주의",
           "88b7613afb": "terminal 벨 및 agent 완료 이벤트에 대한 지속적인 패널 강조 표시입니다.",
@@ -4658,6 +4712,12 @@
             "idleMinutesSuffix": "분",
             "title": "Agent 최대 절전",
             "toggleLabel": "Agent 최대 절전 전환"
+          },
+          "newWorktreeCardStyle": {
+            "copy": "업데이트된 worktree 카드 레이아웃, 메타데이터 배치, 카드 표시 메뉴 옵션 및 상태 표시를 미리 봅니다.",
+            "description": "업데이트된 worktree 카드 레이아웃, 메타데이터 배치, 카드 표시 메뉴 옵션 및 상태 표시를 미리 봅니다.",
+            "title": "새 카드 스타일",
+            "toggleLabel": "새 카드 스타일 전환"
           }
         },
         "FloatingWorkspacePane": {
@@ -4723,7 +4783,11 @@
           "c46cdbbd4e": "회로망"
         },
         "GeneralPane": {
-          "d58fccfd84": "항해"
+          "d58fccfd84": "항해",
+          "5cb5475664": "고정된 탭을 닫기 전에 확인",
+          "36b2a5dc6d": "고정된 탭을 닫기 전에 확인 대화상자를 표시합니다.",
+          "projectRuntime": "Project Runtime",
+          "projectRuntimeDescription": "Default runtime for local Windows projects that do not override it."
         },
         "GeneralSupportSection": {
           "af7d9f4396": "지원해 주셔서 감사합니다!",
@@ -5051,7 +5115,7 @@
         },
         "MobilePane": {
           "dd3cd78d04": "Orca 모바일로 스캔",
-          "35100bca5d": "휴대폰에서 terminal을 사용하는 동안 Orca는 휴대폰 화면에 맞게 terminal을 축소합니다. 앱을 닫거나 다른 곳으로 전환하면 앱이 휴대폰 크기로 유지되는지(대화형 CLI 도구가 리플로우되지 않음) 또는 데스크탑으로 다시 크기가 조정되는지 여부가 제어됩니다. 언제든지 terminal 배너에서 복원을 클릭하여 수동으로 크기를 조정할 수 있습니다.",
+          "35100bca5d": "휴대폰에서 terminal을 사용하는 동안 Orca는 휴대폰 화면에 맞게 terminal을 축소합니다. 앱을 닫거나 다른 곳으로 전환하면 앱이 휴대폰 크기로 유지되는지(대화형 CLI 도구가 리플로우되지 않음) 또는 데스크탑으로 다시 크기가 조정되는지 여부가 제어됩니다. 배너에서 이 터미널 복원 또는 모든 터미널 복원을 사용해 언제든지 수동으로 크기를 조정할 수 있습니다.",
           "ee56f1c7e4": "모바일 앱을 나갈 때",
           "3939fd062c": "장치를 취소하면 즉시 연결이 끊어집니다.",
           "254a6d09e4": "페어링됨",
@@ -5183,34 +5247,28 @@
           "239bf9132b": "설치 명령을 복사했습니다."
         },
         "PrivacyDiagnosticBundleControls": {
-          "dc8404a930": "미리보기 만들기",
+          "dc8404a930": "진단 파일 만들기",
           "a5acaffdb6": "버리기",
-          "aca2c8a367": "업로드",
-          "798b6f0be5": "미리보기 열기",
+          "aca2c8a367": "지원팀에 보내기",
+          "798b6f0be5": "검토 파일 열기",
           "2ae9a6b63e": "완료",
-          "7f14a1733c": "번들 삭제",
-          "2801d4ce22": "티켓 복사"
+          "7f14a1733c": "보낸 파일 삭제",
+          "2801d4ce22": "참조 ID 복사",
+          "d8be621237": "먼저 검토 파일을 여세요.",
+          "61676df223": "진단 정보를 보냈습니다. 이 참조 ID를 지원팀에 공유하세요: {{value0}}.",
+          "fd7b3891af": "검토 파일({{value0}})을 열었습니다. 이 파일을 지원팀에 보내거나 버릴 수 있습니다.",
+          "62340d4439": "검토 파일({{value0}})이 준비되었습니다. 열어서 보낼 내용을 확인한 다음 지원팀에 보낼지 선택하세요.",
+          "19ec5e29b3": "최근 앱 활동과 오류를 보내기 전에 검토할 수 있는 수정된 파일로 모읍니다. 보내기를 선택하기 전에는 아무것도 업로드되지 않습니다."
         },
         "PrivacyDiagnosticsSection": {
-          "acc7c66e6e": "OTLP 내보내기",
-          "4ff08ff3a7": "로컬 흔적 지우기",
-          "9ca08a9f8f": "이 시스템에서 회전된 모든 추적 파일을 삭제합니다.",
-          "fe81a52cb2": "추적 폴더 열기",
-          "5ff57fc986": "파일 관리자에 {{value0}}이 표시됩니다.",
-          "af2fc82cde": "진단 번들",
-          "c18cbe45df": "업로드된 진단 번들이 삭제되었습니다.",
-          "7a4944595b": "진단 티켓을 복사할 수 없습니다.",
-          "13eb2c65a1": "진단 티켓이 복사되었습니다.",
-          "860bca9ec9": "진단 번들 미리보기가 삭제되었습니다.",
-          "49fc6c80e8": "진단 번들이 업로드되었습니다.",
-          "db3228e01a": "진단 번들 미리보기 열림",
-          "a2b3505c77": "진단 번들 미리보기가 생성되었습니다.",
-          "9666a05580": "추적 파일을 지울 수 없습니다.",
-          "32d767f84d": "로컬 추적 파일이 지워졌습니다.",
-          "b85fe972cd": "추적 폴더를 열 수 없습니다.",
-          "1fb00a8995": "비활성",
-          "46ea3fb2d0": "활성화됨",
-          "7c9d9820b6": "Orca가 자체 OpenTelemetry 수집기를 가리키도록 ORCA_OTLP_TRACES_URL을 설정합니다."
+          "af2fc82cde": "앱 진단 정보를 지원팀에 보내기",
+          "c18cbe45df": "보낸 진단 정보가 삭제되었습니다",
+          "7a4944595b": "참조 ID를 복사할 수 없습니다",
+          "13eb2c65a1": "참조 ID가 복사되었습니다",
+          "860bca9ec9": "검토 파일을 버렸습니다",
+          "49fc6c80e8": "진단 정보를 보냈습니다",
+          "db3228e01a": "검토 파일을 열었습니다",
+          "a2b3505c77": "검토 파일을 만들었습니다"
         },
         "PrivacyPane": {
           "36e0e2e63b": "환경 변수. 다시 활성화하려면 설정을 해제하고 다시 시작하세요.",
@@ -5421,7 +5479,9 @@
           "addPlannedHostHelp": "Remember this host and finish adding the project later.",
           "existingFolder": "Existing folder",
           "addPlannedHostToHost": "Add {{host}}",
-          "addPlannedHostConfirm": "This only records that the project should be available on this host. You can add the folder or clone later."
+          "addPlannedHostConfirm": "This only records that the project should be available on this host. You can add the folder or clone later.",
+          "projectRuntime": "Project Runtime",
+          "projectRuntimeDescription": "Choose whether this project runs on Windows or WSL."
         },
         "RepositorySourceControlAiActionRows": {
           "548a6e1281": "명령 템플릿",
@@ -5696,7 +5756,8 @@
           "97dccee14e": "수정됨",
           "3b11ef3a43": "{{value0}} 바로가기",
           "f6579be67b": "바로가기 변경",
-          "6a7848fdac": "단축키 입력 대기 중"
+          "6a7848fdac": "단축키 입력 대기 중",
+          "a98d551407": "단축키를 누르거나 보조 키를 두 번 탭하세요(예: {{value0}}). Esc로 취소합니다."
         },
         "ShortcutFilterRail": {
           "28b63545bf": "상태",
@@ -6165,15 +6226,15 @@
         "WorktreeSymlinksSection": {
           "1c1e35b219": "{{value0}} 제거",
           "b814c618e2": "연결된 경로",
-          "31ebab5403": "이 저장소에 대해 구성된 심볼릭 링크 경로가 없습니다.",
+          "31ebab5403": "이 저장소에 구성된 공유 경로가 없습니다.",
           "ea06227efa": "추가됨",
           "b2429aeb31": "추가",
           "ab40b8a5f1": "일치하는 항목이 없습니다. 사용자 정의 경로를 추가하려면 계속 입력하세요.",
           "4cd2a4c077": "경로를 입력하세요(예: .env 또는 node_modules)…",
           "241325302c": "경로 추가",
-          "7ff265071d": "새 작업 트리가 생성되면 여기에 나열된 각 경로가 기본 체크아웃에서 심볼릭 링크됩니다.",
-          "4755f120b6": "작업 트리 심볼릭 링크",
-          "b07ef5a8b6": "기본 체크아웃에서 새로 생성된 작업 트리로의 심볼릭 링크 경로입니다.",
+          "7ff265071d": "새 작업 트리가 생성되면 여기에 나열된 각 경로는 가능한 경우 macOS에서 APFS clone-copy로 복사되고, 그렇지 않으면 기본 체크아웃에서 심볼릭 링크됩니다.",
+          "4755f120b6": "작업 트리 공유 경로",
+          "b07ef5a8b6": "기본 체크아웃에서 새로 생성된 작업 트리에 배치할 경로입니다.",
           "d72ba8dc68": "{{value0}} 경로",
           "9ea912d811": "경로 1개"
         },
@@ -6685,8 +6746,8 @@
             "10b52f79c1": "작업 트리",
             "d23ae13990": "작업 트리",
             "0d24759f14": "실험적인",
-            "603d29ed74": "구성된 파일 또는 폴더를 새로 생성된 작업 트리에 자동으로 심볼릭 링크하여 공유 상태(env, 캐시, 설치)가 연결된 상태를 유지합니다.",
-            "78c2a8dc74": "작업 트리의 심볼릭 링크",
+            "603d29ed74": "구성된 파일이나 폴더를 새로 생성된 작업 트리에 자동으로 배치합니다. 가능한 경우 macOS에서 APFS clone-copy를 사용하고, 그렇지 않으면 심볼릭 링크합니다.",
+            "78c2a8dc74": "작업 트리의 공유 경로",
             "7b79081695": "읽히지 않는",
             "f10d307468": "완성",
             "5f067ba0f9": "agent",
@@ -6724,6 +6785,17 @@
               "sleep": "절전",
               "terminal": "터미널",
               "title": "Agent 최대 절전"
+            },
+            "newWorktreeCardStyle": {
+              "card": "카드",
+              "cards": "카드",
+              "description": "업데이트된 worktree 카드 레이아웃, 메타데이터 배치, 카드 표시 메뉴 옵션 및 상태 표시를 미리 봅니다.",
+              "menu": "메뉴",
+              "metadata": "메타데이터",
+              "status": "상태",
+              "title": "새 카드 스타일",
+              "worktree": "worktree",
+              "worktrees": "worktrees"
             }
           }
         },
@@ -6883,7 +6955,11 @@
             "7887a2c262": "폴더",
             "7baf524b04": "워크스페이스",
             "d0bc793689": "워크스페이스 폴더가 생성되는 루트 디렉터리입니다.",
-            "4c95d08fa2": "워크스페이스 디렉토리"
+            "4c95d08fa2": "워크스페이스 디렉토리",
+            "161a86a9da": "고정된 탭을 닫기 전에 확인",
+            "8e593f04fc": "고정된 탭을 닫기 전에 확인 대화상자를 표시합니다.",
+            "defaultProjectRuntime": "Default Project Runtime",
+            "defaultProjectRuntimeDescription": "Choose the runtime inherited by local Windows projects."
           }
         },
         "git": {
@@ -7196,12 +7272,8 @@
             "f7a2d9f137": "텔레메트리 전송을 비활성화하는 환경 변수입니다.",
             "e058a3c98d": "텔레메트리 환경 변수",
             "1686c07fee": "지원",
-            "4a583f3a2f": "개방형 텔레메트리",
-            "9ea93ce3d6": "otlp",
-            "685c68a81f": "로그",
-            "40de3c2f19": "추적",
             "c0494ff48a": "진단",
-            "8b08f32366": "추적 파일 및 OTLP 내보내기 제어.",
+            "8b08f32366": "앱 진단 및 지원 공유 제어.",
             "6d258d2ed6": "진단",
             "ead1deded2": "공유",
             "27a27b2f63": "탈퇴",
@@ -7294,8 +7366,8 @@
             "f1c53f2820": "작업 트리",
             "7e228fc439": "심볼릭 링크",
             "c06adcf136": "심볼릭 링크",
-            "ed885e589f": "기본 체크아웃에서 새로 생성된 작업 트리로의 심볼릭 링크 경로입니다.",
-            "01b3377ebc": "작업 트리 심볼릭 링크",
+            "ed885e589f": "기본 체크아웃에서 새로 생성된 작업 트리에 배치할 경로입니다.",
+            "01b3377ebc": "작업 트리 공유 경로",
             "fff8834983": "프롬프트",
             "fa3131f223": "모델",
             "130d76dc16": "이름 변경",
@@ -7352,7 +7424,12 @@
             "remote": "remote",
             "vm": "vm",
             "keepForkUpToDate": "포크를 최신 상태로 유지",
-            "keepForkUpToDateDescription": "이 포크를 upstream에서 안전하게 fast-forward합니다."
+            "keepForkUpToDateDescription": "이 포크를 upstream에서 안전하게 fast-forward합니다.",
+            "projectRuntime": "Project Runtime",
+            "projectRuntimeDescription": "Choose whether this project runs on Windows or WSL.",
+            "copy": "copy",
+            "clone": "clone",
+            "apfs": "apfs"
           }
         },
         "runtime": {
@@ -7963,6 +8040,47 @@
           "ask": "묻기",
           "safeAuto": "안전 자동",
           "off": "끄기"
+        },
+        "DefaultWindowsProjectRuntimeSetting": {
+          "defaultRuntime": "Default project runtime",
+          "windows": "Windows",
+          "wsl": "WSL",
+          "selectDistro": "Select distro",
+          "windowsDescription": "Projects inherit Windows unless a project overrides it.",
+          "wslUnavailable": "WSL is not available. Projects that inherit WSL will need repair.",
+          "distroRequired": "Choose a WSL distro before projects can inherit WSL.",
+          "wslDescription": "Projects inherit {{value0}} via WSL unless a project overrides it."
+        },
+        "ProjectWindowsRuntimeSetting": {
+          "projectRuntime": "Project runtime",
+          "defaultRuntime": "Default ({{value0}})",
+          "windows": "Windows",
+          "wsl": "WSL",
+          "selectDistro": "Select distro",
+          "runtimeChangeHelp": "Runtime changes apply to new terminals, agent checks, and skill discovery for this project. Existing terminals keep their current runtime.",
+          "wslUnavailable": "WSL is not available. Switch this project to Windows or repair WSL.",
+          "distroMissing": "{{value0}} is not installed in WSL. Choose an installed distro or switch this project to Windows.",
+          "distroRequired": "Choose a WSL distro or switch this project to Windows.",
+          "inheritedWsl": "No project override. General settings select {{value0}} via WSL.",
+          "projectWsl": "This project runs in {{value0}} via WSL.",
+          "inheritedWindows": "No project override. General settings select Windows.",
+          "projectWindows": "This project runs on Windows.",
+          "liveTerminalSingular": "{{count}}개의 실행 중인 터미널",
+          "liveTerminalPlural": "{{count}}개의 실행 중인 터미널",
+          "activeTaskSingular": "{{count}}개의 활성 작업",
+          "activeTaskPlural": "{{count}}개의 활성 작업",
+          "runtimeSessionJoin": "{{value0}} 및 {{value1}}",
+          "runtimeSessionWarning": "{{value0}}은 현재 런타임에서 계속 실행됩니다. 계속하기 전에 작업이 끝나게 하거나 터미널을 다시 시작하세요.",
+          "pendingRuntimeChange": "Runtime change pending. New project work will use the selected runtime after you apply.",
+          "cancel": "Cancel",
+          "applyRuntimeChange": "Apply runtime change"
+        },
+        "PrivacyDiagnosticsRows": {
+          "5a7cbe069a": "DO_NOT_TRACK=1이 설정되어 있어 진단 파일 만들기와 보내기가 비활성화되었습니다.",
+          "63d03261d1": "ORCA_TELEMETRY_DISABLED=1이 설정되어 있어 진단 파일 만들기와 보내기가 비활성화되었습니다.",
+          "d37e92a06b": "ORCA_DIAGNOSTICS_DISABLED=1이 설정되어 있어 앱 진단이 꺼져 있습니다.",
+          "5ebb31e1fb": "CI에서 실행 중입니다. 진단이 꺼져 있습니다.",
+          "e27c8d45bf": "환경 변수로 인해 진단이 비활성화되었습니다."
         }
       },
       "right": {
@@ -8338,6 +8456,7 @@
             "834cb3f23d": "AI로 해결",
             "60bd988f0b": "AI 수정",
             "461575b9bc": "AI로 commit 메시지 생성",
+            "b16b8f0e4b": "AI commit 메시지",
             "ddc1fbd690": "commit 메시지 생성 중지",
             "5acbcedc1a": "{{value0}} 만들기",
             "aaf1451654": "초안 만들기 {{value0}}",
@@ -8713,7 +8832,19 @@
                   "c39d0c75c3": "연결된 검토 브랜치 대상을 사용할 수 없습니다.",
                   "8c6d15a07d": "PR 생성",
                   "d37e68f61d": "검토를 위해 브랜치를 준비하는 중…",
-                  "c72e5e65d1": "이 브랜치를 준비하고 {{value0}} 생성"
+                  "c72e5e65d1": "이 브랜치를 준비하고 {{value0}} 생성",
+                  "b8e4f2a901": "Wait for the remote operation to finish.",
+                  "c9f3a1b802": "Resolve conflicts before creating a {{value0}}.",
+                  "d2a8c4e703": "No changes on this branch to include in a {{value0}}.",
+                  "e3b9d5f814": "Cannot create a {{value0}} from the default branch.",
+                  "f4c0e6a925": "Commit changes before creating a {{value0}}.",
+                  "a5d1f7b036": "Publish commits before creating a {{value0}}.",
+                  "b6e2a8c147": "Push commits before creating a {{value0}}.",
+                  "c7f3b9d258": "Sync this branch before creating a {{value0}}.",
+                  "d8a4c0e369": "Authenticate before creating a {{value0}}.",
+                  "e9b5d1f470": "Check out a branch before creating a {{value0}}.",
+                  "f0c6e2a581": "This branch is not ready for a {{value0}} yet.",
+                  "h3i4j5k607": "Checking whether this branch can create a {{value0}}…"
                 }
               }
             }
@@ -8888,6 +9019,24 @@
             "8c2d5fab13": "커밋 해시 복사",
             "9d3e60bc24": "커밋 메시지 복사",
             "ae4f71cd35": "변경 사항 설명"
+          },
+          "pull": {
+            "policy": {
+              "notice": {
+                "merge": "Merge",
+                "mergeDescription": "Create a merge commit when local and remote both changed.",
+                "rebase": "Rebase",
+                "rebaseDescription": "Replay local commits on top of the remote branch.",
+                "fastForwardOnly": "Fast-forward only",
+                "fastForwardOnlyDescription": "Only pull when no merge or rebase is needed.",
+                "title": "Pull needs a policy",
+                "diverged": "Diverged",
+                "body": "This branch has local and remote commits. Run one command in this worktree or on the SSH host, then try Pull or Sync again.",
+                "copyAria": "Copy {{value0}} pull policy command",
+                "copied": "Copied",
+                "copyCommand": "Copy command"
+              }
+            }
           }
         }
       },
@@ -11325,6 +11474,25 @@
         "sourceUnavailable": "{{value0}} source unavailable: {{value1}}",
         "someSourceHostsUnavailable": "Some {{value0}} source hosts unavailable: {{value1}}",
         "reconnectOrUpdateTitle": "Reconnect or update {{value0}} to load this source."
+      },
+      "ShortcutKeyCombo": {
+        "07eb4985a1": "Double-tap {{value0}}"
+      },
+      "star": {
+        "nag": {
+          "StarNagToastHost": {
+            "starredThanks": "Starred — thank you!",
+            "githubOpened": "GitHub opened",
+            "opening": "Opening…",
+            "starring": "Starring…",
+            "openGithub": "Open GitHub",
+            "starOnGithub": "Star on GitHub",
+            "onboardingCompleted": "Onboarding completed!",
+            "body": "If you’re enjoying Orca so far, a GitHub star helps other developers discover it.",
+            "dismiss": "Dismiss",
+            "later": "Later"
+          }
+        }
       }
     },
     "i18n": {

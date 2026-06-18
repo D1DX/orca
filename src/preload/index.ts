@@ -9,6 +9,7 @@ import type { AppIdentity } from '../shared/app-identity'
 import type { CliInstallStatus } from '../shared/cli-install-types'
 import type { AgentHookInstallStatus } from '../shared/agent-hook-types'
 import type { TerminalPaneSplitSource } from '../shared/feature-education-telemetry'
+import type { ProjectExecutionRuntimeResolution } from '../shared/project-execution-runtime'
 import type {
   BaseRefSearchResult,
   BaseRefDefaultResult,
@@ -69,7 +70,11 @@ import type {
   RuntimeMobileMarkdownRequest,
   RuntimeMobileMarkdownResponse
 } from '../shared/mobile-markdown-document'
-import type { RateLimitRuntimeTarget, RateLimitState } from '../shared/rate-limit-types'
+import type {
+  CodexRateLimitResetResult,
+  RateLimitRuntimeTarget,
+  RateLimitState
+} from '../shared/rate-limit-types'
 import type { WorkspaceSpaceScanProgress } from '../shared/workspace-space-types'
 import type { WorkspacePortAdvertisedUrlChangedEvent } from '../shared/workspace-ports'
 import type { GhAuthDiagnostic } from '../shared/github-auth-types'
@@ -124,7 +129,7 @@ import type {
   SpeechTranscriptEvent
 } from '../shared/speech-types'
 import type { TelemetryConsentState } from '../shared/telemetry-consent-types'
-import type { RefreshAgentsResult } from './api-types'
+import type { PreflightRuntimeContext, RefreshAgentsResult } from './api-types'
 import type { AgentKind, LaunchSource, RequestKind } from '../shared/telemetry-events'
 import type { AppStarSource } from '../shared/gh-star-source'
 import type {
@@ -525,6 +530,7 @@ const api = {
 
   projects: {
     list: () => ipcRenderer.invoke('projects:list'),
+    update: (args) => ipcRenderer.invoke('projects:update', args),
     listHostSetups: () => ipcRenderer.invoke('projectHostSetups:list'),
     createHostSetup: (args) => ipcRenderer.invoke('projectHostSetups:create', args),
     setupExistingFolder: (args) =>
@@ -692,6 +698,7 @@ const api = {
       worktreeId?: string
       sessionId?: string
       shellOverride?: string
+      projectRuntime?: ProjectExecutionRuntimeResolution
       // Why: closes the SIGKILL race documented in INVESTIGATION.md by
       // letting main patch + sync-flush the (worktreeId, tabId, leafId →
       // ptyId) binding before pty:spawn returns. Only the renderer's
@@ -1519,13 +1526,20 @@ const api = {
   },
 
   starNag: {
-    onShow: (callback: (payload?: { mode?: 'gh' | 'web' }) => void): (() => void) => {
+    onShow: (
+      callback: (payload?: { mode?: 'gh' | 'web'; surface?: 'card' | 'toast' }) => void
+    ): (() => void) => {
       const listener = (
         _event: Electron.IpcRendererEvent,
-        payload?: { mode?: 'gh' | 'web' }
+        payload?: { mode?: 'gh' | 'web'; surface?: 'card' | 'toast' }
       ): void => callback(payload)
       ipcRenderer.on('star-nag:show', listener)
       return () => ipcRenderer.removeListener('star-nag:show', listener)
+    },
+    onHide: (callback: () => void): (() => void) => {
+      const listener = (): void => callback()
+      ipcRenderer.on('star-nag:hide', listener)
+      return () => ipcRenderer.removeListener('star-nag:hide', listener)
     },
     dismiss: (): Promise<void> => ipcRenderer.invoke('star-nag:dismiss'),
     later: (): Promise<void> => ipcRenderer.invoke('star-nag:later'),
@@ -1533,7 +1547,12 @@ const api = {
     disable: (): Promise<void> => ipcRenderer.invoke('star-nag:disable'),
     openWeb: (): Promise<void> => ipcRenderer.invoke('star-nag:openWeb'),
     starOrca: (): Promise<boolean> => ipcRenderer.invoke('star-nag:starOrca'),
-    forceShow: (): Promise<void> => ipcRenderer.invoke('star-nag:forceShow')
+    forceShow: (): Promise<void> => ipcRenderer.invoke('star-nag:forceShow'),
+    agentValueMoment: (): Promise<
+      { status: 'ready'; mode: 'gh' | 'web' } | { status: 'skipped' }
+    > => ipcRenderer.invoke('star-nag:agentValueMoment'),
+    showAgentValueMoment: (): Promise<void> => ipcRenderer.invoke('star-nag:showAgentValueMoment'),
+    onboardingCompleted: (): Promise<void> => ipcRenderer.invoke('star-nag:onboardingCompleted')
   },
 
   // Why: telemetry uses a loose untyped surface at the preload boundary on
@@ -1551,14 +1570,11 @@ const api = {
     ipcRenderer.invoke('telemetry:getConsentState'),
 
   // Why: diagnostics is the renderer-facing surface for the error-tracking
-  // lane (telemetry-error-tracking.md §User controls). All five channels
-  // are gated by main-side handlers that strictly type-narrow their inputs
-  // (renderer is untrusted by design); the bridges here are deliberately
-  // loose for the same reason the telemetry bridges are.
+  // lane (telemetry-error-tracking.md §User controls). Handlers type-narrow
+  // their inputs in main (renderer is untrusted by design); the bridges here
+  // are deliberately loose for the same reason the telemetry bridges are.
   diagnostics: {
     getStatus: (): Promise<unknown> => ipcRenderer.invoke('diagnostics:getStatus'),
-    openTraceFolder: (): Promise<void> => ipcRenderer.invoke('diagnostics:openTraceFolder'),
-    clearTraces: (): Promise<void> => ipcRenderer.invoke('diagnostics:clearTraces'),
     collectBundle: (lookbackMinutes?: number): Promise<unknown> =>
       ipcRenderer.invoke('diagnostics:collectBundle', lookbackMinutes),
     openBundlePreview: (bundleSubmissionId: string): Promise<void> =>
@@ -1676,10 +1692,12 @@ const api = {
     commandCodeStatus: (): Promise<AgentHookInstallStatus> =>
       ipcRenderer.invoke('agentHooks:commandCodeStatus'),
     grokStatus: (): Promise<AgentHookInstallStatus> => ipcRenderer.invoke('agentHooks:grokStatus'),
+    devinStatus: (): Promise<AgentHookInstallStatus> =>
+      ipcRenderer.invoke('agentHooks:devinStatus'),
     copilotStatus: (): Promise<AgentHookInstallStatus> =>
       ipcRenderer.invoke('agentHooks:copilotStatus'),
     hermesStatus: (): Promise<AgentHookInstallStatus> =>
-      ipcRenderer.invoke('agentHooks:hermesStatus')
+      ipcRenderer.invoke('agentHooks:hermesStatus'),
   },
 
   agentTrust: {
@@ -1714,12 +1732,10 @@ const api = {
       }
       linear: { connected: boolean }
     }> => ipcRenderer.invoke('preflight:check', args),
-    detectAgents: (args?: { wslDistro?: string | null; wslDefault?: boolean }): Promise<string[]> =>
+    detectAgents: (args?: PreflightRuntimeContext): Promise<string[]> =>
       ipcRenderer.invoke('preflight:detectAgents', args),
-    refreshAgents: (args?: {
-      wslDistro?: string | null
-      wslDefault?: boolean
-    }): Promise<RefreshAgentsResult> => ipcRenderer.invoke('preflight:refreshAgents', args),
+    refreshAgents: (args?: PreflightRuntimeContext): Promise<RefreshAgentsResult> =>
+      ipcRenderer.invoke('preflight:refreshAgents', args),
     detectRemoteAgents: (args: { connectionId: string }): Promise<string[]> =>
       ipcRenderer.invoke('preflight:detectRemoteAgents', args)
   },
@@ -2742,6 +2758,11 @@ const api = {
       ipcRenderer.on('ui:deleteCurrentWorkspace', listener)
       return () => ipcRenderer.removeListener('ui:deleteCurrentWorkspace', listener)
     },
+    onOpenWorkspaceBoard: (callback: () => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent) => callback()
+      ipcRenderer.on('ui:openWorkspaceBoard', listener)
+      return () => ipcRenderer.removeListener('ui:openWorkspaceBoard', listener)
+    },
     onOpenTasks: (callback: () => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent) => callback()
       ipcRenderer.on('ui:openTasks', listener)
@@ -2855,6 +2876,12 @@ const api = {
       ipcRenderer.on('ui:reloadBrowserPage', listener)
       return () => ipcRenderer.removeListener('ui:reloadBrowserPage', listener)
     },
+    onBrowserHistoryNavigate: (callback: (direction: 'back' | 'forward') => void): (() => void) => {
+      const listener = (_event: Electron.IpcRendererEvent, direction: 'back' | 'forward'): void =>
+        callback(direction)
+      ipcRenderer.on('ui:browserHistoryNavigate', listener)
+      return () => ipcRenderer.removeListener('ui:browserHistoryNavigate', listener)
+    },
     onZoomBrowserPage: (callback: (direction: 'in' | 'out' | 'reset') => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent, direction: 'in' | 'out' | 'reset') =>
         callback(direction)
@@ -2906,11 +2933,6 @@ const api = {
       const listener = (_event: Electron.IpcRendererEvent) => callback()
       ipcRenderer.on('ui:toggleStatusBar', listener)
       return () => ipcRenderer.removeListener('ui:toggleStatusBar', listener)
-    },
-    onExportPdfRequested: (callback: () => void): (() => void) => {
-      const listener = (_event: Electron.IpcRendererEvent) => callback()
-      ipcRenderer.on('export:requestPdf', listener)
-      return () => ipcRenderer.removeListener('export:requestPdf', listener)
     },
     onDictationKeyDown: (callback: () => void): (() => void) => {
       const listener = (_event: Electron.IpcRendererEvent) => callback()
@@ -3458,6 +3480,8 @@ const api = {
     refresh: (): Promise<RateLimitState> => ipcRenderer.invoke('rateLimits:refresh'),
     refreshCodexForTarget: (target: RateLimitRuntimeTarget): Promise<RateLimitState> =>
       ipcRenderer.invoke('rateLimits:refreshCodexForTarget', target),
+    consumeCodexResetCredit: (): Promise<CodexRateLimitResetResult> =>
+      ipcRenderer.invoke('rateLimits:consumeCodexResetCredit'),
     refreshClaudeForTarget: (target: RateLimitRuntimeTarget): Promise<RateLimitState> =>
       ipcRenderer.invoke('rateLimits:refreshClaudeForTarget', target),
     setPollingInterval: (ms: number): Promise<void> =>
