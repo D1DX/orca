@@ -10930,6 +10930,25 @@ describe('OrcaRuntimeService', () => {
     expect(surface?.type === 'terminal' && surface.isPinned).toBe(true)
   })
 
+  it('still persists tab props in serve mode after syncWindowGraph(0) (gate does not fire)', async () => {
+    // Why: the renderer-authoritative gate uses getAvailableAuthoritativeWindow,
+    // and serve startup calls syncWindowGraph(0,...) which sets authoritativeWindowId=0.
+    // BrowserWindow.fromId(0) is null, so the gate must NOT fire in serve mode.
+    const session = makeWorkspaceSessionWithHeadlessTerminal()
+    const { runtimeStore, getSession } = makeRuntimeStoreWithWorkspaceSession(session)
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+    runtime.syncWindowGraph(0, { tabs: [], leaves: [] })
+
+    await runtime.setMobileSessionTabProps(`id:${TEST_WORKTREE_ID}`, {
+      tabId: 'host-tab',
+      isPinned: true
+    })
+
+    expect(
+      getSession().tabsByWorktree[TEST_WORKTREE_ID]!.find((tab) => tab.id === 'host-tab')!.isPinned
+    ).toBe(true)
+  })
+
   it('moves a headless tab into an existing group without renderer_unavailable', async () => {
     let ptyCounter = 0
     const runtime = new OrcaRuntimeService(store)

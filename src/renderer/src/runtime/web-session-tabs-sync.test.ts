@@ -104,6 +104,33 @@ describe('applyWebSessionTabsSnapshot', () => {
     expect(applyFreshWebSessionTabsSnapshot(afterNewer, newer, ENV, NOW)).toBe(afterNewer)
   })
 
+  it('rejects an out-of-order older snapshot even when the epoch differs', () => {
+    // Why: every host mutation stamps a fresh publicationEpoch, and the active
+    // worktree is delivered on two streams (subscribe + subscribeAll) that can
+    // interleave. The version guard must hold across epochs or an older frame
+    // clobbers a newer one (lost update).
+    const newer = makeSnapshot([], {
+      publicationEpoch: 'epoch-newer',
+      snapshotVersion: 6,
+      activeTabType: null
+    })
+    const olderDifferentEpoch = makeSnapshot([], {
+      publicationEpoch: 'epoch-older',
+      snapshotVersion: 5,
+      activeTabType: null
+    })
+
+    expect(shouldApplyWebSessionTabsSnapshot(newer, ENV)).toBe(true)
+    expect(shouldApplyWebSessionTabsSnapshot(olderDifferentEpoch, ENV)).toBe(false)
+    // A genuinely newer version on yet another epoch still applies.
+    const newest = makeSnapshot([], {
+      publicationEpoch: 'epoch-newest',
+      snapshotVersion: 7,
+      activeTabType: null
+    })
+    expect(shouldApplyWebSessionTabsSnapshot(newest, ENV)).toBe(true)
+  })
+
   it('does not bootstrap a terminal from a stale empty active-worktree snapshot', () => {
     const ready = makeSnapshot([
       {

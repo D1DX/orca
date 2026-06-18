@@ -193,7 +193,14 @@ function patchTerminalTabPinned(
 // Dynamic import keeps this store slice off the runtime layer.
 function mirrorTabPinnedToHost(state: AppState, tabId: string, isPinned: boolean): void {
   const found = findTabAndWorktree(state.unifiedTabsByWorktree, tabId)
-  if (!found || !getRuntimeEnvironmentIdForWorktree(state, found.worktreeId)) {
+  // Why: only terminal tab pins are persisted host-side today (browser/editor
+  // tracked in #5729), so skip the RPC for other types instead of a no-op round
+  // trip.
+  if (
+    !found ||
+    found.tab.contentType !== 'terminal' ||
+    !getRuntimeEnvironmentIdForWorktree(state, found.worktreeId)
+  ) {
     return
   }
   const worktreeId = found.worktreeId
