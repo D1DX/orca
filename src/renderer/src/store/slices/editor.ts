@@ -1660,6 +1660,7 @@ export const createEditorSlice: StateCreator<AppState, [], [], EditorSlice> = (s
       rightSidebarOpen: true,
       rightSidebarTab: 'explorer',
       rightSidebarExplorerView: 'files',
+      rightSidebarRouteRequestId: s.rightSidebarRouteRequestId + 1,
       rightSidebarExplorerViewByWorktree: {
         ...s.rightSidebarExplorerViewByWorktree,
         [worktreeId]: 'files'
