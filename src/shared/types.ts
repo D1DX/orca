@@ -780,6 +780,8 @@ export type TerminalTab = {
   quickCommandLabel?: string | null
   customTitle: string | null
   color: string | null
+  /** Pinned tabs survive "close others"; host-persisted for remote servers. */
+  isPinned?: boolean
   sortOrder: number
   createdAt: number
   /** Bumped on shutdown so TerminalPane remounts with a fresh PTY. */

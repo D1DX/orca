@@ -50,6 +50,7 @@ import {
 } from '@/lib/windows-terminal-capabilities'
 import { getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import { getRuntimeEnvironmentIdForWorktree } from '@/lib/worktree-runtime-owner'
+import { setWebRuntimeTabProps } from '@/runtime/web-runtime-session'
 import { getLocalProjectExecutionRuntimeContext } from '@/lib/local-preflight-context'
 import { useShortcutLabel } from '@/hooks/useShortcutLabel'
 import {
@@ -963,6 +964,9 @@ function TabBarInner({
   const togglePinned = (item: TabItem): void => {
     if (item.isPinned) {
       unpinTab(item.unifiedTabId)
+      // Why: pin state is host-authoritative for remote-server tabs; mirror it
+      // so it persists instead of reverting on the next snapshot.
+      setWebRuntimeTabProps({ worktreeId, tabId: item.unifiedTabId, isPinned: false })
       return
     }
     if (item.type === 'editor' && onPinFile) {
@@ -970,6 +974,7 @@ function TabBarInner({
       return
     }
     pinTab(item.unifiedTabId)
+    setWebRuntimeTabProps({ worktreeId, tabId: item.unifiedTabId, isPinned: true })
   }
 
   const { tabStripRef, tabStripOverflowState, scrollTabStrip } = useTabStripOverflowNavigation({

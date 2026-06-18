@@ -1496,6 +1496,17 @@ export const createTerminalSlice: StateCreator<AppState, [], [], TerminalSlice> 
       .find((entry) => entry.contentType === 'terminal' && entry.entityId === tabId)
     if (item) {
       get().setUnifiedTabColor(item.id, color)
+      // Why: tab color is host-authoritative for remote-server tabs; mirror it
+      // so it persists instead of reverting on the next snapshot.
+      const state = get()
+      const owningWorktreeId = Object.keys(state.unifiedTabsByWorktree).find((wId) =>
+        (state.unifiedTabsByWorktree[wId] ?? []).some((entry) => entry.id === item.id)
+      )
+      if (owningWorktreeId && getRuntimeEnvironmentIdForWorktree(state, owningWorktreeId)) {
+        void import('@/runtime/web-runtime-session').then(({ setWebRuntimeTabProps }) =>
+          setWebRuntimeTabProps({ worktreeId: owningWorktreeId, tabId: item.id, color })
+        )
+      }
     }
   },
 

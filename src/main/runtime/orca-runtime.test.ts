@@ -10903,6 +10903,33 @@ describe('OrcaRuntimeService', () => {
     })
   })
 
+  it('persists headless tab color + pin and surfaces them through a cold rehydrate', async () => {
+    const session = makeWorkspaceSessionWithHeadlessTerminal()
+    const { runtimeStore, getSession } = makeRuntimeStoreWithWorkspaceSession(session)
+    const runtime = new OrcaRuntimeService(runtimeStore as never)
+
+    await runtime.setMobileSessionTabProps(`id:${TEST_WORKTREE_ID}`, {
+      tabId: 'host-tab',
+      color: '#ff8800',
+      isPinned: true
+    })
+
+    const persisted = getSession().tabsByWorktree[TEST_WORKTREE_ID]!.find(
+      (tab) => tab.id === 'host-tab'
+    )!
+    expect(persisted.color).toBe('#ff8800')
+    expect(persisted.isPinned).toBe(true)
+
+    runtime['mobileSessionTabsByWorktree'].delete(TEST_WORKTREE_ID)
+    runtime['hydrateHeadlessMobileSessionTabsFromWorkspaceSession'](TEST_WORKTREE_ID)
+    const rehydrated = await runtime.listMobileSessionTabs(`id:${TEST_WORKTREE_ID}`)
+    const surface = rehydrated.tabs.find(
+      (tab) => tab.type === 'terminal' && tab.parentTabId === 'host-tab'
+    )
+    expect(surface?.type === 'terminal' && surface.color).toBe('#ff8800')
+    expect(surface?.type === 'terminal' && surface.isPinned).toBe(true)
+  })
+
   it('moves a headless tab into an existing group without renderer_unavailable', async () => {
     let ptyCounter = 0
     const runtime = new OrcaRuntimeService(store)

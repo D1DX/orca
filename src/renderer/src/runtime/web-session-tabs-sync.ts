@@ -497,6 +497,13 @@ function buildMirroredTerminalTabs(
       activeSurface.launchAgent ??
       surfaces.find((surface) => surface.launchAgent)?.launchAgent ??
       existing?.launchAgent
+    // Why: tab color/pin are host-authoritative for remote tabs. Prefer the host
+    // value (any surface of this tab carries it) and fall back to the prior
+    // client value, instead of hardcoding null/false which wiped pins.
+    const hostColorSurface = surfaces.find((surface) => surface.color != null)
+    const color = hostColorSurface ? hostColorSurface.color! : (existing?.color ?? null)
+    const isPinned =
+      surfaces.some((surface) => surface.isPinned) || existing?.isPinned === true
     return {
       tab: {
         id: localTabId,
@@ -506,7 +513,8 @@ function buildMirroredTerminalTabs(
         defaultTitle: existing?.defaultTitle ?? title,
         ...(quickCommandLabel ? { quickCommandLabel } : {}),
         customTitle: existing?.customTitle ?? null,
-        color: existing?.color ?? null,
+        color,
+        isPinned,
         sortOrder: sortOffset + index,
         createdAt: existing?.createdAt ?? now + index,
         // Why: runtime snapshots can omit launchAgent after the process settles;
@@ -645,7 +653,7 @@ function buildTerminalUnifiedTab(tab: TerminalTab, groupId: string): Tab {
     sortOrder: tab.sortOrder,
     createdAt: tab.createdAt,
     isPreview: false,
-    isPinned: false
+    isPinned: tab.isPinned === true
   }
 }
 

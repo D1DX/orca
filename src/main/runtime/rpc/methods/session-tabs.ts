@@ -6,6 +6,7 @@ import {
   MoveTab,
   SaveMarkdownTab,
   SessionTabsUnsubscribe,
+  SetTabProps,
   UpdatePaneLayout,
   WorktreeTabSelector
 } from './session-tabs-schemas'
@@ -85,6 +86,16 @@ export const SESSION_TAB_METHODS: RpcAnyMethod[] = [
         root: params.root,
         expandedLeafId: params.expandedLeafId ?? null,
         titlesByLeafId: params.titlesByLeafId
+      })
+  }),
+  defineMethod({
+    name: 'session.tabs.setTabProps',
+    params: SetTabProps,
+    handler: async (params, { runtime }) =>
+      runtime.setMobileSessionTabProps(params.worktree, {
+        tabId: params.tabId,
+        ...(params.color !== undefined ? { color: params.color } : {}),
+        ...(params.isPinned !== undefined ? { isPinned: params.isPinned } : {})
       })
   }),
   defineStreamingMethod({

@@ -653,6 +653,47 @@ export async function updateWebRuntimePaneLayout(args: {
   }
 }
 
+// Why: tab color/pin are host-authoritative for remote-server tabs; mirror the
+// change to the host so it persists and survives the next snapshot. Pass only
+// the fields that changed (undefined = leave as-is on the host).
+export function setWebRuntimeTabProps(args: {
+  worktreeId: string
+  tabId: string
+  color?: string | null
+  isPinned?: boolean
+}): boolean {
+  const environmentId =
+    getRuntimeEnvironmentIdForWorktree(useAppStore.getState(), args.worktreeId) ?? null
+  if (!environmentId || !isWebRuntimeSessionActive(environmentId)) {
+    return false
+  }
+  const hostTabId = isWebTerminalSurfaceTabId(args.tabId)
+    ? toHostSessionTabId(args.tabId)
+    : args.tabId
+  void window.api.runtimeEnvironments
+    .call({
+      selector: environmentId,
+      method: 'session.tabs.setTabProps',
+      params: {
+        worktree: toRuntimeWorktreeSelector(args.worktreeId),
+        tabId: hostTabId,
+        ...(args.color !== undefined ? { color: args.color } : {}),
+        ...(args.isPinned !== undefined ? { isPinned: args.isPinned } : {})
+      },
+      timeoutMs: 15_000
+    })
+    .then((response) => {
+      unwrapRuntimeRpcResult(response as RuntimeRpcResponse<{ updated: true }>)
+    })
+    .catch((error) => {
+      console.warn(
+        '[web-runtime-session] failed to set tab props:',
+        error instanceof Error ? error.message : String(error)
+      )
+    })
+  return true
+}
+
 // Why: clearing scrollback locally (pane.terminal.clear()) is undone by the next
 // host snapshot/re-subscribe, which replays the host buffer. Clear the host
 // buffer too so the clear actually sticks on a remote-server pane.

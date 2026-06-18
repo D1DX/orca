@@ -3084,6 +3084,8 @@ export class OrcaRuntimeService {
             ...(ptyId ? { ptyId } : {}),
             ...(tab.launchAgent ? { launchAgent: tab.launchAgent } : {}),
             ...(layout ? { parentLayout: this.cloneTerminalLayoutSnapshot(layout) } : {}),
+            ...(tab.color != null ? { color: tab.color } : {}),
+            ...(tab.isPinned ? { isPinned: true } : {}),
             isActive: this.isPersistedTerminalLeafActive(worktreeId, tab.id, leafId, layout)
           }
         })
@@ -3852,6 +3854,90 @@ export class OrcaRuntimeService {
     this.persistHeadlessTerminalPaneLayout(args)
     this.applyHeadlessTerminalPaneLayoutToSnapshot(worktreeId, args)
     return { updated: true }
+  }
+
+  // Why: tab color/pin are host-authoritative for remote-server tabs but had no
+  // push path, so pinning or coloring a tab reverted on the next snapshot and
+  // was never persisted. Persist to the workspace session + live snapshot.
+  async setMobileSessionTabProps(
+    worktreeSelector: string,
+    args: { tabId: string; color?: string | null; isPinned?: boolean }
+  ): Promise<{ updated: true }> {
+    const explicitWorktreeId = getExplicitWorktreeIdSelector(worktreeSelector)
+    const worktreeId =
+      explicitWorktreeId ?? (await this.resolveWorktreeSelector(worktreeSelector)).id
+    const snapshot = this.mobileSessionTabsByWorktree.get(worktreeId)
+    const hostTabId = snapshot
+      ? (this.resolveMobileSessionHostTabId(snapshot, args.tabId) ?? args.tabId)
+      : args.tabId
+    this.persistHeadlessTerminalTabProps(worktreeId, hostTabId, args)
+    this.applyHeadlessTerminalTabPropsToSnapshot(worktreeId, hostTabId, args)
+    return { updated: true }
+  }
+
+  private persistHeadlessTerminalTabProps(
+    worktreeId: string,
+    tabId: string,
+    props: { color?: string | null; isPinned?: boolean }
+  ): void {
+    const session = this.store?.getWorkspaceSession?.()
+    if (!session || !this.store?.setWorkspaceSession) {
+      return
+    }
+    const tabs = session.tabsByWorktree[worktreeId]
+    if (!tabs?.some((tab) => tab.id === tabId)) {
+      return
+    }
+    this.store.setWorkspaceSession({
+      ...session,
+      tabsByWorktree: {
+        ...session.tabsByWorktree,
+        [worktreeId]: tabs.map((tab) =>
+          tab.id === tabId
+            ? {
+                ...tab,
+                ...(props.color !== undefined ? { color: props.color } : {}),
+                ...(props.isPinned !== undefined ? { isPinned: props.isPinned } : {})
+              }
+            : tab
+        )
+      }
+    })
+  }
+
+  private applyHeadlessTerminalTabPropsToSnapshot(
+    worktreeId: string,
+    tabId: string,
+    props: { color?: string | null; isPinned?: boolean }
+  ): void {
+    const snapshot = this.mobileSessionTabsByWorktree.get(worktreeId)
+    if (!snapshot) {
+      return
+    }
+    let changed = false
+    const tabs = snapshot.tabs.map((tab) => {
+      const topLevelId = tab.type === 'terminal' ? tab.parentTabId : tab.id
+      if (topLevelId !== tabId || (tab.type !== 'terminal' && tab.type !== 'browser')) {
+        return tab
+      }
+      changed = true
+      return {
+        ...tab,
+        ...(props.color !== undefined ? { color: props.color } : {}),
+        ...(props.isPinned !== undefined ? { isPinned: props.isPinned } : {})
+      }
+    })
+    if (!changed) {
+      return
+    }
+    const nextSnapshot: RuntimeMobileSessionTabsSnapshot = {
+      ...snapshot,
+      publicationEpoch: `headless:${Date.now().toString(36)}`,
+      snapshotVersion: snapshot.snapshotVersion + 1,
+      tabs
+    }
+    this.mobileSessionTabsByWorktree.set(worktreeId, nextSnapshot)
+    this.emitMobileSessionTabsSnapshot(nextSnapshot)
   }
 
   // Merge the client's pane structure into the persisted tab layout. PTY
@@ -16101,6 +16187,8 @@ export class OrcaRuntimeService {
         ...(tab.launchAgent ? { launchAgent: tab.launchAgent } : {}),
         ...(agentStatus ?? this.buildPtyMobileAgentStatus(livePty ?? pty, tab, terminalHandle)),
         ...(tab.parentLayout ? { parentLayout: tab.parentLayout } : {}),
+        ...(tab.color != null ? { color: tab.color } : {}),
+        ...(tab.isPinned ? { isPinned: true } : {}),
         isActive: tab.isActive,
         ...(terminalHandle
           ? { status: 'ready' as const, terminal: terminalHandle }

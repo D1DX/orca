@@ -56,6 +56,16 @@ export const UpdatePaneLayout = WorktreeTabSelector.extend({
   titlesByLeafId: z.record(z.string(), z.string()).optional()
 })
 
+export const SetTabProps = WorktreeTabSelector.extend({
+  tabId: z
+    .unknown()
+    .transform((v) => (typeof v === 'string' ? v : ''))
+    .pipe(z.string().min(1, 'Missing tab id')),
+  // undefined = leave unchanged; null = clear color / unset.
+  color: z.string().max(64).nullable().optional(),
+  isPinned: z.boolean().optional()
+})
+
 export const CreateTerminalTab = WorktreeTabSelector.extend({
   afterTabId: z.string().optional(),
   targetGroupId: z.string().optional(),

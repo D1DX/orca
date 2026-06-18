@@ -127,6 +127,9 @@ export type RuntimeMobileSessionTerminalTab = {
   agentStatus?: AgentStatusEntry | null
   launchAgent?: TuiAgent
   parentLayout?: TerminalLayoutSnapshot
+  /** Tab-level color/pin (per parentTabId), host-persisted for remote servers. */
+  color?: string | null
+  isPinned?: boolean
   isActive: boolean
 }
 
@@ -174,6 +177,8 @@ export type RuntimeMobileSessionBrowserTab = {
   loading: boolean
   canGoBack: boolean
   canGoForward: boolean
+  color?: string | null
+  isPinned?: boolean
   isActive: boolean
 }
 
