@@ -5642,6 +5642,20 @@ describe('OrcaRuntimeService', () => {
       splitFromLeafId: sourceLeafId,
       splitDirection: 'vertical'
     })
+
+    // Why: regression for "Split Right renders as a down split". The published
+    // mobile-session snapshot must carry the requested direction on EVERY
+    // sibling surface — the client picks one surface's parentLayout to render
+    // the whole tab, so a stale single-leaf sibling would flip the orientation.
+    const publishedTabs = runtime['mobileSessionTabsByWorktree'].get(TEST_WORKTREE_ID)!.tabs
+    const siblingSurfaces = publishedTabs.filter(
+      (tab): tab is Extract<typeof tab, { type: 'terminal' }> =>
+        tab.type === 'terminal' && tab.parentTabId === sourceEnv.ORCA_TAB_ID
+    )
+    expect(siblingSurfaces.length).toBe(2)
+    for (const surface of siblingSurfaces) {
+      expect(surface.parentLayout?.root).toMatchObject({ type: 'split', direction: 'vertical' })
+    }
   })
 
   it('splits folder workspace pty-backed terminal sessions with folder cwd and env', async () => {

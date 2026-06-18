@@ -1,6 +1,3 @@
-/* eslint-disable max-lines -- Why: one cohesive parity suite mapped section-by-
- * section to docs/remote-server-parity-test-plan.md; splitting it would scatter
- * the remote↔local equivalence assertions that belong together. */
 /**
  * Remote-server ↔ local parity tests.
  *
