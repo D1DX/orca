@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- Why: these note-send routing cases share one mocked app store and RPC harness. */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  activeAgentNotesSendFailureMessage,
   getActiveAgentNoteTarget,
   getActiveAgentRuntimeProbeDescriptor,
   getActiveTerminalNoteTarget,
@@ -466,19 +467,8 @@ describe('active agent note send', () => {
       if (method === 'terminal.isRunningAgent') {
         return { isRunningAgent: true }
       }
-      if (method === 'terminal.wait') {
-        return {
-          wait: {
-            handle: 'term-2',
-            condition: 'tui-idle',
-            satisfied: true,
-            status: 'running',
-            exitCode: null
-          }
-        }
-      }
-      if (method === 'terminal.send') {
-        return { send: { handle: 'term-2', accepted: true, bytesWritten: params.text.length } }
+      if (method === 'terminal.sendWhenIdle') {
+        return { send: { handle: 'term-2', status: 'sent', bytesWritten: params.text.length } }
       }
       throw new Error(`unexpected method ${method}`)
     })
@@ -493,15 +483,165 @@ describe('active agent note send', () => {
 
     expect(testState.callRuntimeRpc).toHaveBeenCalledWith(
       { kind: 'local' },
-      'terminal.send',
+      'terminal.sendWhenIdle',
       {
         terminal: 'term-2',
         text: 'notes',
         enter: true,
+        timeoutMs: 60000,
         client: { id: 'orca-desktop', type: 'desktop' }
       },
-      { timeoutMs: 15000 }
+      { timeoutMs: 65000 }
     )
+  })
+
+  it('maps explicit note target idle-gated send failures without marking sent', async () => {
+    testState.callRuntimeRpc.mockImplementation(async (_target, method) => {
+      if (method === 'terminal.list') {
+        return {
+          terminals: [
+            {
+              handle: 'term-2',
+              worktreeId: 'wt-1',
+              worktreePath: '/repo',
+              branch: 'main',
+              tabId: 'tab-9',
+              leafId: OTHER_LEAF_ID,
+              title: 'Codex',
+              connected: true,
+              writable: true,
+              lastOutputAt: 1,
+              preview: ''
+            }
+          ],
+          totalCount: 1,
+          truncated: false
+        }
+      }
+      if (method === 'terminal.isRunningAgent') {
+        return { isRunningAgent: true }
+      }
+      if (method === 'terminal.sendWhenIdle') {
+        return { send: { handle: 'term-2', status: 'partial-submit-failed', bytesWritten: 0 } }
+      }
+      throw new Error(`unexpected method ${method}`)
+    })
+
+    await expect(
+      sendNotesToActiveAgentSession({
+        worktreeId: 'wt-1',
+        prompt: 'notes',
+        noteTarget: { tabId: 'tab-9', leafId: OTHER_LEAF_ID },
+        timeoutMs: 60_000
+      })
+    ).resolves.toEqual({ status: 'partial-submit-failed' })
+
+    expect(testState.callRuntimeRpc).toHaveBeenCalledWith(
+      { kind: 'local' },
+      'terminal.sendWhenIdle',
+      expect.objectContaining({ timeoutMs: 60_000 }),
+      { timeoutMs: 65_000 }
+    )
+  })
+
+  it('maps explicit note target not-ready and not-writable idle-gated failures', async () => {
+    const statuses = ['not-ready', 'not-writable'] as const
+    for (const status of statuses) {
+      testState.callRuntimeRpc.mockReset()
+      testState.callRuntimeRpc.mockImplementation(async (_target, method) => {
+        if (method === 'terminal.list') {
+          return {
+            terminals: [
+              {
+                handle: 'term-2',
+                worktreeId: 'wt-1',
+                worktreePath: '/repo',
+                branch: 'main',
+                tabId: 'tab-9',
+                leafId: OTHER_LEAF_ID,
+                title: 'Codex',
+                connected: true,
+                writable: true,
+                lastOutputAt: 1,
+                preview: ''
+              }
+            ],
+            totalCount: 1,
+            truncated: false
+          }
+        }
+        if (method === 'terminal.isRunningAgent') {
+          return { isRunningAgent: true }
+        }
+        if (method === 'terminal.sendWhenIdle') {
+          return { send: { handle: 'term-2', status, bytesWritten: 0 } }
+        }
+        throw new Error(`unexpected method ${method}`)
+      })
+
+      await expect(
+        sendNotesToActiveAgentSession({
+          worktreeId: 'wt-1',
+          prompt: 'notes',
+          noteTarget: { tabId: 'tab-9', leafId: OTHER_LEAF_ID },
+          timeoutMs: 60_000
+        })
+      ).resolves.toEqual({ status })
+    }
+  })
+
+  it('throws unexpected explicit note target runtime send errors to the caller', async () => {
+    testState.callRuntimeRpc.mockImplementation(async (_target, method) => {
+      if (method === 'terminal.list') {
+        return {
+          terminals: [
+            {
+              handle: 'term-2',
+              worktreeId: 'wt-1',
+              worktreePath: '/repo',
+              branch: 'main',
+              tabId: 'tab-9',
+              leafId: OTHER_LEAF_ID,
+              title: 'Codex',
+              connected: true,
+              writable: true,
+              lastOutputAt: 1,
+              preview: ''
+            }
+          ],
+          totalCount: 1,
+          truncated: false
+        }
+      }
+      if (method === 'terminal.isRunningAgent') {
+        return { isRunningAgent: true }
+      }
+      if (method === 'terminal.sendWhenIdle') {
+        throw new Error('rpc exploded')
+      }
+      throw new Error(`unexpected method ${method}`)
+    })
+
+    await expect(
+      sendNotesToActiveAgentSession({
+        worktreeId: 'wt-1',
+        prompt: 'notes',
+        noteTarget: { tabId: 'tab-9', leafId: OTHER_LEAF_ID },
+        timeoutMs: 60_000
+      })
+    ).rejects.toThrow('rpc exploded')
+  })
+
+  it('uses selected-target failure wording for explicit note targets', () => {
+    expect(activeAgentNotesSendFailureMessage('not-ready', { explicitTarget: true })).toBe(
+      'The selected agent was not ready for input yet.'
+    )
+    expect(activeAgentNotesSendFailureMessage('not-ready')).toBe(
+      'The active agent was not ready for input yet.'
+    )
+    expect(
+      activeAgentNotesSendFailureMessage('partial-submit-failed', { explicitTarget: true })
+    ).toContain('may already be pasted')
   })
 
   it('returns no-active-terminal when the explicit note target is absent from the runtime list', async () => {

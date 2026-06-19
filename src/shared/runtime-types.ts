@@ -369,6 +369,20 @@ export type RuntimeTerminalSend = {
   bytesWritten: number
 }
 
+export type RuntimeTerminalSendWhenIdleStatus =
+  | 'sent'
+  | 'no-active-terminal'
+  | 'no-agent'
+  | 'not-ready'
+  | 'not-writable'
+  | 'partial-submit-failed'
+
+export type RuntimeTerminalSendWhenIdle = {
+  handle: string
+  status: RuntimeTerminalSendWhenIdleStatus
+  bytesWritten: number
+}
+
 export type RuntimeTerminalCreate = {
   handle: string
   tabId?: string

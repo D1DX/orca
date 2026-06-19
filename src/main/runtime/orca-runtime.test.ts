@@ -5268,6 +5268,249 @@ describe('OrcaRuntimeService', () => {
     expect(writes).toEqual(['continue', '\r'])
   })
 
+  it('sends terminal input only after the selected terminal is idle at write time', async () => {
+    const writes: string[] = []
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-1' }),
+      write: (_ptyId: string, data: string) => {
+        writes.push(data)
+        return true
+      },
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, {
+      tabs: [
+        {
+          tabId: 'tab-1',
+          worktreeId: TEST_WORKTREE_ID,
+          title: 'Codex ready',
+          activeLeafId: 'pane:1',
+          layout: null
+        }
+      ],
+      leaves: [
+        {
+          tabId: 'tab-1',
+          worktreeId: TEST_WORKTREE_ID,
+          leafId: 'pane:1',
+          paneRuntimeId: 1,
+          ptyId: 'pty-1'
+        }
+      ]
+    })
+
+    const [terminal] = (await runtime.listTerminals()).terminals
+
+    await expect(
+      runtime.sendTerminalWhenIdle(terminal.handle, { text: 'notes', enter: true })
+    ).resolves.toMatchObject({
+      handle: terminal.handle,
+      status: 'sent'
+    })
+    expect(writes).toEqual(['notes', '\r'])
+  })
+
+  it('rejects idle-gated sends when the final runtime recheck sees a blocked prompt', async () => {
+    const writes: string[] = []
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-1' }),
+      write: (_ptyId: string, data: string) => {
+        writes.push(data)
+        return true
+      },
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, {
+      tabs: [
+        {
+          tabId: 'tab-1',
+          worktreeId: TEST_WORKTREE_ID,
+          title: 'Codex ready',
+          activeLeafId: 'pane:1',
+          layout: null
+        }
+      ],
+      leaves: [
+        {
+          tabId: 'tab-1',
+          worktreeId: TEST_WORKTREE_ID,
+          leafId: 'pane:1',
+          paneRuntimeId: 1,
+          ptyId: 'pty-1'
+        }
+      ]
+    })
+    runtime.onPtyData('pty-1', 'Hooks need review. Press enter to confirm\n', 123)
+
+    const [terminal] = (await runtime.listTerminals()).terminals
+
+    await expect(
+      runtime.sendTerminalWhenIdle(terminal.handle, { text: 'notes', enter: true })
+    ).resolves.toMatchObject({
+      handle: terminal.handle,
+      status: 'not-ready'
+    })
+    expect(writes).toEqual([])
+  })
+
+  it('reports partial idle-gated sends when text writes but Enter is rejected', async () => {
+    const writes: string[] = []
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-1' }),
+      write: (_ptyId: string, data: string) => {
+        writes.push(data)
+        return data !== '\r'
+      },
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, {
+      tabs: [
+        {
+          tabId: 'tab-1',
+          worktreeId: TEST_WORKTREE_ID,
+          title: 'Codex ready',
+          activeLeafId: 'pane:1',
+          layout: null
+        }
+      ],
+      leaves: [
+        {
+          tabId: 'tab-1',
+          worktreeId: TEST_WORKTREE_ID,
+          leafId: 'pane:1',
+          paneRuntimeId: 1,
+          ptyId: 'pty-1'
+        }
+      ]
+    })
+
+    const [terminal] = (await runtime.listTerminals()).terminals
+
+    await expect(
+      runtime.sendTerminalWhenIdle(terminal.handle, { text: 'notes', enter: true })
+    ).resolves.toMatchObject({
+      handle: terminal.handle,
+      status: 'partial-submit-failed'
+    })
+    expect(writes).toEqual(['notes', '\r'])
+  })
+
+  it('rechecks idle-gated send guards before submitting Enter after pasted text', async () => {
+    vi.useFakeTimers()
+    try {
+      const writes: string[] = []
+      let inputLocked = false
+      const runtime = new OrcaRuntimeService(store)
+      runtime.setPtyController({
+        spawn: vi.fn().mockResolvedValue({ id: 'pty-1' }),
+        write: (_ptyId: string, data: string) => {
+          writes.push(data)
+          if (data === 'notes') {
+            inputLocked = true
+          }
+          return true
+        },
+        kill: () => true,
+        getForegroundProcess: async () => null
+      })
+      runtime.attachWindow(1)
+      runtime.syncWindowGraph(1, {
+        tabs: [
+          {
+            tabId: 'tab-1',
+            worktreeId: TEST_WORKTREE_ID,
+            title: 'Codex ready',
+            activeLeafId: 'pane:1',
+            layout: null
+          }
+        ],
+        leaves: [
+          {
+            tabId: 'tab-1',
+            worktreeId: TEST_WORKTREE_ID,
+            leafId: 'pane:1',
+            paneRuntimeId: 1,
+            ptyId: 'pty-1'
+          }
+        ]
+      })
+
+      const [terminal] = (await runtime.listTerminals()).terminals
+      const send = runtime.sendTerminalWhenIdle(
+        terminal.handle,
+        { text: 'notes', enter: true },
+        {
+          beforeWrite: () => {
+            if (inputLocked) {
+              throw new Error('terminal_not_writable')
+            }
+          }
+        }
+      )
+
+      await vi.advanceTimersByTimeAsync(600)
+
+      await expect(send).resolves.toMatchObject({
+        handle: terminal.handle,
+        status: 'partial-submit-failed'
+      })
+      expect(writes).toEqual(['notes'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps ordinary terminal send suffix failures on the existing not-writable contract', async () => {
+    const writes: string[] = []
+    const runtime = new OrcaRuntimeService(store)
+    runtime.setPtyController({
+      spawn: vi.fn().mockResolvedValue({ id: 'pty-1' }),
+      write: (_ptyId: string, data: string) => {
+        writes.push(data)
+        return data !== '\r'
+      },
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+    runtime.attachWindow(1)
+    runtime.syncWindowGraph(1, {
+      tabs: [
+        {
+          tabId: 'tab-1',
+          worktreeId: TEST_WORKTREE_ID,
+          title: 'Codex ready',
+          activeLeafId: 'pane:1',
+          layout: null
+        }
+      ],
+      leaves: [
+        {
+          tabId: 'tab-1',
+          worktreeId: TEST_WORKTREE_ID,
+          leafId: 'pane:1',
+          paneRuntimeId: 1,
+          ptyId: 'pty-1'
+        }
+      ]
+    })
+
+    const [terminal] = (await runtime.listTerminals()).terminals
+
+    await expect(
+      runtime.sendTerminal(terminal.handle, { text: 'notes', enter: true })
+    ).rejects.toThrow('terminal_not_writable')
+    expect(writes).toEqual(['notes', '\r'])
+  })
+
   it('creates visible terminal sessions without asking the renderer to focus a tab', async () => {
     const spawn = vi.fn().mockResolvedValue({ id: 'pty-bg' })
     const createTerminal = vi.fn()

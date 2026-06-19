@@ -214,6 +214,8 @@ import type {
   RuntimeTerminalRead,
   RuntimeTerminalRename,
   RuntimeTerminalSend,
+  RuntimeTerminalSendWhenIdle,
+  RuntimeTerminalSendWhenIdleStatus,
   RuntimeTerminalCreate,
   RuntimeTerminalSplit,
   RuntimeTerminalFocus,
@@ -6734,7 +6736,8 @@ export class OrcaRuntimeService {
       text?: string
       enter?: boolean
       interrupt?: boolean
-    }
+    },
+    options: { beforeWrite?: (ptyId: string) => void; suffixFailureError?: string } = {}
   ): Promise<RuntimeTerminalSend> {
     const pty = this.getLivePtyForHandle(handle)
     if (pty) {
@@ -6745,7 +6748,8 @@ export class OrcaRuntimeService {
       if (payload === null) {
         throw new Error('invalid_terminal_send')
       }
-      await this.writeTerminalAction(pty.pty.ptyId, action, payload)
+      options.beforeWrite?.(pty.pty.ptyId)
+      await this.writeTerminalAction(pty.pty.ptyId, action, payload, options)
       return {
         handle,
         accepted: true,
@@ -6762,7 +6766,8 @@ export class OrcaRuntimeService {
       throw new Error('invalid_terminal_send')
     }
 
-    await this.writeTerminalAction(leaf.ptyId, action, payload)
+    options.beforeWrite?.(leaf.ptyId)
+    await this.writeTerminalAction(leaf.ptyId, action, payload, options)
 
     return {
       handle,
@@ -6771,10 +6776,148 @@ export class OrcaRuntimeService {
     }
   }
 
+  async sendTerminalWhenIdle(
+    handle: string,
+    action: {
+      text?: string
+      enter?: boolean
+      interrupt?: boolean
+    },
+    options?: { timeoutMs?: number; signal?: AbortSignal; beforeWrite?: (ptyId: string) => void }
+  ): Promise<RuntimeTerminalSendWhenIdle> {
+    const payload = buildSendPayload(action)
+    if (payload === null) {
+      throw new Error('invalid_terminal_send')
+    }
+
+    try {
+      const wait = await this.waitForTerminal(handle, {
+        condition: 'tui-idle',
+        timeoutMs: options?.timeoutMs,
+        signal: options?.signal
+      })
+      if (!wait.satisfied) {
+        return { handle, status: 'not-ready', bytesWritten: 0 }
+      }
+      if (wait.status !== 'running') {
+        return { handle, status: 'no-active-terminal', bytesWritten: 0 }
+      }
+    } catch (error) {
+      return this.mapTerminalSendWhenIdleError(handle, error)
+    }
+
+    let isAgent = false
+    try {
+      isAgent = await this.isTerminalRunningAgent(handle)
+    } catch (error) {
+      return this.mapTerminalSendWhenIdleError(handle, error)
+    }
+    if (!isAgent) {
+      return { handle, status: 'no-agent', bytesWritten: 0 }
+    }
+
+    const readinessStatus = this.getImmediateTuiIdleSendFailureStatus(handle)
+    if (readinessStatus) {
+      return { handle, status: readinessStatus, bytesWritten: 0 }
+    }
+
+    try {
+      const send = await this.sendTerminal(handle, action, {
+        beforeWrite: options?.beforeWrite,
+        suffixFailureError: 'terminal_submit_failed_after_text'
+      })
+      return {
+        handle,
+        status: send.accepted ? 'sent' : 'not-writable',
+        bytesWritten: send.bytesWritten
+      }
+    } catch (error) {
+      return this.mapTerminalSendWhenIdleError(handle, error)
+    }
+  }
+
+  private getImmediateTuiIdleSendFailureStatus(
+    handle: string
+  ): RuntimeTerminalSendWhenIdleStatus | null {
+    const pty = this.getLivePtyForHandle(handle)
+    if (pty) {
+      if (!pty.pty.connected) {
+        return 'no-active-terminal'
+      }
+      const waitText = buildTerminalWaitText(
+        pty.pty.tailBuffer,
+        pty.pty.tailPartialLine,
+        pty.pty.preview
+      )
+      if (detectTerminalWaitBlockedReason(waitText)) {
+        return 'not-ready'
+      }
+      if (
+        pty.pty.lastAgentStatus === 'idle' ||
+        this.getAdoptedPtyExplicitIdleStatus(pty.pty) === 'idle' ||
+        isKnownReadyPromptPreview(waitText)
+      ) {
+        return null
+      }
+      return 'not-ready'
+    }
+
+    try {
+      const { leaf } = this.getLiveLeafForHandle(handle)
+      if (getTerminalState(leaf) !== 'running') {
+        return 'no-active-terminal'
+      }
+      if (!leaf.writable || !leaf.ptyId) {
+        return 'not-writable'
+      }
+      const waitText = buildTerminalWaitText(leaf.tailBuffer, leaf.tailPartialLine, leaf.preview)
+      if (detectTerminalWaitBlockedReason(waitText)) {
+        return 'not-ready'
+      }
+      const title = leaf.paneTitle ?? this.tabs.get(leaf.tabId)?.title
+      if (
+        leaf.lastAgentStatus === 'idle' ||
+        (title && detectExplicitIdleStatusFromTitle(title) === 'idle') ||
+        isKnownReadyPromptPreview(waitText)
+      ) {
+        return null
+      }
+      return 'not-ready'
+    } catch {
+      return 'no-active-terminal'
+    }
+  }
+
+  private mapTerminalSendWhenIdleError(
+    handle: string,
+    error: unknown
+  ): RuntimeTerminalSendWhenIdle {
+    const message = error instanceof Error ? error.message : String(error)
+    if (message.includes('timeout')) {
+      return { handle, status: 'not-ready', bytesWritten: 0 }
+    }
+    if (message.includes('terminal_submit_failed_after_text')) {
+      return { handle, status: 'partial-submit-failed', bytesWritten: 0 }
+    }
+    if (message.includes('terminal_not_writable')) {
+      return { handle, status: 'not-writable', bytesWritten: 0 }
+    }
+    if (
+      message.includes('terminal_handle_stale') ||
+      message.includes('terminal_exited') ||
+      message.includes('terminal_gone') ||
+      message.includes('no_active_terminal')
+    ) {
+      return { handle, status: 'no-active-terminal', bytesWritten: 0 }
+    }
+    throw error
+  }
+
   private async writeTerminalAction(
     ptyId: string,
     action: { text?: string; enter?: boolean; interrupt?: boolean },
-    payload: string
+    payload: string,
+    options: { beforeWrite?: (ptyId: string) => void; suffixFailureError?: string } = {}
   ): Promise<void> {
     // Why: TUI apps (Claude Code, etc.) treat a single large write as a paste
     // event. Keep Enter/interrupt as a second write for both visible and
@@ -6782,15 +6925,24 @@ export class OrcaRuntimeService {
     const hasText = typeof action.text === 'string' && action.text.length > 0
     const hasSuffix = action.enter || action.interrupt
     if (hasText && hasSuffix) {
+      options.beforeWrite?.(ptyId)
       const textWrote = this.ptyController?.write(ptyId, action.text!) ?? false
       if (!textWrote) {
         throw new Error('terminal_not_writable')
       }
       const suffix = (action.enter ? '\r' : '') + (action.interrupt ? '\x03' : '')
       await new Promise((resolve) => setTimeout(resolve, 500))
+      try {
+        options.beforeWrite?.(ptyId)
+      } catch (error) {
+        if (options.suffixFailureError) {
+          throw new Error(options.suffixFailureError)
+        }
+        throw error
+      }
       const suffixWrote = this.ptyController?.write(ptyId, suffix) ?? false
       if (!suffixWrote) {
-        throw new Error('terminal_not_writable')
+        throw new Error(options.suffixFailureError ?? 'terminal_not_writable')
       }
       return
     }

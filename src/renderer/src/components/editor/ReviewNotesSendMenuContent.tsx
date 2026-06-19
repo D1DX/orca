@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { focusTerminalTabSurface } from '@/lib/focus-terminal-tab-surface'
 import {
+  ACTIVE_AGENT_EXPLICIT_TARGET_SEND_TIMEOUT_MS,
   activeAgentNotesSendFailureMessage,
   sendNotesToActiveAgentSession,
   type ActiveAgentNotesSendResult
@@ -100,7 +101,11 @@ export function ReviewNotesSendMenuContent({
   )
 
   const runNotesSend = useCallback(
-    (send: () => Promise<ActiveAgentNotesSendResult>, onSent: () => void) => {
+    (
+      send: () => Promise<ActiveAgentNotesSendResult>,
+      onSent: () => void,
+      options: { explicitTarget?: boolean } = {}
+    ) => {
       const pending = toast.loading(
         translate(
           'auto.components.editor.ReviewNotesSendMenuContent.50f7e753ea',
@@ -121,7 +126,11 @@ export function ReviewNotesSendMenuContent({
             return
           }
 
-          toast.message(activeAgentNotesSendFailureMessage(result.status))
+          toast.message(
+            activeAgentNotesSendFailureMessage(result.status, {
+              explicitTarget: options.explicitTarget
+            })
+          )
         })
         .catch((error) => {
           console.error('Failed to send notes:', error)
@@ -145,12 +154,19 @@ export function ReviewNotesSendMenuContent({
         return
       }
 
+      const currentEligibility = resolveCurrentSendTargetEligibility(target, worktreeId)
+      if (currentEligibility.status !== 'eligible') {
+        toast.message(currentEligibility.disabledReason)
+        return
+      }
+
       runNotesSend(
         () =>
           sendNotesToActiveAgentSession({
             worktreeId,
             prompt,
-            noteTarget: { tabId: target.tabId, leafId: target.leafId }
+            noteTarget: { tabId: target.tabId, leafId: target.leafId },
+            timeoutMs: ACTIVE_AGENT_EXPLICIT_TARGET_SEND_TIMEOUT_MS
           }),
         () => {
           onPromptDelivered?.()
@@ -161,7 +177,8 @@ export function ReviewNotesSendMenuContent({
             launch_source: launchSource,
             request_kind: 'followup'
           })
-        }
+        },
+        { explicitTarget: true }
       )
     },
     [hasPrompt, runNotesSend, worktreeId, prompt, onPromptDelivered, launchSource]
@@ -197,6 +214,29 @@ export function ReviewNotesSendMenuContent({
       />
     </>
   )
+}
+
+function resolveCurrentSendTargetEligibility(
+  target: NotesSendAgentTarget,
+  worktreeId: string
+): { status: 'eligible' } | { status: 'disabled'; disabledReason: string } {
+  const state = useAppStore.getState()
+  const currentTarget = deriveNotesSendAgentTargets(state, worktreeId).find(
+    (candidate) => candidate.paneKey === target.paneKey
+  )
+  if (currentTarget) {
+    return currentTarget.status === 'eligible'
+      ? { status: 'eligible' }
+      : {
+          status: 'disabled',
+          disabledReason: currentTarget.disabledReason ?? 'Terminal is no longer available'
+        }
+  }
+
+  const ptyId = state.terminalLayoutsByTabId[target.tabId]?.ptyIdsByLeafId?.[target.leafId] ?? null
+  return ptyId && state.ptyIdsByTabId[target.tabId]?.includes(ptyId)
+    ? { status: 'eligible' }
+    : { status: 'disabled', disabledReason: 'Terminal is no longer available' }
 }
 
 function AgentTargetMenuItem({
@@ -287,15 +327,13 @@ function deriveTitleOnlySendTarget(
   if (!ptyId || !ptyIdsByTabId[parsed.tabId]?.includes(ptyId)) {
     return null
   }
-  const disabledReason = agent.state === 'working' ? 'Agent is working' : undefined
   return {
     paneKey: agent.paneKey,
     tabId: parsed.tabId,
     leafId: parsed.leafId,
     agentType: agent.agentType,
     tabTitle: agent.tab.title,
-    status: disabledReason ? 'disabled' : 'eligible',
-    ...(disabledReason ? { disabledReason } : {})
+    status: 'eligible'
   }
 }
 

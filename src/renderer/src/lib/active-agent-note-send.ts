@@ -1,4 +1,8 @@
-import type { RuntimeTerminalSend, RuntimeTerminalWait } from '../../../shared/runtime-types'
+import type {
+  RuntimeTerminalSend,
+  RuntimeTerminalSendWhenIdle,
+  RuntimeTerminalWait
+} from '../../../shared/runtime-types'
 import { useAppStore } from '@/store'
 import { callRuntimeRpc, getActiveRuntimeTarget } from '@/runtime/runtime-rpc-client'
 import { getSettingsForWorktreeRuntimeOwner } from '@/lib/worktree-runtime-owner'
@@ -19,6 +23,7 @@ export {
 
 const ACTIVE_AGENT_SEND_TIMEOUT_MS = 8000
 const ACTIVE_AGENT_SEND_RPC_TIMEOUT_MS = 15000
+export const ACTIVE_AGENT_EXPLICIT_TARGET_SEND_TIMEOUT_MS = 60_000
 
 export type ActiveAgentNotesSendStatus =
   | 'sent'
@@ -27,6 +32,7 @@ export type ActiveAgentNotesSendStatus =
   | 'no-agent'
   | 'not-ready'
   | 'not-writable'
+  | 'partial-submit-failed'
 
 export type ActiveAgentNotesSendResult = {
   status: ActiveAgentNotesSendStatus
@@ -36,7 +42,7 @@ export async function sendNotesToActiveAgentSession({
   worktreeId,
   prompt,
   noteTarget: explicitNoteTarget,
-  timeoutMs = ACTIVE_AGENT_SEND_TIMEOUT_MS
+  timeoutMs
 }: {
   worktreeId: string
   prompt: string
@@ -57,6 +63,11 @@ export async function sendNotesToActiveAgentSession({
   if (!noteTarget) {
     return { status: 'no-active-terminal' }
   }
+  const effectiveTimeoutMs =
+    timeoutMs ??
+    (explicitNoteTarget
+      ? ACTIVE_AGENT_EXPLICIT_TARGET_SEND_TIMEOUT_MS
+      : ACTIVE_AGENT_SEND_TIMEOUT_MS)
 
   // Route by the worktree's owner host so the agent terminal is found and driven
   // on the host that actually runs it, not on the focused runtime.
@@ -85,24 +96,50 @@ export async function sendNotesToActiveAgentSession({
     return { status: 'no-agent' }
   }
 
-  try {
-    const { wait } = await callRuntimeRpc<{ wait: RuntimeTerminalWait }>(
-      runtimeTarget,
-      'terminal.wait',
-      { terminal: terminal.handle, for: 'tui-idle', timeoutMs },
-      { timeoutMs: timeoutMs + 5000 }
-    )
-    if (!wait.satisfied) {
-      return { status: 'not-ready' }
+  if (explicitNoteTarget) {
+    try {
+      const { send } = await callRuntimeRpc<{ send: RuntimeTerminalSendWhenIdle }>(
+        runtimeTarget,
+        'terminal.sendWhenIdle',
+        {
+          terminal: terminal.handle,
+          text: trimmedPrompt,
+          enter: true,
+          timeoutMs: effectiveTimeoutMs,
+          client: { id: 'orca-desktop', type: 'desktop' }
+        },
+        { timeoutMs: effectiveTimeoutMs + 5000 }
+      )
+      return mapRuntimeSendWhenIdleStatus(send.status)
+    } catch (error) {
+      if (isRuntimeTerminalUnavailable(error)) {
+        return { status: 'no-active-terminal' }
+      }
+      if (isRuntimeTimeout(error)) {
+        return { status: 'not-ready' }
+      }
+      throw error
     }
-  } catch (error) {
-    if (isRuntimeTerminalUnavailable(error)) {
-      return { status: 'no-active-terminal' }
+  } else {
+    try {
+      const { wait } = await callRuntimeRpc<{ wait: RuntimeTerminalWait }>(
+        runtimeTarget,
+        'terminal.wait',
+        { terminal: terminal.handle, for: 'tui-idle', timeoutMs: effectiveTimeoutMs },
+        { timeoutMs: effectiveTimeoutMs + 5000 }
+      )
+      if (!wait.satisfied) {
+        return { status: 'not-ready' }
+      }
+    } catch (error) {
+      if (isRuntimeTerminalUnavailable(error)) {
+        return { status: 'no-active-terminal' }
+      }
+      if (isRuntimeTimeout(error)) {
+        return { status: 'not-ready' }
+      }
+      throw error
     }
-    if (isRuntimeTimeout(error)) {
-      return { status: 'not-ready' }
-    }
-    throw error
   }
 
   const { send } = await callRuntimeRpc<{ send: RuntimeTerminalSend }>(
@@ -119,20 +156,47 @@ export async function sendNotesToActiveAgentSession({
   return send.accepted ? { status: 'sent' } : { status: 'not-writable' }
 }
 
-export function activeAgentNotesSendFailureMessage(status: ActiveAgentNotesSendStatus): string {
+export function activeAgentNotesSendFailureMessage(
+  status: ActiveAgentNotesSendStatus,
+  options: { explicitTarget?: boolean } = {}
+): string {
+  const target = options.explicitTarget ? 'selected' : 'active'
   switch (status) {
     case 'empty':
       return 'No notes to send.'
     case 'no-active-terminal':
-      return 'Open the agent terminal in this worktree, then send the notes again.'
+      return options.explicitTarget
+        ? 'The selected terminal is no longer available.'
+        : 'Open the agent terminal in this worktree, then send the notes again.'
     case 'no-agent':
-      return 'The active terminal is not a recognized agent session.'
+      return `The ${target} terminal is not a recognized agent session.`
     case 'not-ready':
-      return 'The active agent was not ready for input yet.'
+      return `The ${target} agent was not ready for input yet.`
     case 'not-writable':
-      return 'The active terminal did not accept the notes.'
+      return `The ${target} terminal did not accept the notes.`
+    case 'partial-submit-failed':
+      return 'The notes may already be pasted in the selected terminal, but Orca could not submit them.'
     case 'sent':
       return ''
+  }
+}
+
+function mapRuntimeSendWhenIdleStatus(
+  status: RuntimeTerminalSendWhenIdle['status']
+): ActiveAgentNotesSendResult {
+  switch (status) {
+    case 'sent':
+      return { status: 'sent' }
+    case 'no-active-terminal':
+      return { status: 'no-active-terminal' }
+    case 'no-agent':
+      return { status: 'no-agent' }
+    case 'not-ready':
+      return { status: 'not-ready' }
+    case 'not-writable':
+      return { status: 'not-writable' }
+    case 'partial-submit-failed':
+      return { status: 'partial-submit-failed' }
   }
 }
 

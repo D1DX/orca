@@ -322,6 +322,7 @@ const MOBILE_RPC_METHOD_ALLOWLIST = new Set([
   'terminal.read',
   'terminal.rename',
   'terminal.send',
+  'terminal.sendWhenIdle',
   'terminal.setAutoRestoreFit',
   'terminal.setDisplayMode',
   'terminal.subscribe',
@@ -349,7 +350,7 @@ const MOBILE_RPC_METHOD_ALLOWLIST = new Set([
 // counter, abort wiring, keepalives, and runtime_busy admission check all
 // share this decision. See §3.1.
 function isLongPollRequest(request: RpcRequest): boolean {
-  if (request.method === 'terminal.wait') {
+  if (request.method === 'terminal.wait' || request.method === 'terminal.sendWhenIdle') {
     return true
   }
   if (request.method === 'orchestration.check') {

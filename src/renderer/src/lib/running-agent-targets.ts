@@ -56,8 +56,6 @@ export function deriveRunningAgentSendTargets(
       disabledReason = 'Agent status is stale'
     } else if (!ptyId) {
       disabledReason = 'Terminal is no longer available'
-    } else if (entry.state === 'working') {
-      disabledReason = 'Agent is working'
     }
 
     targets.push({

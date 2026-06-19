@@ -151,8 +151,7 @@ describe('running agent send targets', () => {
 
     expect(resolveRunningAgentSendTarget(state(), WORKTREE_ID, 'missing')).toBeNull()
     expect(targets.find((target) => target.paneKey === workingPaneKey)).toMatchObject({
-      status: 'disabled',
-      disabledReason: 'Agent is working',
+      status: 'eligible',
       ptyId: 'pty-left'
     })
     expect(targets.find((target) => target.paneKey === waitingPaneKey)).toMatchObject({

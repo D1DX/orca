@@ -232,8 +232,7 @@ describe('notes send agent targets', () => {
     expect(targets[0]).toMatchObject({
       tabId: LAUNCH_TAB_ID,
       leafId: LEAF_A,
-      status: 'disabled',
-      disabledReason: 'Agent is working'
+      status: 'eligible'
     })
   })
 

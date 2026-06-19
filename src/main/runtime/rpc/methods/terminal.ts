@@ -492,6 +492,10 @@ const TerminalSend = TerminalHandle.extend({
     .optional()
 })
 
+const TerminalSendWhenIdle = TerminalSend.extend({
+  timeoutMs: OptionalFiniteNumber
+})
+
 const TerminalViewport = z.object({
   cols: z.number().int().min(1).max(1000),
   rows: z.number().int().min(1).max(500)
@@ -754,6 +758,46 @@ export const TERMINAL_METHODS: RpcAnyMethod[] = [
       const mobileFloorClientId = resolveMobileFloorClientId(driver, params.client)
       if (leaf?.ptyId && mobileFloorClientId) {
         await runtime.mobileTookFloor(leaf.ptyId, mobileFloorClientId)
+      }
+      return { send: result }
+    }
+  }),
+  defineMethod({
+    name: 'terminal.sendWhenIdle',
+    params: TerminalSendWhenIdle,
+    handler: async (params, { runtime, signal }) => {
+      const initialLeaf = runtime.resolveLeafForHandle(params.terminal)
+      const throwIfInputLocked = (ptyId: string): void => {
+        if (isTerminalInputLockedForClient(runtime, ptyId, params.client)) {
+          throw new Error('terminal_not_writable')
+        }
+      }
+      if (
+        initialLeaf?.ptyId &&
+        isTerminalInputLockedForClient(runtime, initialLeaf.ptyId, params.client)
+      ) {
+        return {
+          send: {
+            handle: params.terminal,
+            status: 'not-writable',
+            bytesWritten: 0
+          }
+        }
+      }
+      const result = await runtime.sendTerminalWhenIdle(
+        params.terminal,
+        {
+          text: params.text,
+          enter: params.enter === true,
+          interrupt: params.interrupt === true
+        },
+        { timeoutMs: params.timeoutMs, signal, beforeWrite: throwIfInputLocked }
+      )
+      const currentLeaf = runtime.resolveLeafForHandle(params.terminal)
+      const driver = currentLeaf?.ptyId ? runtime.getDriver(currentLeaf.ptyId) : null
+      const mobileFloorClientId = resolveMobileFloorClientId(driver, params.client)
+      if (result.status === 'sent' && currentLeaf?.ptyId && mobileFloorClientId) {
+        await runtime.mobileTookFloor(currentLeaf.ptyId, mobileFloorClientId)
       }
       return { send: result }
     }

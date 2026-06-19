@@ -146,15 +146,13 @@ describe('WorktreeCardAgents send targets', () => {
     }
   })
 
-  it('marks eligible active-worktree rows and disables working send targets', async () => {
+  it('marks eligible active-worktree rows including working send targets', async () => {
     const { default: WorktreeCardAgents } = await import('./WorktreeCardAgents')
 
     const markup = renderToStaticMarkup(<WorktreeCardAgents worktreeId="wt-1" />)
 
     expect(markup).toContain('data-agent-send-target="eligible"')
     expect(markup).toContain(`data-pane-key="${READY_PANE_KEY}"`)
-    expect(markup).toContain('data-agent-send-target="disabled"')
-    expect(markup).toContain('data-disabled-reason="Agent is working"')
     expect(markup).toContain(`data-pane-key="${WORKING_PANE_KEY}"`)
     expect(markup).toContain('data-has-send-handler="true"')
   }, 10_000)
@@ -203,7 +201,7 @@ describe('WorktreeCardAgents send targets', () => {
     const markup = renderToStaticMarkup(<WorktreeCardAgents worktreeId="wt-1" />)
 
     expect(markup).toContain('data-agent-send-target="eligible"')
-    expect(markup).toContain('data-agent-send-target="disabled"')
-    expect(markup).toContain('title="Agent is working"')
+    expect(markup).not.toContain('data-agent-send-target="disabled"')
+    expect(markup).not.toContain('title="Agent is working"')
   })
 })
