@@ -5,6 +5,7 @@
 import { existsSync } from 'fs'
 import { join } from 'path'
 import os from 'node:os'
+import { chmod, mkdir, writeFile } from 'node:fs/promises'
 import { app, BrowserWindow, ipcMain, nativeTheme } from 'electron'
 import { electronApp, is } from '@electron-toolkit/utils'
 import * as QRCode from 'qrcode'
@@ -1604,13 +1605,15 @@ app.whenReady().then(async () => {
       throw error
     })
     installServeSignalHandlers()
-    // Why: the `orca` CLI command (~/.local/bin/orca on Linux, /usr/local/bin/orca on
-    // macOS) is normally installed by the renderer onboarding / Settings "Install CLI"
-    // flow via the cli:install IPC. Headless serve has no renderer, so without this the
-    // command is never created and an in-terminal `orca …` — including the Claude Team
-    // launcher `orca claude-teams` opened by "Start new agent" — fails with
-    // command-not-found. The installer is idempotent and best-effort: a failure must
-    // not block serve startup.
+    // Why: the orca CLI command is normally installed by the renderer onboarding /
+    // Settings "Install CLI" flow via the cli:install IPC. Headless serve has no
+    // renderer, so without this the command is never created and an in-terminal
+    // `orca …` fails with command-not-found. Note CliInstaller installs bare `orca`
+    // on macOS (/usr/local/bin/orca or ~/.local/bin/orca) but `orca-ide` on Linux
+    // (~/.local/bin/orca-ide — renamed to avoid shadowing GNOME Orca's /usr/bin/orca).
+    // So this fixes the Claude Team launcher (`orca claude-teams`) on macOS; the Linux
+    // launchers still invoke bare `orca`, handled by the dispatcher installed below.
+    // The installer is idempotent and best-effort: a failure must not block serve start.
     try {
       const cliStatus = await new CliInstaller().install()
       console.log(
@@ -1621,6 +1624,38 @@ app.whenReady().then(async () => {
         '[serve] orca CLI install skipped:',
         error instanceof Error ? error.message : String(error)
       )
+    }
+    // Why: on Linux the CLI installs as `orca-ide`, NOT bare `orca` (above). But the
+    // Claude Team launcher typed into the initial managed terminal — from the desktop
+    // renderer (agent-catalog.tsx) AND the mobile client (mobile/.../mobile-tui-agents.ts),
+    // both carrying the literal `orca claude-teams` string composed client-side and
+    // written verbatim host-side (local-pty-provider) — invokes bare `orca`. With no
+    // ORCA_AGENT_TEAMS_TEAM_ID yet, the agent-teams shim dir is not on PATH, so bare
+    // `orca` is unresolved and `orca claude-teams` fails. ~/.local/bin is hardcoded
+    // ahead of /usr/bin on the managed-terminal PATH (patchPackagedProcessPath), so
+    // drop a bare-`orca` dispatcher there that execs the bundled CLI wrapper. It is a
+    // plain file (not a managed symlink), so CliInstaller.removeLegacyLinuxCommandIfManaged
+    // never reclaims it; the GNOME-Orca shadow that the `orca-ide` rename avoids is moot
+    // on a headless serve box. Best-effort: a failure must not block serve startup.
+    if (process.platform === 'linux' && app.isPackaged && process.resourcesPath) {
+      try {
+        const bundledCli = join(process.resourcesPath, 'bin', 'orca-ide')
+        const localBin = join(os.homedir(), '.local', 'bin')
+        const bareOrca = join(localBin, 'orca')
+        await mkdir(localBin, { recursive: true })
+        await writeFile(
+          bareOrca,
+          `#!/usr/bin/env bash\nexec ${JSON.stringify(bundledCli)} "$@"\n`,
+          'utf8'
+        )
+        await chmod(bareOrca, 0o755)
+        console.log(`[serve] installed bare orca dispatcher: ${bareOrca} -> ${bundledCli}`)
+      } catch (error) {
+        console.warn(
+          '[serve] bare orca dispatcher install skipped:',
+          error instanceof Error ? error.message : String(error)
+        )
+      }
     }
     await printServeReady(serveOptions)
     return
