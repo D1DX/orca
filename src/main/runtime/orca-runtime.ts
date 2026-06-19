@@ -138,7 +138,8 @@ import {
 } from '../../shared/worktree-id'
 import {
   getProjectHostSetupForRepo,
-  getProjectHostSetupWorktreeMeta
+  getProjectHostSetupWorktreeMeta,
+  getProjectIdentityKey
 } from '../../shared/project-host-setup-projection'
 import { parsePtySessionId } from '../../shared/pty-session-id-format'
 import { clampLinearIssueListLimit } from '../../shared/linear-issue-read-limits'
@@ -7372,16 +7373,14 @@ export class OrcaRuntimeService {
       throw new Error('runtime_unavailable')
     }
     const existingProject = this.listProjects().find((project) => project.id === args.projectId)
-    if (!existingProject) {
-      throw new Error(`Project not found: ${args.projectId}`)
-    }
+    // Why: project may originate on a peer runtime and not be in this store yet;
+    // the explicit add joins it by origin-remote identity (see getProjectIdentityKey).
     let repo = await this.addRepo(args.path, args.kind === 'folder' ? 'folder' : 'git')
     let setup = getProjectHostSetupForRepo(this.listProjectHostSetups(), repo)
-    if (setup.projectId !== args.projectId) {
-      if (
-        !existingProject.providerIdentity ||
-        existingProject.providerIdentity.provider !== 'github'
-      ) {
+    // Why: skip the upstream stamp when the imported folder's identity already
+    // matches the requested project (non-GitHub repos group by origin remote).
+    if (setup.projectId !== args.projectId && getProjectIdentityKey(repo) !== args.projectId) {
+      if (!existingProject?.providerIdentity || existingProject.providerIdentity.provider !== 'github') {
         throw new Error('Imported folder does not match the selected project identity.')
       }
       const updated = this.store.updateRepo(repo.id, {
