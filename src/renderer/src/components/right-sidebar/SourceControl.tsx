@@ -238,6 +238,12 @@ import {
   shouldShowSourceControlCompareUnavailableCard,
   SourceControlHeaderToolbar
 } from './source-control-header-toolbar'
+import {
+  createSourceControlViewModeEducationChoiceUpdate,
+  createSourceControlViewModeEducationDismissUpdate,
+  shouldShowSourceControlViewModeEducation,
+  SourceControlViewModeEducation
+} from './source-control-view-mode-education'
 export { HostedReviewHeaderLink } from './hosted-review-header-chrome'
 import {
   createRunningCommitMessageGenerationRecord,
@@ -536,7 +542,7 @@ function requestSourceControlEditorRevealFrame(
 type CommitDraftsByWorktree = Record<string, string>
 
 export function normalizeSourceControlViewMode(value: unknown): SourceControlViewMode {
-  return value === 'tree' || value === 'list' ? value : 'list'
+  return value === 'tree' || value === 'list' ? value : 'tree'
 }
 
 type GitStatusSourceControlTreeNode = SourceControlTreeNode<
@@ -4001,9 +4007,27 @@ function SourceControlInner(): React.JSX.Element {
       return
     }
     updateSettings({
-      sourceControlViewMode: getNextSourceControlViewMode(sourceControlViewMode)
+      sourceControlViewMode: getNextSourceControlViewMode(sourceControlViewMode),
+      sourceControlViewModeEducationDismissed: true
     })
   }, [settings, sourceControlViewMode, updateSettings])
+
+  const handleChooseSourceControlViewModeEducation = useCallback(
+    (mode: SourceControlViewMode) => {
+      if (!settings) {
+        return
+      }
+      updateSettings(createSourceControlViewModeEducationChoiceUpdate(mode))
+    },
+    [settings, updateSettings]
+  )
+
+  const handleDismissSourceControlViewModeEducation = useCallback(() => {
+    if (!settings) {
+      return
+    }
+    updateSettings(createSourceControlViewModeEducationDismissUpdate())
+  }, [settings, updateSettings])
 
   // Clear selection on worktree or tab change
   useEffect(() => {
@@ -5061,6 +5085,15 @@ function SourceControlInner(): React.JSX.Element {
           compareBaseRef={effectiveBaseRef}
           upstreamStatus={remoteStatus}
         />
+
+        {shouldShowSourceControlViewModeEducation(settings) ? (
+          <SourceControlViewModeEducation
+            sourceControlViewMode={sourceControlViewMode}
+            disabled={settings === null}
+            onChooseViewMode={handleChooseSourceControlViewModeEducation}
+            onDismiss={handleDismissSourceControlViewModeEducation}
+          />
+        ) : null}
 
         {detachedHeadDisplay && (
           <div className="border-b border-border px-3 py-2">

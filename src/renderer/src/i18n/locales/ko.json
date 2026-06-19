@@ -8555,7 +8555,11 @@
             "b715ef615b": "{{value1}}보다 {{value0}} 커밋 앞서 있음",
             "c1a8f3e204": "{{value0}}보다 1 커밋 뒤처짐",
             "d2b9g4f315": "{{value1}}보다 {{value0}} 커밋 뒤처짐",
-            "e9c2a5d416": "{{value0}}와 동일한 상태"
+            "e9c2a5d416": "{{value0}}와 동일한 상태",
+            "d4e8a6f312": "Group Source Control files by folder or keep one flat list. Change this later from More actions.",
+            "e7a9f63a12": "Use tree",
+            "f3b91c50a4": "Use list",
+            "ccd4a812af": "Dismiss view options"
           },
           "SourceControlAgentActionDialog": {
             "8e856842d1": "선택한 agent를 시작할 수 없습니다.",
@@ -11390,7 +11394,15 @@
           "openReviewExternally": "{{value0}} 외부에서 열기",
           "summary": "{{value0}}개 연결됨 · PR/MR 있음 {{value1}}개 · 주의 필요 {{value2}}개 · 대기 중 {{value3}}개 · 통과 {{value4}}개 · PR 없음 {{value5}}개 · 알 수 없음 {{value6}}개",
           "showDetails": "{{value0}} PR 검사 세부 정보 표시",
-          "hideDetails": "{{value0}} PR 검사 세부 정보 숨기기"
+          "hideDetails": "{{value0}} PR 검사 세부 정보 숨기기",
+          "reviewChecks": "Review checks",
+          "allChecksPassing": "all checks passing",
+          "oneWorktree": "1 worktree",
+          "worktreeCount": "{{value0}} worktrees",
+          "oneFailing": "1 failing",
+          "failingCount": "{{value0}} failing",
+          "onePending": "1 pending",
+          "pendingCount": "{{value0}} pending"
         },
         "parentPrChecks": {
           "rowSummary": {
