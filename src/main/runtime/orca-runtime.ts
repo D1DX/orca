@@ -338,6 +338,16 @@ import {
   updateIssue as updateGitLabIssue
 } from '../gitlab/client'
 import { getGlabKnownHosts } from '../gitlab/gl-utils'
+import {
+  getIssue as getGiteaIssue,
+  listIssues as listGiteaIssues,
+  createIssue as createGiteaIssue,
+  updateIssue as updateGiteaIssue,
+  addIssueComment as addGiteaIssueComment,
+  listLabels as listGiteaLabels,
+  listAssignableUsers as listGiteaAssignableUsers
+} from '../gitea/issues'
+import { getGiteaAuthStatus } from '../gitea/client'
 import { getWorkItemDetails as getGitLabWorkItemDetails } from '../gitlab/work-item-details'
 import {
   normalizeGitLabIssueListArgs,
@@ -7380,7 +7390,10 @@ export class OrcaRuntimeService {
     // Why: skip the upstream stamp when the imported folder's identity already
     // matches the requested project (non-GitHub repos group by origin remote).
     if (setup.projectId !== args.projectId && getProjectIdentityKey(repo) !== args.projectId) {
-      if (!existingProject?.providerIdentity || existingProject.providerIdentity.provider !== 'github') {
+      if (
+        !existingProject?.providerIdentity ||
+        existingProject.providerIdentity.provider !== 'github'
+      ) {
         throw new Error('Imported folder does not match the selected project identity.')
       }
       const updated = this.store.updateRepo(repo.id, {
@@ -8843,6 +8856,83 @@ export class OrcaRuntimeService {
       projectRef,
       ...this.getLocalGitExecutionOptionArgs(repo)
     )
+  }
+
+  async giteaAuthStatus(): Promise<Awaited<ReturnType<typeof getGiteaAuthStatus>>> {
+    return getGiteaAuthStatus()
+  }
+
+  async getGiteaRepoIssue(repoSelector: string, issueNumber: number) {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return getGiteaIssue(repo.path, issueNumber, repo.connectionId ?? null)
+  }
+
+  async listGiteaRepoIssues(
+    repoSelector: string,
+    state?: 'open' | 'closed' | 'all',
+    assignee?: string,
+    limit?: number
+  ): Promise<{
+    items: GitLabWorkItem[]
+    error?: Awaited<ReturnType<typeof listGiteaIssues>>['error']
+  }> {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    const normalizedLimit =
+      typeof limit === 'number' && isFinite(limit)
+        ? Math.max(1, Math.min(100, Math.round(limit)))
+        : 20
+    const normalizedState = state === 'closed' || state === 'all' ? state : 'open'
+    const result = await listGiteaIssues(
+      repo.path,
+      normalizedLimit,
+      normalizedState,
+      assignee,
+      repo.connectionId ?? null
+    )
+    // Why: Gitea issue rows share the GitLabWorkItem shape so the renderer's
+    // repo-backed (github/gitlab) branch renders them with the same row.
+    const items: GitLabWorkItem[] = result.items.map((issue) => ({
+      id: `gitea-issue-${repo.id}-${issue.number}`,
+      type: 'issue' as const,
+      number: issue.number,
+      title: issue.title,
+      state: issue.state === 'open' ? ('opened' as const) : ('closed' as const),
+      url: issue.url,
+      labels: issue.labels,
+      updatedAt: issue.updatedAt ?? '',
+      author: issue.author ?? null,
+      repoId: repo.id
+    }))
+    return { items, ...(result.error ? { error: result.error } : {}) }
+  }
+
+  async createGiteaRepoIssue(repoSelector: string, title: string, body: string) {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return createGiteaIssue(repo.path, title, body, repo.connectionId ?? null)
+  }
+
+  async updateGiteaRepoIssue(
+    repoSelector: string,
+    issueNumber: number,
+    updates: Parameters<typeof updateGiteaIssue>[2]
+  ) {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return updateGiteaIssue(repo.path, issueNumber, updates, repo.connectionId ?? null)
+  }
+
+  async addGiteaRepoIssueComment(repoSelector: string, issueNumber: number, body: string) {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return addGiteaIssueComment(repo.path, issueNumber, body, repo.connectionId ?? null)
+  }
+
+  async listGiteaRepoLabels(repoSelector: string) {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return listGiteaLabels(repo.path, repo.connectionId ?? null)
+  }
+
+  async listGiteaRepoAssignableUsers(repoSelector: string) {
+    const repo = await this.resolveRepoSelector(repoSelector)
+    return listGiteaAssignableUsers(repo.path, repo.connectionId ?? null)
   }
 
   async addGitLabRepoMRComment(
@@ -14226,8 +14316,7 @@ export class OrcaRuntimeService {
       } catch {
         warnings.push({
           code: 'LINEAGE_PARENT_CONTEXT_MISSING',
-          message:
-            'Worktree created, but Orca could not validate the environment parent context.',
+          message: 'Worktree created, but Orca could not validate the environment parent context.',
           details: { envParentWorkspace: input.envParentWorkspace }
         })
       }
