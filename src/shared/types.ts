@@ -327,7 +327,7 @@ export type FolderWorkspace = {
 }
 
 export type FolderWorkspaceLinkedTask = {
-  provider: 'github' | 'gitlab' | 'linear' | 'jira'
+  provider: 'github' | 'gitlab' | 'linear' | 'jira' | 'gitea'
   type: 'issue' | 'pr' | 'mr'
   number: number
   title: string
